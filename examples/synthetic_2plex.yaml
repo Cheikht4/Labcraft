@@ -1,0 +1,121 @@
+# =============================================================================
+# SYNTHETIC 2-PLEX LAMP PANEL — FOR TESTING AND DEVELOPMENT ONLY
+# PANEL LAMP 2-PLEX SYNTHÉTIQUE — POUR TESTS ET DÉVELOPPEMENT UNIQUEMENT
+# =============================================================================
+# This file uses entirely invented sequences and is NOT derived from any
+# biological organism. It is designed to trigger three specific diagnostic
+# mechanisms when analyzed by LabCraft:
+#
+#   1. Cross-hybridization between FIP_A and BIP_B (partial complementarity
+#      amplified by the high concentration of inner primers)
+#   2. A 3'-extensible dimer on FIP_B (last 5 nt of FIP_B are complementary
+#      to BIP_B, allowing polymerase extension)
+#   3. The F3 binding site on Target_A is buried in a stable stem-loop
+#      (inverted repeat creates a thermodynamic barrier to hybridization)
+#
+# Ce fichier utilise des séquences entièrement inventées. Il est conçu pour
+# déclencher trois mécanismes diagnostiques spécifiques lorsqu'il est analysé
+# par LabCraft (voir ci-dessus).
+# =============================================================================
+
+experiment:
+  name: "Synthetic 2-Plex LAMP Panel (Test)"
+  chemistry: LAMP
+  temperature_C: 65.0
+  enzyme: Bst2.0_WarmStart
+
+buffer:
+  Na_mM: 50.0
+  K_mM: 10.0
+  Tris_mM: 20.0
+  Mg_total_mM: 8.0
+  dNTP_total_mM: 1.4
+  EDTA_mM: 0.0
+  chelation_model: simple
+
+targets:
+  # Target A: contains an inverted repeat around nt 20-38 and 60-78 that
+  # buries the F3_A binding site (nt 40-59) in a stable stem-loop.
+  # Cible A : répétition inversée autour du site F3_A, créant une tige-boucle stable.
+  - id: SynthA
+    sequence_file: examples/synth_target_a.fasta
+    type: DNA
+    copies_per_uL: 1000
+
+  # Target B: unstructured region for straightforward primer binding.
+  # Cible B : région non structurée pour une hybridation simple.
+  - id: SynthB
+    sequence_file: examples/synth_target_b.fasta
+    type: DNA
+    copies_per_uL: 1000
+
+primer_sets:
+  # --- Panel A (targeting SynthA) ---
+  - target: SynthA
+    primers:
+      F3:
+        # Binds a site buried in the stem-loop → high ΔG_unfolding expected
+        # Se fixe sur un site enfoui dans la tige-boucle → ΔG_unfolding élevé
+        seq: "GCTAGCAATCGTACGCATAG"
+        conc_uM: 0.2
+      B3:
+        seq: "TGACCTTAGGCATTCGAACT"
+        conc_uM: 0.2
+      FIP:
+        # F1c (20 nt) + TTTT linker + F2 (20 nt)
+        # Last 5 nt of FIP_A (GCTAG) partially complement BIP_B → cross-hyb
+        # Les 5 derniers nt de FIP_A (GCTAG) sont partiellement complémentaires
+        # à BIP_B → hybridation croisée
+        seq: "ATCGATCGATCGATCGATCGTTTTCAGTACGCATAGCTAGCTAG"
+        conc_uM: 1.6
+        domains:
+          F1c: "ATCGATCGATCGATCGATCG"
+          linker: "TTTT"
+          F2: "CAGTACGCATAGCTAGCTAG"
+      BIP:
+        seq: "TTGCAATGCAATGCAATGCATTTTGACCTTAGGCATTCGAACT"
+        conc_uM: 1.6
+        domains: auto
+      LF:
+        seq: "ACGTACGTACGTACGTACGT"
+        conc_uM: 0.8
+      LB:
+        seq: "TGCATGCATGCATGCATGCA"
+        conc_uM: 0.8
+
+  # --- Panel B (targeting SynthB) ---
+  - target: SynthB
+    primers:
+      F3:
+        seq: "ATGCATGCATGCATGCATGC"
+        conc_uM: 0.2
+      B3:
+        seq: "GCATGCATGCATGCATGCAT"
+        conc_uM: 0.2
+      FIP:
+        # Last 5 nt: CGATC — designed to form a 3'-extensible dimer with BIP_B
+        # Les 5 derniers nt (CGATC) forment un dimère 3'-extensible avec BIP_B
+        seq: "TACCGATCGATCGATCGATCTTTTACGTACGTACGTACGATCG"
+        conc_uM: 1.6
+        domains:
+          F1c: "TACCGATCGATCGATCGATC"
+          linker: "TTTT"
+          F2: "ACGTACGTACGTACGATCG"
+      BIP:
+        # Contains CTAGC near 3' — complements FIP_A's 3' end (GCTAG) → cross-hyb
+        # Also complements FIP_B's 3' (CGATC↔GATCG) → amplifiable dimer
+        seq: "GATCGATCGATCGATCGATCTTTTCTAGCTGCATGCATGATCG"
+        conc_uM: 1.6
+        domains: auto
+      LF:
+        seq: "CATGCATGCATGCATGCATG"
+        conc_uM: 0.4
+      LB:
+        seq: "GTACGTACGTACGTACGTAC"
+        conc_uM: 0.4
+
+analysis:
+  temperature_scan: [50.0, 70.0, 0.5]
+  amplifiable_dimer_threshold_kcal: -2.0
+  duplex_backend: primer3
+  max_complex_size: 2
