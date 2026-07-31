@@ -87,6 +87,25 @@ class EquilibriumProblem:
             if np.all(self.stoichiometry[:, i] == 0):
                 raise ValueError(f"Strand {i} is not present in any complex")
 
+        # Check that each strand has exactly one monomer row (A_c = e_i, dG_c = 0)
+        # Vérifie que chaque brin a exactement une ligne monomère pure
+        for i in range(self.n_strands):
+            # Create e_i basis vector
+            e_i = np.zeros(self.n_strands, dtype=self.stoichiometry.dtype)
+            e_i[i] = 1.0
+            
+            # Find rows matching e_i
+            is_monomer_row = np.all(self.stoichiometry == e_i, axis=1)
+            is_zero_dg = self.delta_g == 0.0
+            
+            # Intersection
+            valid_monomer_rows = is_monomer_row & is_zero_dg
+            if not np.any(valid_monomer_rows):
+                raise ValueError(
+                    f"Strand {i} is missing a valid monomer row in the stoichiometry matrix. "
+                    "There must be exactly one row c where A[c, :] is e_i and delta_g[c] == 0.0."
+                )
+
 
 @dataclass(frozen=True)
 class EquilibriumResult:

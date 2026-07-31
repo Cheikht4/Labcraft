@@ -42,9 +42,9 @@ def solve_equilibrium(
         try:
             logger.info("Attempting DUAL_NEWTON solver / Tentative du solveur DUAL_NEWTON")
             return solve_dual(problem, convergence_threshold=convergence_threshold)
-        except ConvergenceError as e:
-            logger.warning(f"DUAL_NEWTON failed: {e}")
-            errors.append(f"DUAL_NEWTON: {e}")
+        except Exception as e:
+            logger.warning(f"DUAL_NEWTON failed: {type(e).__name__} - {e}")
+            errors.append(f"DUAL_NEWTON: {type(e).__name__} - {e}")
             if method == SolverMethod.DUAL_NEWTON:
                 raise
                 
@@ -52,9 +52,9 @@ def solve_equilibrium(
         try:
             logger.info("Attempting TRUST_CONSTR solver / Tentative du solveur TRUST_CONSTR")
             return solve_primal(problem, convergence_threshold=convergence_threshold)
-        except ConvergenceError as e:
-            logger.warning(f"TRUST_CONSTR failed: {e}")
-            errors.append(f"TRUST_CONSTR: {e}")
+        except Exception as e:
+            logger.warning(f"TRUST_CONSTR failed: {type(e).__name__} - {e}")
+            errors.append(f"TRUST_CONSTR: {type(e).__name__} - {e}")
             if method == SolverMethod.TRUST_CONSTR:
                 raise
                 
@@ -67,9 +67,9 @@ def solve_equilibrium(
             errors.append(f"EXTENDED_PRECISION: {e}")
             if method == SolverMethod.EXTENDED_PRECISION:
                 raise
-        except ConvergenceError as e:
-            logger.warning(f"EXTENDED_PRECISION failed: {e}")
-            errors.append(f"EXTENDED_PRECISION: {e}")
+        except Exception as e:
+            logger.warning(f"EXTENDED_PRECISION failed: {type(e).__name__} - {e}")
+            errors.append(f"EXTENDED_PRECISION: {type(e).__name__} - {e}")
             if method == SolverMethod.EXTENDED_PRECISION:
                 raise
                 

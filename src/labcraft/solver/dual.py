@@ -30,19 +30,17 @@ logger = logging.getLogger(__name__)
 # Gas constant in kcal/(mol·K) / Constante des gaz en kcal/(mol·K)
 _R_KCAL_MOL_K: float = 1.987e-3
 
-# Maximum log-concentration to prevent exp overflow / Log-concentration max pour éviter overflow
-_LOG_CONC_CAP: float = 500.0
-
 
 def _compute_complex_concentrations(
     u: np.ndarray,
     a_mat: np.ndarray,
     dg_over_rt: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, bool]:
     """Compute complex concentrations from free-strand log-concentrations.
 
     Calcule les concentrations de complexes à partir des log-concentrations
-    des brins libres.
+    des brins libres. Ne masque plus silencieusement les débordements,
+    mais signale si un débordement a eu lieu (overflow).
 
     Parameters
     ----------
@@ -56,14 +54,26 @@ def _compute_complex_concentrations(
     Returns
     -------
     log_c : ndarray, shape (n_complexes,)
-        Log-concentrations of complexes (capped) / Log-concentrations des complexes.
+        Log-concentrations of complexes / Log-concentrations des complexes.
     c_conc : ndarray, shape (n_complexes,)
         Concentrations of complexes / Concentrations des complexes.
+    overflow : bool
+        True if any log_c > 500 (would cause exp overflow).
     """
     log_c = -dg_over_rt + a_mat @ u
-    log_c_capped = np.clip(log_c, a_min=-_LOG_CONC_CAP, a_max=_LOG_CONC_CAP)
-    c_conc = np.exp(log_c_capped)
-    return log_c_capped, c_conc
+    
+    # Check for overflow
+    overflow = bool(np.any(log_c > 500.0))
+    
+    if overflow:
+        # Cap only to prevent actual floating point exception,
+        # but the caller is informed that the point is invalid.
+        log_c_safe = np.clip(log_c, a_min=None, a_max=500.0)
+        c_conc = np.exp(log_c_safe)
+    else:
+        c_conc = np.exp(log_c)
+        
+    return log_c, c_conc, overflow
 
 
 def _build_result(
@@ -93,26 +103,17 @@ def _build_result(
 def solve_dual(
     problem: EquilibriumProblem,
     *,
-    max_iterations: int = 200,
+    max_iterations: int = 500,
     convergence_threshold: float = 1e-10,
     armijo_c: float = 1e-4,
     armijo_rho: float = 0.5,
     initial_step_size: float = 1.0,
     precondition: bool = True,
-    stagnation_rtol: float = 1e-14,
 ) -> EquilibriumResult:
     """Solve the equilibrium problem using the damped dual Newton method.
 
-    Résout le problème d'équilibre par la méthode de Newton duale amortie.
-
-    The dual function D(u) = Σ_i x_i^total · u_i - Σ_c exp(-ΔG°_c/RT + Σ_i A[c,i]·u_i)
-    is concave. Its gradient equals the mass conservation residual, and its
-    Hessian is negative definite. We maximize D(u) using damped Newton with
-    Armijo backtracking line search.
-
-    La fonction duale D(u) est concave. Son gradient est le résidu de
-    conservation de masse, et sa hessienne est définie négative. On maximise
-    D(u) par Newton amorti avec recherche linéaire d'Armijo.
+    Résout le problème d'équilibre par la méthode de Newton duale amortie,
+    avec régularisation de Levenberg-Marquardt dans l'espace préconditionné.
 
     Parameters
     ----------
@@ -130,10 +131,6 @@ def solve_dual(
         Initial step size α₀ / Pas initial α₀.
     precondition : bool
         If True, apply diagonal preconditioning / Si True, préconditionnement diagonal.
-    stagnation_rtol : float
-        Relative tolerance for detecting stagnation. If the residual doesn't
-        improve by more than this factor, accept the current solution if
-        the residual is within 10x of the threshold.
 
     Returns
     -------
@@ -151,109 +148,131 @@ def solve_dual(
     xtot = problem.total_concentrations
 
     # Initialization: assume half of each strand is free
-    # Initialisation : on suppose la moitié de chaque brin libre
     u = np.log(xtot) - np.log(2.0)
-
-    prev_max_res = np.inf
-    stagnation_count = 0
-    max_stagnation = 10  # Accept after N stagnant iterations / Accepte après N itérations stagnantes
+    
+    lambda_lm = 1e-12
 
     for it in range(max_iterations):
-        # Compute complex concentrations / Calcule les concentrations de complexes
-        _, c_conc = _compute_complex_concentrations(u, a_mat, dg_over_rt)
+        # Compute complex concentrations
+        _, c_conc, overflow = _compute_complex_concentrations(u, a_mat, dg_over_rt)
+        
+        if overflow:
+            raise ConvergenceError(
+                f"Overflow encountered outside line search at iteration {it}."
+            )
 
         # Gradient (= mass conservation residual)
-        # Gradient (= résidu de conservation de masse)
         g = xtot - a_mat.T @ c_conc
 
-        # Relative residual / Résidu relatif
+        # Relative residual
         rel_residuals = np.abs(g) / xtot
         max_res = float(np.max(rel_residuals))
 
-        # Check convergence / Vérifie la convergence
+        # Check convergence
         if max_res < convergence_threshold:
             return _build_result(u, c_conc, g, max_res, it + 1)
 
-        # Detect stagnation: if residual barely improves, the solver has
-        # reached machine precision for this problem. Accept if close enough.
-        # Détecte la stagnation : si le résidu ne s'améliore plus, le solveur
-        # a atteint la précision machine. Accepte si suffisamment proche.
-        improvement = abs(prev_max_res - max_res) / max(prev_max_res, 1e-300)
-        if improvement < stagnation_rtol:
-            stagnation_count += 1
-            if stagnation_count >= max_stagnation:
-                # Accept if within 10x of threshold
-                # Accepte si dans un facteur 10 du seuil
-                if max_res < convergence_threshold * 10:
-                    logger.info(
-                        f"Dual Newton stagnated at residual {max_res:.2e} "
-                        f"(threshold={convergence_threshold:.0e}). "
-                        f"Accepting as converged. / Stagnation, accepté."
-                    )
-                    return _build_result(u, c_conc, g, max_res, it + 1)
-                break  # Stagnated but too far — let fallback handle it
-        else:
-            stagnation_count = 0
-        prev_max_res = max_res
-
         # Hessian: H[i,j] = -Σ_c A[c,i]·A[c,j]·[c]  (negative definite)
-        # Hessienne : H[i,j] = -Σ_c A[c,i]·A[c,j]·[c]  (définie négative)
         # -H = A^T · diag(c) · A  (positive definite)
         neg_h = (a_mat.T * c_conc) @ a_mat
 
-        # Solve Newton system: (-H) · Δu = g
-        # Résout le système Newton : (-H) · Δu = g
         if precondition:
             # Diagonal preconditioning: D = diag(1/sqrt(diag(-H)))
-            # Préconditionnement diagonal : D = diag(1/sqrt(diag(-H)))
             diag_neg_h = np.diag(neg_h)
             diag_neg_h = np.maximum(diag_neg_h, 1e-300)
             d_vec = 1.0 / np.sqrt(diag_neg_h)
 
-            # Preconditioned system: (D·(-H)·D) · δ = D·g, then Δu = D·δ
+            # Preconditioned system: (D·(-H)·D)
             h_precond = d_vec[:, np.newaxis] * neg_h * d_vec[np.newaxis, :]
             g_precond = d_vec * g
+            
+            # Levenberg-Marquardt with Cholesky retries
+            cholesky_success = False
+            for _ in range(20):  # max retries for LM
+                # Add ridge lambda_lm to preconditioned Hessian (diagonal is ~1.0)
+                if lambda_lm > 0:
+                    h_damped = h_precond + lambda_lm * np.eye(problem.n_strands)
+                else:
+                    h_damped = h_precond
 
-            try:
-                cho, lower = scipy.linalg.cho_factor(h_precond)
-                delta_u = d_vec * scipy.linalg.cho_solve((cho, lower), g_precond)
-            except scipy.linalg.LinAlgError:
-                # Fallback to general solve / Repli sur résolution générale
-                logger.debug("Cholesky failed, falling back to general solve")
-                delta_u = np.linalg.solve(neg_h, g)
+                try:
+                    cho, lower = scipy.linalg.cho_factor(h_damped)
+                    delta_precond = scipy.linalg.cho_solve((cho, lower), g_precond)
+                    delta_u = d_vec * delta_precond
+                    cholesky_success = True
+                    break
+                except scipy.linalg.LinAlgError:
+                    lambda_lm = max(lambda_lm * 10, 1e-12)
+            
+            if not cholesky_success:
+                raise ConvergenceError(
+                    f"Cholesky factorization failed even with LM damping at iteration {it}."
+                )
+
         else:
-            try:
-                cho, lower = scipy.linalg.cho_factor(neg_h)
-                delta_u = scipy.linalg.cho_solve((cho, lower), g)
-            except scipy.linalg.LinAlgError:
-                delta_u = np.linalg.solve(neg_h, g)
+            # Non-preconditioned fallback (for testing/completeness)
+            cholesky_success = False
+            for _ in range(20):
+                if lambda_lm > 0:
+                    h_damped = neg_h + lambda_lm * np.eye(problem.n_strands)
+                else:
+                    h_damped = neg_h
+                try:
+                    cho, lower = scipy.linalg.cho_factor(h_damped)
+                    delta_u = scipy.linalg.cho_solve((cho, lower), g)
+                    cholesky_success = True
+                    break
+                except scipy.linalg.LinAlgError:
+                    lambda_lm = max(lambda_lm * 10, 1e-12)
+            if not cholesky_success:
+                raise ConvergenceError("Cholesky failed without preconditioning.")
 
-        # Armijo backtracking line search / Recherche linéaire d'Armijo
-        # Find α such that D(u + α·Δu) ≥ D(u) + c·α·g^T·Δu
+        # Armijo backtracking line search
         g_dot_du = float(np.dot(g, delta_u))
 
-        # Skip if Newton direction is not ascent / Passe si pas direction de montée
         if g_dot_du <= 0:
             logger.debug(f"Newton direction is not ascent: g·Δu = {g_dot_du:.2e}")
             break
 
-        # Evaluate dual at current point / Évalue le dual au point courant
         d_current = float(np.sum(xtot * u) - np.sum(c_conc))
 
         alpha = initial_step_size
         min_alpha = 1e-15
+        step_accepted = False
+        
         while alpha > min_alpha:
             u_next = u + alpha * delta_u
-            _, c_next = _compute_complex_concentrations(u_next, a_mat, dg_over_rt)
+            _, c_next, next_overflow = _compute_complex_concentrations(u_next, a_mat, dg_over_rt)
+            
+            # If the trial point overflows, we must backtrack
+            if next_overflow:
+                alpha *= armijo_rho
+                continue
+                
             d_next = float(np.sum(xtot * u_next) - np.sum(c_next))
             if d_next >= d_current + armijo_c * alpha * g_dot_du:
+                step_accepted = True
                 break
             alpha *= armijo_rho
 
-        if alpha <= min_alpha:
+        if not step_accepted:
             logger.debug(f"Armijo step too small at iteration {it}")
-
-        u = u + alpha * delta_u
+            # If the step fails, we might just be blocked. Increase LM damping.
+            lambda_lm = max(lambda_lm * 10, 1e-12)
+        else:
+            # Step accepted: update u
+            u = u + alpha * delta_u
+            
+            # Update LM damping based on step size
+            # If we took a full or large step, the quadratic approximation is good -> decrease damping
+            if alpha >= 0.1:
+                if lambda_lm > 1e-12:
+                    lambda_lm /= 10
+                else:
+                    lambda_lm = 0.0
+            # If we took a tiny step, the quadratic approximation is poor -> increase damping
+            elif alpha < 1e-3:
+                lambda_lm = max(lambda_lm * 10, 1e-12)
 
     raise ConvergenceError(
         f"Dual Newton failed to converge after {it + 1} iterations. "
