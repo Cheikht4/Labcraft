@@ -45,7 +45,8 @@ def test_owczarzy2004_validations():
             tm_pred_iso = salt_model.correct_tm(
                 tm_ref_celsius=tm_ref_1020,
                 f_gc=f_gc,
-                na_target_molar=na_molar,
+                n_bp=len(seq),
+                na_molar=na_molar,
                 na_ref_molar=1.02
             )
             tm_exp = row[col_name]
@@ -58,7 +59,7 @@ def test_owczarzy2004_validations():
         
         # Test cohérence 1.02 M pour bout-en-bout
         tm_e2e_1020 = salt_model.correct_tm(
-            tm_ref_celsius=tm_nn_1m, f_gc=f_gc, na_target_molar=1.02, na_ref_molar=1.0
+            tm_ref_celsius=tm_nn_1m, f_gc=f_gc, n_bp=len(seq), na_molar=1.02, na_ref_molar=1.0
         )
         errors_e2e_1020.append(abs(tm_e2e_1020 - tm_ref_1020))
         
@@ -67,7 +68,8 @@ def test_owczarzy2004_validations():
             tm_pred_e2e = salt_model.correct_tm(
                 tm_ref_celsius=tm_nn_1m,
                 f_gc=f_gc,
-                na_target_molar=na_molar,
+                n_bp=len(seq),
+                na_molar=na_molar,
                 na_ref_molar=1.0
             )
             tm_exp = row[col_name]

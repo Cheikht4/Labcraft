@@ -34,4 +34,4 @@ jobs:
         run: mypy src/labcraft
         
       - name: Run pytest
-        run: pytest --cov=labcraft --cov-report=xml tests/
+        run: pytest --maxfail=1 --cov=labcraft --cov-report=xml tests/
