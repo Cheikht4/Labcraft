@@ -48,6 +48,7 @@ class DuplexEnergyBackend(ABC):
     def calc_heterodimer(
         self, seq1: str, seq2: str, *, temp_celsius: float = 65.0,
         na_mm: float = 50.0, mg_mm: float = 0.0,
+        k_mm: float = 0.0, tris_mm: float = 0.0, dntp_mm: float = 0.0,
         ct_molar: float | None = None,
     ) -> DuplexResult:
         """Compute heterodimer thermodynamics / Calcul thermodynamique d'un hétérodimère."""
@@ -57,6 +58,7 @@ class DuplexEnergyBackend(ABC):
     def calc_homodimer(
         self, seq: str, *, temp_celsius: float = 65.0,
         na_mm: float = 50.0, mg_mm: float = 0.0,
+        k_mm: float = 0.0, tris_mm: float = 0.0, dntp_mm: float = 0.0,
         ct_molar: float | None = None,
     ) -> DuplexResult:
         """Compute homodimer thermodynamics / Calcul thermodynamique d'un homodimère."""
@@ -66,6 +68,7 @@ class DuplexEnergyBackend(ABC):
     def calc_hairpin(
         self, seq: str, *, temp_celsius: float = 65.0,
         na_mm: float = 50.0, mg_mm: float = 0.0,
+        k_mm: float = 0.0, tris_mm: float = 0.0, dntp_mm: float = 0.0,
         ct_molar: float | None = None,
     ) -> DuplexResult:
         """Compute hairpin thermodynamics / Calcul thermodynamique d'une épingle à cheveux."""
@@ -75,6 +78,7 @@ class DuplexEnergyBackend(ABC):
     def calc_duplex(
         self, seq1: str, seq2: str, *, temp_celsius: float = 65.0,
         na_mm: float = 50.0, mg_mm: float = 0.0,
+        k_mm: float = 0.0, tris_mm: float = 0.0, dntp_mm: float = 0.0,
         ct_molar: float | None = None,
     ) -> DuplexResult:
         """Compute perfect-match duplex thermodynamics.

@@ -1,0 +1,2 @@
+description,f_GC,n_bp,Tm_1M_Na_C,Mg_molar,Mon_molar,R_regime,expected_invTm_K,expected_Tm_pred_C,measured_Tm_C
+Owczarzy2008_worked_example,0.6,20,76.3,0.0015,0.0,"R=7.75 (>6, Mg dominant, params Table2)",0.0029322,67.9,68.5

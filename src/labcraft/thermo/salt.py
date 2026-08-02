@@ -6,10 +6,12 @@ Ces modèles sont injectés dans le pipeline via SaltCorrectedBackend.
 from __future__ import annotations
 
 import math
-from abc import ABC, abstractmethod
 import warnings
+from abc import ABC, abstractmethod
 
 from .backends.base import DuplexEnergyBackend, DuplexResult
+from labcraft.buffer.magnesium import get_free_magnesium
+from labcraft.buffer.monovalent import get_total_monovalent
 
 
 class SaltModel(ABC):
@@ -17,7 +19,9 @@ class SaltModel(ABC):
 
     @abstractmethod
     def correct_tm(
-        self, tm_ref_celsius: float, f_gc: float, na_target_molar: float,
+        self, tm_ref_celsius: float, f_gc: float, n_bp: int,
+        na_molar: float = 0.0, k_molar: float = 0.0, tris_molar: float = 0.0,
+        mg_molar: float = 0.0, dntp_molar: float = 0.0,
         na_ref_molar: float = 1.0
     ) -> float:
         """Chemin empirique : calcule le Tm corrigé.
@@ -25,7 +29,8 @@ class SaltModel(ABC):
         Args:
             tm_ref_celsius: Tm de référence en degrés Celsius à la concentration `na_ref_molar`.
             f_gc: Fraction de paires G-C dans le duplexe (0.0 à 1.0).
-            na_target_molar: Concentration cible en cations (Molar).
+            n_bp: Nombre de paires de bases.
+            na_molar, k_molar, tris_molar, mg_molar, dntp_molar: Concentrations du tampon.
             na_ref_molar: Concentration de référence en cations (Molar), défaut 1.0 M.
             
         Returns:
@@ -35,60 +40,145 @@ class SaltModel(ABC):
 
     @abstractmethod
     def corrected_thermodynamics(
-        self, dh_kcal: float, ds_cal: float, na_target_molar: float, n_bp: int
+        self, dh_kcal: float, ds_cal: float, f_gc: float, n_bp: int,
+        na_molar: float = 0.0, k_molar: float = 0.0, tris_molar: float = 0.0,
+        mg_molar: float = 0.0, dntp_molar: float = 0.0,
     ) -> tuple[float, float]:
         """Chemin entropique (Solveur) : calcule les dH et dS corrigés.
         
-        Args:
-            dh_kcal: Enthalpie de référence à 1 M (kcal/mol).
-            ds_cal: Entropie de référence à 1 M (cal/mol·K).
-            na_target_molar: Concentration cible en cations (Molar).
-            n_bp: Longueur du duplexe en paires de bases.
-            
-        Returns:
-            Tuple (dH_corrige_kcal, dS_corrige_cal).
+        Repose sur l'identité ΔS°_corrige = ΔS°(ref) + ΔH° * Δ(1/Tm).
         """
         ...
 
 
-class Owczarzy2004SaltModel(SaltModel):
-    """Modèle Owczarzy 2004 pour les cations monovalents (Na+).
+class UnifiedSaltModel(SaltModel):
+    """Modèle unifié d'Owczarzy (2004, 2008) pour Na+, Mg2+, et régimes mixtes.
     
-    Ref: Biochemistry 2004, 43, 3537-3554.
+    Ref: 
+    - Owczarzy et al. 2004, Biochemistry 43:3537 (Na+)
+    - Owczarzy et al. 2008, Biochemistry 47:5336 (Mg2+ et Mixte)
     """
 
+    def __init__(self, use_legacy_entropy: bool = False):
+        self.use_legacy_entropy = use_legacy_entropy
+
+    def _calc_delta_inv_tm(
+        self, f_gc: float, n_bp: int, mon_total: float, mg_free: float, na_ref_molar: float
+    ) -> float:
+        """Calcule le terme de correction empirique Δ(1/Tm) en K^-1."""
+        if mon_total == 0.0 and mg_free == 0.0:
+            return 0.0  # Aucune correction si l'utilisateur donne 0 absolu partout
+
+        # Eq 16 params (Table 2)
+        a = 3.92e-5
+        b = -9.11e-6
+        c = 6.26e-5
+        d = 1.42e-5
+        e = -4.82e-4
+        f = 5.25e-4
+        g = 8.31e-5
+
+        if mon_total == 0.0:
+            # Magnésium pur
+            if not (0.5e-3 <= mg_free <= 600e-3):
+                warnings.warn("Mg2+ concentration outside calibrated range (0.5 - 600 mM).", RuntimeWarning)
+            
+            ln_mg = math.log(mg_free)
+            delta_inv_tm = (
+                a + b * ln_mg
+                + f_gc * (c + d * ln_mg)
+                + (1.0 / (2.0 * (n_bp - 1))) * (e + f * ln_mg + g * (ln_mg ** 2))
+            )
+            return delta_inv_tm
+
+        r_ratio = math.sqrt(mg_free) / mon_total
+
+        if r_ratio < 0.22:
+            # Monovalent dominant (Owczarzy 2004, Eq 22)
+            if not (0.05 <= mon_total <= 1.1) or not (0.05 <= na_ref_molar <= 1.1):
+                warnings.warn("Monovalent concentration outside calibrated range (0.05 - 1.1 M).", RuntimeWarning)
+                
+            ln_mon = math.log(mon_total)
+            ln_ref = math.log(na_ref_molar)
+            term1 = (4.29 * f_gc - 3.95) * 1e-5 * (ln_mon - ln_ref)
+            term2 = 9.40 * 1e-6 * (ln_mon**2 - ln_ref**2)
+            return term1 + term2
+            
+        elif r_ratio < 6.0:
+            # Régime Mixte (Owczarzy 2008, Eqs 18-20)
+            ln_mon = math.log(mon_total)
+            sqrt_mon = math.sqrt(mon_total)
+            
+            a = 3.92e-5 * (0.843 - 0.352 * sqrt_mon * ln_mon)
+            d = 1.42e-5 * (1.279 - 4.03e-3 * ln_mon - 8.03e-3 * (ln_mon ** 2))
+            g = 8.31e-5 * (0.486 - 0.258 * ln_mon + 5.25e-3 * (ln_mon ** 3))
+            
+            ln_mg = math.log(mg_free)
+            delta_inv_tm = (
+                a + b * ln_mg
+                + f_gc * (c + d * ln_mg)
+                + (1.0 / (2.0 * (n_bp - 1))) * (e + f * ln_mg + g * (ln_mg ** 2))
+            )
+            return delta_inv_tm
+            
+        else:
+            # Magnésium dominant
+            if not (0.5e-3 <= mg_free <= 600e-3):
+                warnings.warn("Mg2+ concentration outside calibrated range (0.5 - 600 mM).", RuntimeWarning)
+            
+            ln_mg = math.log(mg_free)
+            delta_inv_tm = (
+                a + b * ln_mg
+                + f_gc * (c + d * ln_mg)
+                + (1.0 / (2.0 * (n_bp - 1))) * (e + f * ln_mg + g * (ln_mg ** 2))
+            )
+            return delta_inv_tm
+
     def correct_tm(
-        self, tm_ref_celsius: float, f_gc: float, na_target_molar: float,
+        self, tm_ref_celsius: float, f_gc: float, n_bp: int,
+        na_molar: float = 0.0, k_molar: float = 0.0, tris_molar: float = 0.0,
+        mg_molar: float = 0.0, dntp_molar: float = 0.0,
         na_ref_molar: float = 1.0
     ) -> float:
-        if na_target_molar <= 0 or na_ref_molar <= 0:
-            raise ValueError("Sodium concentrations must be > 0.")
-            
-        if not (0.05 <= na_target_molar <= 1.1) or not (0.05 <= na_ref_molar <= 1.1):
-            warnings.warn("Owczarzy 2004 eq 22 is calibrated for [Na+] between 0.05 M and 1.1 M.", RuntimeWarning)
-
+        mon_total = get_total_monovalent(na_molar, k_molar, tris_molar)
+        mg_free = get_free_magnesium(mg_molar, dntp_molar)
+        
+        delta_inv = self._calc_delta_inv_tm(f_gc, n_bp, mon_total, mg_free, na_ref_molar)
+        
         tm_ref_k = tm_ref_celsius + 273.15
-        inv_tm_ref = 1.0 / tm_ref_k
+        inv_tm_target = (1.0 / tm_ref_k) + delta_inv
         
-        ln_na2 = math.log(na_target_molar)
-        ln_na1 = math.log(na_ref_molar)
-        
-        term1 = (4.29 * f_gc - 3.95) * 1e-5 * (ln_na2 - ln_na1)
-        term2 = 9.40 * 1e-6 * (ln_na2**2 - ln_na1**2)
-        
-        inv_tm_target = inv_tm_ref + term1 + term2
         return (1.0 / inv_tm_target) - 273.15
 
     def corrected_thermodynamics(
-        self, dh_kcal: float, ds_cal: float, na_target_molar: float, n_bp: int
+        self, dh_kcal: float, ds_cal: float, f_gc: float, n_bp: int,
+        na_molar: float = 0.0, k_molar: float = 0.0, tris_molar: float = 0.0,
+        mg_molar: float = 0.0, dntp_molar: float = 0.0,
     ) -> tuple[float, float]:
-        if na_target_molar <= 0:
-            raise ValueError("Sodium concentration must be > 0.")
+        mon_total = get_total_monovalent(na_molar, k_molar, tris_molar)
+        mg_free = get_free_magnesium(mg_molar, dntp_molar)
+        
+        if self.use_legacy_entropy:
+            # Ancien modèle grossier (ne gère que Na+)
+            if mon_total > 0:
+                ds_corr = ds_cal + 0.368 * (n_bp - 1) * math.log(mon_total)
+            else:
+                ds_corr = ds_cal
+            return dh_kcal, ds_corr
             
-        # Delta H remains unchanged
-        # Delta S corrected: dS(Na) = dS(1M) + 0.368 * (N - 1) * ln[Na+]
-        ds_corr = ds_cal + 0.368 * (n_bp - 1) * math.log(na_target_molar)
+        delta_inv = self._calc_delta_inv_tm(f_gc, n_bp, mon_total, mg_free, 1.0)
+        
+        # Identité: dS_corr = dS(1M) + dH(1M) * delta(1/Tm)
+        # Note: dH est en kcal/mol, delta(1/Tm) est en K^-1. On doit multiplier dh par 1000 pour avoir des cal.
+        # ds_cal est en cal/mol.K.
+        dh_cal = dh_kcal * 1000.0
+        ds_corr = ds_cal + dh_cal * delta_inv
+        
         return dh_kcal, ds_corr
+
+
+# Rétro-compatibilité pour les tests existants et nom explicite
+Owczarzy2004SaltModel = UnifiedSaltModel
 
 
 class SaltCorrectedBackend(DuplexEnergyBackend):
@@ -98,18 +188,30 @@ class SaltCorrectedBackend(DuplexEnergyBackend):
         self._backend = backend
         self._salt_model = salt_model
 
-    def _apply_correction(self, result: DuplexResult, temp_celsius: float, na_mm: float, seq: str, ct_molar: float) -> DuplexResult:
-        """Applique la correction entropique et recalcule dg et tm."""
-        if na_mm == 1000.0:
-            return result # Pas de correction nécessaire si on est déjà à 1 M (la réf)
-
-        # On suppose que le backend de base calcule par défaut à 1 M
-        # Le salt model recalcule dH, dS
+    def _apply_correction(
+        self, result: DuplexResult, temp_celsius: float, seq: str, 
+        na_mm: float, mg_mm: float, k_mm: float, tris_mm: float, dntp_mm: float, 
+        ct_molar: float
+    ) -> DuplexResult:
+        """Applique la correction unifiée entropique et recalcule dg et tm."""
+        # On suppose que le backend de base calcule par défaut à 1 M Na+ (pas de Mg, pas de K)
+        # Si on est déjà aux conditions de réf, on pourrait shunter, mais on laisse le UnifiedSaltModel gérer 
+        # (si mon=1.0 et mg=0, delta=0).
+        
+        seq = seq.upper()
+        gc_count = seq.count('G') + seq.count('C')
+        f_gc = gc_count / len(seq) if seq else 0.0
+        
         dh_kcal, ds_cal = self._salt_model.corrected_thermodynamics(
             dh_kcal=result.dh_kcal,
             ds_cal=result.ds_cal_per_k,
-            na_target_molar=na_mm / 1000.0,
-            n_bp=len(seq)
+            f_gc=f_gc,
+            n_bp=len(seq),
+            na_molar=na_mm / 1000.0,
+            k_molar=k_mm / 1000.0,
+            tris_molar=tris_mm / 1000.0,
+            mg_molar=mg_mm / 1000.0,
+            dntp_molar=dntp_mm / 1000.0
         )
         
         temp_k = temp_celsius + 273.15
@@ -144,47 +246,59 @@ class SaltCorrectedBackend(DuplexEnergyBackend):
     def calc_heterodimer(
         self, seq1: str, seq2: str, *, temp_celsius: float = 65.0,
         na_mm: float = 50.0, mg_mm: float = 0.0,
+        k_mm: float = 0.0, tris_mm: float = 0.0, dntp_mm: float = 0.0,
         ct_molar: float | None = None
     ) -> DuplexResult:
-        # Appel du backend interne à 1000 mM (1 M Na+) pour obtenir la référence
         res_1m = self._backend.calc_heterodimer(
             seq1, seq2, temp_celsius=temp_celsius, 
-            na_mm=1000.0, mg_mm=mg_mm, ct_molar=ct_molar
+            na_mm=1000.0, mg_mm=0.0, k_mm=0.0, tris_mm=0.0, dntp_mm=0.0,
+            ct_molar=ct_molar
         )
-        # On utilise le ct_molar par défaut du backend si non spécifié (NativeBackend fournit default_ct_molar)
         eff_ct = ct_molar if ct_molar is not None else getattr(self._backend, 'default_ct_molar', 2e-6)
-        return self._apply_correction(res_1m, temp_celsius, na_mm, seq1, eff_ct)
+        return self._apply_correction(
+            res_1m, temp_celsius, seq1, na_mm, mg_mm, k_mm, tris_mm, dntp_mm, eff_ct
+        )
 
     def calc_homodimer(
         self, seq: str, *, temp_celsius: float = 65.0,
         na_mm: float = 50.0, mg_mm: float = 0.0,
+        k_mm: float = 0.0, tris_mm: float = 0.0, dntp_mm: float = 0.0,
         ct_molar: float | None = None
     ) -> DuplexResult:
         res_1m = self._backend.calc_homodimer(
             seq, temp_celsius=temp_celsius,
-            na_mm=1000.0, mg_mm=mg_mm, ct_molar=ct_molar
+            na_mm=1000.0, mg_mm=0.0, k_mm=0.0, tris_mm=0.0, dntp_mm=0.0,
+            ct_molar=ct_molar
         )
         eff_ct = ct_molar if ct_molar is not None else getattr(self._backend, 'default_ct_molar', 2e-6)
-        return self._apply_correction(res_1m, temp_celsius, na_mm, seq, eff_ct)
+        return self._apply_correction(
+            res_1m, temp_celsius, seq, na_mm, mg_mm, k_mm, tris_mm, dntp_mm, eff_ct
+        )
 
     def calc_hairpin(
         self, seq: str, *, temp_celsius: float = 65.0,
         na_mm: float = 50.0, mg_mm: float = 0.0,
+        k_mm: float = 0.0, tris_mm: float = 0.0, dntp_mm: float = 0.0,
         ct_molar: float | None = None
     ) -> DuplexResult:
         res_1m = self._backend.calc_hairpin(
             seq, temp_celsius=temp_celsius,
-            na_mm=1000.0, mg_mm=mg_mm, ct_molar=ct_molar
+            na_mm=1000.0, mg_mm=0.0, k_mm=0.0, tris_mm=0.0, dntp_mm=0.0,
+            ct_molar=ct_molar
         )
         eff_ct = ct_molar if ct_molar is not None else getattr(self._backend, 'default_ct_molar', 2e-6)
-        return self._apply_correction(res_1m, temp_celsius, na_mm, seq, eff_ct)
+        return self._apply_correction(
+            res_1m, temp_celsius, seq, na_mm, mg_mm, k_mm, tris_mm, dntp_mm, eff_ct
+        )
 
     def calc_duplex(
         self, seq1: str, seq2: str, *, temp_celsius: float = 65.0,
         na_mm: float = 50.0, mg_mm: float = 0.0,
+        k_mm: float = 0.0, tris_mm: float = 0.0, dntp_mm: float = 0.0,
         ct_molar: float | None = None
     ) -> DuplexResult:
         return self.calc_heterodimer(
             seq1, seq2, temp_celsius=temp_celsius,
-            na_mm=na_mm, mg_mm=mg_mm, ct_molar=ct_molar
+            na_mm=na_mm, mg_mm=mg_mm, k_mm=k_mm, tris_mm=tris_mm, dntp_mm=dntp_mm,
+            ct_molar=ct_molar
         )

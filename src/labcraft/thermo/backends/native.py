@@ -142,7 +142,8 @@ class NativeBackend(DuplexEnergyBackend):
     def calc_heterodimer(
         self, seq1: str, seq2: str, *, temp_celsius: float = 65.0,
         na_mm: float = 50.0, mg_mm: float = 0.0,
-        ct_molar: float | None = None
+        k_mm: float = 0.0, tris_mm: float = 0.0, dntp_mm: float = 0.0,
+        ct_molar: float | None = None,
     ) -> DuplexResult:
         """Compute heterodimer thermodynamics (must be perfect match)."""
         complement = {'A': 'T', 'T': 'A', 'C': 'G', 'G': 'C'}
@@ -164,7 +165,8 @@ class NativeBackend(DuplexEnergyBackend):
     def calc_homodimer(
         self, seq: str, *, temp_celsius: float = 65.0,
         na_mm: float = 50.0, mg_mm: float = 0.0,
-        ct_molar: float | None = None
+        k_mm: float = 0.0, tris_mm: float = 0.0, dntp_mm: float = 0.0,
+        ct_molar: float | None = None,
     ) -> DuplexResult:
         """Compute homodimer thermodynamics (must be self-complementary)."""
         if not _is_self_complementary(seq):
@@ -175,12 +177,20 @@ class NativeBackend(DuplexEnergyBackend):
     def calc_hairpin(
         self, seq: str, *, temp_celsius: float = 65.0,
         na_mm: float = 50.0, mg_mm: float = 0.0,
+        k_mm: float = 0.0, tris_mm: float = 0.0, dntp_mm: float = 0.0,
+        ct_molar: float | None = None,
     ) -> DuplexResult:
         raise NotImplementedError("NativeBackend does not support hairpins.")
 
     def calc_duplex(
         self, seq1: str, seq2: str, *, temp_celsius: float = 65.0,
         na_mm: float = 50.0, mg_mm: float = 0.0,
-        ct_molar: float | None = None
+        k_mm: float = 0.0, tris_mm: float = 0.0, dntp_mm: float = 0.0,
+        ct_molar: float | None = None,
     ) -> DuplexResult:
-        return self.calc_heterodimer(seq1, seq2, temp_celsius=temp_celsius, na_mm=na_mm, mg_mm=mg_mm, ct_molar=ct_molar)
+        return self.calc_heterodimer(
+            seq1, seq2, temp_celsius=temp_celsius, 
+            na_mm=na_mm, mg_mm=mg_mm, 
+            k_mm=k_mm, tris_mm=tris_mm, dntp_mm=dntp_mm, 
+            ct_molar=ct_molar
+        )

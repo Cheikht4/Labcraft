@@ -1,0 +1,8 @@
+param,value,std_error,source
+a,3.92e-05,2e-06,Owczarzy2008_Biochem_Table2_eq16
+b,-9.11e-06,5e-07,Owczarzy2008_Biochem_Table2_eq16
+c,6.26e-05,4e-06,Owczarzy2008_Biochem_Table2_eq16
+d,1.42e-05,8e-07,Owczarzy2008_Biochem_Table2_eq16
+e,-0.000482,7e-05,Owczarzy2008_Biochem_Table2_eq16
+f,0.000525,2e-05,Owczarzy2008_Biochem_Table2_eq16
+g,8.31e-05,2e-06,Owczarzy2008_Biochem_Table2_eq16
