@@ -293,3 +293,37 @@ class TestSolverValidation:
         
         with pytest.raises(ValueError, match="Strand 0 is missing a valid monomer row"):
             solve_equilibrium(problem)
+
+    def test_benign_fast_convergence(self) -> None:
+        """Garantie de non-régression (Vitesse): Convergence en < 20 itérations.
+        
+        Vérifie que la stratégie 'Newton Complet d'Abord' empêche le
+        sur-amortissement sur un problème facile bien conditionné.
+        """
+        a0 = 1.087e-6
+        b0 = 2.458e-6
+        dg = -11.76
+        T = 338.15
+        
+        problem = EquilibriumProblem(
+            n_strands=2,
+            n_complexes=3,
+            stoichiometry=np.array([[1, 0], [0, 1], [1, 1]], dtype=np.float64),
+            delta_g=np.array([0.0, 0.0, dg]),
+            total_concentrations=np.array([a0, b0]),
+            temperature_kelvin=T,
+        )
+        
+        # We explicitly request the DUAL_NEWTON method and a very strict threshold
+        from labcraft.solver.types import SolverMethod
+        result = solve_equilibrium(
+            problem, 
+            method=SolverMethod.DUAL_NEWTON, 
+            convergence_threshold=1e-10
+        )
+        
+        # It should converge extremely fast (typically < 10 iterations)
+        assert result.n_iterations < 20, (
+            f"Dual solver is crawling! Took {result.n_iterations} iterations "
+            f"for a benign problem. Expected < 20."
+        )

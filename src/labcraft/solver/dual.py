@@ -114,6 +114,8 @@ def solve_dual(
 
     Résout le problème d'équilibre par la méthode de Newton duale amortie,
     avec régularisation de Levenberg-Marquardt dans l'espace préconditionné.
+    Utilise une globalisation "Newton Complet d'Abord" pour garantir la 
+    convergence quadratique finale.
 
     Parameters
     ----------
@@ -163,6 +165,7 @@ def solve_dual(
 
         # Gradient (= mass conservation residual)
         g = xtot - a_mat.T @ c_conc
+        g_norm_sq = float(np.sum(g**2))
 
         # Relative residual
         rel_residuals = np.abs(g) / xtot
@@ -181,79 +184,118 @@ def solve_dual(
             diag_neg_h = np.diag(neg_h)
             diag_neg_h = np.maximum(diag_neg_h, 1e-300)
             d_vec = 1.0 / np.sqrt(diag_neg_h)
-
-            # Preconditioned system: (D·(-H)·D)
+            
             h_precond = d_vec[:, np.newaxis] * neg_h * d_vec[np.newaxis, :]
             g_precond = d_vec * g
-            
-            # Levenberg-Marquardt with Cholesky retries
-            cholesky_success = False
-            for _ in range(20):  # max retries for LM
-                # Add ridge lambda_lm to preconditioned Hessian (diagonal is ~1.0)
-                if lambda_lm > 0:
-                    h_damped = h_precond + lambda_lm * np.eye(problem.n_strands)
-                else:
-                    h_damped = h_precond
-
-                try:
-                    cho, lower = scipy.linalg.cho_factor(h_damped)
-                    delta_precond = scipy.linalg.cho_solve((cho, lower), g_precond)
-                    delta_u = d_vec * delta_precond
-                    cholesky_success = True
-                    break
-                except scipy.linalg.LinAlgError:
-                    lambda_lm = max(lambda_lm * 10, 1e-12)
-            
-            if not cholesky_success:
-                raise ConvergenceError(
-                    f"Cholesky factorization failed even with LM damping at iteration {it}."
-                )
-
         else:
-            # Non-preconditioned fallback (for testing/completeness)
-            cholesky_success = False
-            for _ in range(20):
-                if lambda_lm > 0:
-                    h_damped = neg_h + lambda_lm * np.eye(problem.n_strands)
-                else:
-                    h_damped = neg_h
-                try:
-                    cho, lower = scipy.linalg.cho_factor(h_damped)
-                    delta_u = scipy.linalg.cho_solve((cho, lower), g)
-                    cholesky_success = True
-                    break
-                except scipy.linalg.LinAlgError:
-                    lambda_lm = max(lambda_lm * 10, 1e-12)
-            if not cholesky_success:
-                raise ConvergenceError("Cholesky failed without preconditioning.")
+            h_precond = neg_h
+            g_precond = g
+            d_vec = np.ones(problem.n_strands)
 
-        # Armijo backtracking line search
+        # ---------------------------------------------------------
+        # FAST PATH: Try pure full Newton step first (lambda=0, alpha=1)
+        # ---------------------------------------------------------
+        pure_success = False
+        try:
+            cho, lower = scipy.linalg.cho_factor(h_precond)
+            delta_precond = scipy.linalg.cho_solve((cho, lower), g_precond)
+            delta_u_pure = d_vec * delta_precond
+            
+            # Evaluate full step
+            u_next_pure = u + delta_u_pure
+            _, c_next_pure, next_overflow_pure = _compute_complex_concentrations(
+                u_next_pure, a_mat, dg_over_rt
+            )
+            
+            if not next_overflow_pure:
+                g_next_pure = xtot - a_mat.T @ c_next_pure
+                g_next_norm_sq = float(np.sum(g_next_pure**2))
+                
+                if g_next_norm_sq < g_norm_sq:
+                    # Pure step accepted!
+                    u = u_next_pure
+                    lambda_lm = 0.0
+                    pure_success = True
+                    
+        except scipy.linalg.LinAlgError:
+            pass
+            
+        if pure_success:
+            continue
+            
+        # ---------------------------------------------------------
+        # FALLBACK PATH: Levenberg-Marquardt with Cholesky retries
+        # ---------------------------------------------------------
+        lambda_lm = max(lambda_lm, 1e-12)
+        cholesky_success = False
+        
+        for _ in range(20):  # max retries for LM
+            if precondition:
+                h_damped = h_precond + lambda_lm * np.eye(problem.n_strands)
+            else:
+                h_damped = neg_h + lambda_lm * np.eye(problem.n_strands)
+
+            try:
+                cho, lower = scipy.linalg.cho_factor(h_damped)
+                delta_precond = scipy.linalg.cho_solve((cho, lower), g_precond)
+                delta_u = d_vec * delta_precond
+                cholesky_success = True
+                break
+            except scipy.linalg.LinAlgError:
+                lambda_lm = max(lambda_lm * 10, 1e-12)
+        
+        if not cholesky_success:
+            raise ConvergenceError(
+                f"Cholesky factorization failed even with LM damping at iteration {it}."
+            )
+
+        # Pre-compute values for defensive Dual Armijo if needed
         g_dot_du = float(np.dot(g, delta_u))
-
         if g_dot_du <= 0:
             logger.debug(f"Newton direction is not ascent: g·Δu = {g_dot_du:.2e}")
             break
-
+            
         d_current = float(np.sum(xtot * u) - np.sum(c_conc))
 
         alpha = initial_step_size
         min_alpha = 1e-15
         step_accepted = False
         
+        # 1. Line search on Residual Norm ||g||^2
         while alpha > min_alpha:
             u_next = u + alpha * delta_u
             _, c_next, next_overflow = _compute_complex_concentrations(u_next, a_mat, dg_over_rt)
             
-            # If the trial point overflows, we must backtrack
             if next_overflow:
                 alpha *= armijo_rho
                 continue
                 
-            d_next = float(np.sum(xtot * u_next) - np.sum(c_next))
-            if d_next >= d_current + armijo_c * alpha * g_dot_du:
+            g_next = xtot - a_mat.T @ c_next
+            g_next_norm_sq = float(np.sum(g_next**2))
+            
+            if g_next_norm_sq < g_norm_sq:
                 step_accepted = True
                 break
+                
             alpha *= armijo_rho
+
+        # 2. Defensive fallback: Line search on Dual Objective D(u)
+        if not step_accepted:
+            alpha = initial_step_size
+            while alpha > min_alpha:
+                u_next = u + alpha * delta_u
+                _, c_next, next_overflow = _compute_complex_concentrations(u_next, a_mat, dg_over_rt)
+                
+                if next_overflow:
+                    alpha *= armijo_rho
+                    continue
+                    
+                d_next = float(np.sum(xtot * u_next) - np.sum(c_next))
+                if d_next >= d_current + armijo_c * alpha * g_dot_du:
+                    step_accepted = True
+                    break
+                    
+                alpha *= armijo_rho
 
         if not step_accepted:
             logger.debug(f"Armijo step too small at iteration {it}")
@@ -264,13 +306,11 @@ def solve_dual(
             u = u + alpha * delta_u
             
             # Update LM damping based on step size
-            # If we took a full or large step, the quadratic approximation is good -> decrease damping
             if alpha >= 0.1:
                 if lambda_lm > 1e-12:
                     lambda_lm /= 10
                 else:
                     lambda_lm = 0.0
-            # If we took a tiny step, the quadratic approximation is poor -> increase damping
             elif alpha < 1e-3:
                 lambda_lm = max(lambda_lm * 10, 1e-12)
 
