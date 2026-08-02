@@ -1,0 +1,8 @@
+sequence,length,self_complementary,dH_kcal_mol,dS_cal_mol_K,dG37_kcal_mol,Tm_native_C,Tm_biopython_NN3_C
+GCGTACGC,8,True,-64.6,-176.3,-9.921,41.77,39.67
+CGTTGA,6,False,-41.2,-115.4,-5.409,7.15,7.15
+ATGCAT,6,True,-36.6,-103.8,-4.406,2.81,-0.03
+AAAAAAAA,8,False,-50.7,-147.2,-5.046,10.43,10.43
+GGGCCC,6,True,-41.6,-111.0,-7.173,24.36,21.46
+ACGTACGTACGT,12,True,-92.0,-251.8,-13.904,54.69,53.08
+TTGGCCAATTGG,12,False,-87.8,-237.9,-14.015,52.66,52.66

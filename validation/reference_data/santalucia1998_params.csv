@@ -1,0 +1,14 @@
+motif,dH_kcal_mol,dS_cal_mol_K,source
+AA/TT,-7.9,-22.2,SantaLucia1998_PNAS_Table2
+AT/TA,-7.2,-20.4,SantaLucia1998_PNAS_Table2
+TA/AT,-7.2,-21.3,SantaLucia1998_PNAS_Table2
+CA/GT,-8.5,-22.7,SantaLucia1998_PNAS_Table2
+GT/CA,-8.4,-22.4,SantaLucia1998_PNAS_Table2
+CT/GA,-7.8,-21.0,SantaLucia1998_PNAS_Table2
+GA/CT,-8.2,-22.2,SantaLucia1998_PNAS_Table2
+CG/GC,-10.6,-27.2,SantaLucia1998_PNAS_Table2
+GC/CG,-9.8,-24.4,SantaLucia1998_PNAS_Table2
+GG/CC,-8.0,-19.9,SantaLucia1998_PNAS_Table2
+init_term_GC,0.1,-2.8,SantaLucia1998_PNAS_Table2
+init_term_AT,2.3,4.1,SantaLucia1998_PNAS_Table2
+symmetry,0.0,-1.4,SantaLucia1998_PNAS_Table2
