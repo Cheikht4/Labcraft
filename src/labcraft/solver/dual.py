@@ -208,8 +208,11 @@ def solve_dual(
             )
             
             if not next_overflow_pure:
-                g_next_pure = xtot - a_mat.T @ c_next_pure
-                g_next_norm_sq = float(np.sum(g_next_pure**2))
+                with np.errstate(over='ignore', invalid='ignore'):
+                    g_next_pure = xtot - a_mat.T @ c_next_pure
+                    g_next_norm_sq = float(np.sum(g_next_pure**2))
+                    if not np.isfinite(g_next_norm_sq):
+                        g_next_norm_sq = np.inf
                 
                 if g_next_norm_sq < g_norm_sq:
                     # Pure step accepted!
@@ -270,8 +273,11 @@ def solve_dual(
                 alpha *= armijo_rho
                 continue
                 
-            g_next = xtot - a_mat.T @ c_next
-            g_next_norm_sq = float(np.sum(g_next**2))
+            with np.errstate(over='ignore', invalid='ignore'):
+                g_next = xtot - a_mat.T @ c_next
+                g_next_norm_sq = float(np.sum(g_next**2))
+                if not np.isfinite(g_next_norm_sq):
+                    g_next_norm_sq = np.inf
             
             if g_next_norm_sq < g_norm_sq:
                 step_accepted = True

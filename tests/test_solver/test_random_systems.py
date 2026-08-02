@@ -327,3 +327,26 @@ class TestSolverValidation:
             f"Dual solver is crawling! Took {result.n_iterations} iterations "
             f"for a benign problem. Expected < 20."
         )
+
+    def test_no_warnings_on_extreme_cases(self) -> None:
+        """S'assure qu'aucun RuntimeWarning n'est émis sur un cas extrême."""
+        import warnings
+        
+        a0, b0 = 1e-12, 1e-12
+        dg = -45.0
+        T = 338.15
+        
+        problem = EquilibriumProblem(
+            n_strands=2,
+            n_complexes=3,
+            stoichiometry=np.array([[1, 0], [0, 1], [1, 1]], dtype=np.float64),
+            delta_g=np.array([0.0, 0.0, dg]),
+            total_concentrations=np.array([a0, b0]),
+            temperature_kelvin=T,
+        )
+        
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            solve_equilibrium(problem, convergence_threshold=1e-7)
+            
+            assert len(w) == 0, f"Expected no warnings, but got {[str(warn.message) for warn in w]}"
