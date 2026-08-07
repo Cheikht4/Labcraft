@@ -14,8 +14,12 @@ class PolymeraseProfile:
     strand_displacement: bool
     warm_start: bool
     dimer_dg_threshold: float
-    three_prime_window: int = 3  # Fenêtre 3' (nombre de nucléotides depuis l'extrémité) pour le veto d'extensibilité
-
+    # Modèle du Veto 3' selon ARMS (Newton et al. 1989, NAR 17(7):2503-2516)
+    # - Amorces 7b/7c (pos 3) : effet fort
+    # - Amorces 8b/8c (pos 4) : effet marginal
+    # - Amorces 7f/7g (pos 7) : effet fuyant
+    three_prime_window: int = 3  # Fenêtre de forte pénalité (jusqu'à la position 3)
+    three_prime_absolute_window: int = 2  # Fenêtre de blocage absolu de l'extension (pos 1 et 2)
 
 # Profils standards de polymérases
 BST = PolymeraseProfile(
@@ -90,13 +94,15 @@ def get_enzyme(spec) -> PolymeraseProfile:
         # Surcharges optionnelles
         dg_thresh = spec.get("dimer_dg_threshold", base_profile.dimer_dg_threshold)
         tp_window = spec.get("three_prime_window", base_profile.three_prime_window)
+        tp_abs_window = spec.get("three_prime_absolute_window", base_profile.three_prime_absolute_window)
         
         return PolymeraseProfile(
             name=base_profile.name,
             strand_displacement=base_profile.strand_displacement,
             warm_start=base_profile.warm_start,
             dimer_dg_threshold=float(dg_thresh),
-            three_prime_window=int(tp_window)
+            three_prime_window=int(tp_window),
+            three_prime_absolute_window=int(tp_abs_window)
         )
         
     else:

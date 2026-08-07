@@ -4,8 +4,9 @@ from collections import defaultdict
 import RNA
 import hashlib
 
-from labcraft.diagnostics.amplifiable_dimer import is_amplifiable_dimer
+from labcraft.diagnostics.amplifiable_dimer import is_amplifiable_dimer, evaluate_pair_amplifiable
 from labcraft.diagnostics.enzyme import BST
+from labcraft.thermo.backends.vienna import ViennaRNABackend
 from labcraft.thermo.vienna import dna_params
 from labcraft.metrics.risk import RiskItem
 from labcraft.metrics.verdict import PanelVerdict
@@ -37,23 +38,20 @@ def run_analysis(serotype, primers, skip_flp=False):
                 seq1 = p1['sequence']
                 seq2 = p2['sequence']
                 
-                # cofold
-                seq_concat = f"{seq1}&{seq2}"
-                structure, mfe = RNA.cofold(seq_concat)
-                struct_clean = structure.replace('&', '')
+                backend = ViennaRNABackend()
                 
-                is_amp, min_dg_3p = is_amplifiable_dimer(
-                    seq1, seq2, struct_clean, mfe, BST, temp_celsius=63.0
+                is_amp, min_dg_3p, details = evaluate_pair_amplifiable(
+                    seq1, seq2, backend, BST, temp_celsius=63.0
                 )
                 
                 if is_amp:
                     amplifiable_dimers.append({
                         'primer1': p1['name'],
                         'primer2': p2['name'],
-                        'seq1': seq1,
-                        'seq2': seq2,
-                        'structure': structure,
-                        'mfe': mfe,
+                        'seq1': details['seq_a'],
+                        'seq2': details['seq_b'],
+                        'structure': details['structure'],
+                        'mfe': details['delta_g'],
                         'dg_3p': min_dg_3p,
                         'concentration': max(float(p1['conc_uM']), float(p2['conc_uM'])) * 1e-6
                     })
@@ -112,7 +110,10 @@ def main():
             alignment_ascii=format_alignment(d['seq1'], d['seq2'], d['structure'])
         ))
         
-    verdict = PanelVerdict("FAILURE", [], "Présence de dimères amplifiables multiples, notamment avec FLP.")
+    if len(results["DEN-3"]) > 0:
+        verdict = PanelVerdict("FAILURE", [], f"Présence de {len(results['DEN-3'])} dimères amplifiables, notamment avec FLP.")
+    else:
+        verdict = PanelVerdict("OK", [], "Aucun dimère amplifiable détecté.")
     
     import time
     

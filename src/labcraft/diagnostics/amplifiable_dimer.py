@@ -1,6 +1,7 @@
 import RNA
 from typing import Tuple, List, Dict
 from labcraft.diagnostics.enzyme import PolymeraseProfile
+from labcraft.thermo.backends.base import DuplexEnergyBackend
 
 def get_pairs(structure: str) -> Dict[int, int]:
     """Parse la structure dot-bracket et retourne un dictionnaire de paires."""
@@ -131,9 +132,8 @@ def is_amplifiable_dimer(
         local_dg = dh_total - temp_k * (ds_total / 1000.0)
         
         # Application du veto 3'
-        # Le veto stipule que les 'window' premières bases depuis le 3' DOIVENT être appariées
-        # consécutivement au partenaire.
-        window = enzyme.three_prime_window
+        # Le veto pour les dimères n'est absolu que sur les positions critiques (1-2 selon ARMS)
+        window = enzyme.three_prime_absolute_window
         passed_veto = True
         for k in range(window):
             idx_k = idx_3p - k
@@ -170,4 +170,98 @@ def is_amplifiable_dimer(
     min_dg = min(valid_dgs) if valid_dgs else 0.0
     
     return is_amplifiable, min_dg
+
+def evaluate_pair_amplifiable(
+    seq_a: str, 
+    seq_b: str, 
+    backend: DuplexEnergyBackend, 
+    enzyme: PolymeraseProfile, 
+    temp_celsius: float,
+    **backend_kwargs
+) -> Tuple[bool, float, Dict]:
+    """Évalue un couple d'amorces dans les deux ordres de concaténation et
+    renvoie le verdict combiné. Un dimère est amplifiable si l'un OU l'autre
+    ordre révèle un 3' extensible.
+    
+    Note: tester deux ordres n'échantillonne que deux structures de l'ensemble dégénéré.
+    La solution vraiment complète utiliserait les probabilités d'appariement de la 
+    fonction de partition (RNA.pf_fold / co-fold partition function) pour juger si 
+    l'extrémité 3' s'apparie avec une probabilité supérieure à un seuil, indépendamment 
+    d'une structure MFE arbitraire.
+    
+    Returns:
+        (is_amplifiable, worst_dg_3p, details)
+        où details indique l'ordre et l'extrémité 3' responsables.
+    """
+    if seq_a == seq_b:
+        # Homodimère: un seul ordre suffit car la concaténation est symétrique
+        res = backend.calc_homodimer(seq_a, temp_celsius=temp_celsius, **backend_kwargs)
+        struct, mfe = res.structure.replace('&', ''), res.dg_kcal
+        is_amp, dg_3p = is_amplifiable_dimer(seq_a, seq_a, struct, mfe, enzyme, temp_celsius)
+        details = {
+            "seq_a": seq_a, "seq_b": seq_a, "structure": res.structure, 
+            "delta_g": mfe, "delta_g_3p": dg_3p,
+            "order": "a&a"
+        }
+        return is_amp, dg_3p, details
+        
+    # Hétérodimère: on évalue a&b ET b&a
+    res_ab = backend.calc_heterodimer(seq_a, seq_b, temp_celsius=temp_celsius, **backend_kwargs)
+    struct_ab, mfe_ab = res_ab.structure.replace('&', ''), res_ab.dg_kcal
+    is_amp_ab, dg_3p_ab = is_amplifiable_dimer(seq_a, seq_b, struct_ab, mfe_ab, enzyme, temp_celsius)
+    
+    res_ba = backend.calc_heterodimer(seq_b, seq_a, temp_celsius=temp_celsius, **backend_kwargs)
+    struct_ba, mfe_ba = res_ba.structure.replace('&', ''), res_ba.dg_kcal
+    is_amp_ba, dg_3p_ba = is_amplifiable_dimer(seq_b, seq_a, struct_ba, mfe_ba, enzyme, temp_celsius)
+    
+    is_amplifiable = is_amp_ab or is_amp_ba
+    
+    # Pour le dg_3p, on prend le pire (le plus négatif) parmi ceux qui sont extensibles,
+    # ou 0.0 si aucun n'a un template. 
+    # S'il y a un is_amplifiable = True, on prend le dG du is_amplifiable qui l'est.
+    if is_amp_ab and not is_amp_ba:
+        worst_dg = dg_3p_ab
+        chosen_res = res_ab
+        chosen_order = "a&b"
+        seq_1, seq_2 = seq_a, seq_b
+    elif is_amp_ba and not is_amp_ab:
+        worst_dg = dg_3p_ba
+        chosen_res = res_ba
+        chosen_order = "b&a"
+        seq_1, seq_2 = seq_b, seq_a
+    elif is_amp_ab and is_amp_ba:
+        if dg_3p_ab <= dg_3p_ba: # Plus négatif = pire
+            worst_dg = dg_3p_ab
+            chosen_res = res_ab
+            chosen_order = "a&b"
+            seq_1, seq_2 = seq_a, seq_b
+        else:
+            worst_dg = dg_3p_ba
+            chosen_res = res_ba
+            chosen_order = "b&a"
+            seq_1, seq_2 = seq_b, seq_a
+    else:
+        # Aucun amplifiable, on prend le pire dG qui a quand même une template, s'il y en a.
+        valid_dgs = []
+        if dg_3p_ab != 0.0: valid_dgs.append((dg_3p_ab, res_ab, "a&b", seq_a, seq_b))
+        if dg_3p_ba != 0.0: valid_dgs.append((dg_3p_ba, res_ba, "b&a", seq_b, seq_a))
+        
+        if valid_dgs:
+            best_tuple = min(valid_dgs, key=lambda x: x[0])
+            worst_dg = best_tuple[0]
+            chosen_res = best_tuple[1]
+            chosen_order = best_tuple[2]
+            seq_1, seq_2 = best_tuple[3], best_tuple[4]
+        else:
+            worst_dg = 0.0
+            chosen_res = res_ab
+            chosen_order = "a&b"
+            seq_1, seq_2 = seq_a, seq_b
+            
+    details = {
+        "seq_a": seq_1, "seq_b": seq_2, "structure": chosen_res.structure, 
+        "delta_g": chosen_res.dg_kcal, "delta_g_3p": worst_dg,
+        "order": chosen_order
+    }
+    return is_amplifiable, worst_dg, details
 

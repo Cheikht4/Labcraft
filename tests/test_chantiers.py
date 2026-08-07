@@ -44,24 +44,27 @@ def test_three_prime_extensible():
     enz.three_prime_window = 3
     
     # OK
-    ext, bad = three_prime_extensible("ATGC", "TACG", enz)
+    ext, bad, severity = three_prime_extensible("ATGC", "TACG", enz)
     assert ext is True
     
-    # Veto terminal (pos 1)
-    ext, bad = three_prime_extensible("ATGC", "TACA", enz)
+    # Mésappariement au 3' (position terminale, veto absolu)
+    # L'amorce ATGCATGC a pour complément TACGTACG
+    # On met une matrice qui matche sauf à la fin (T à la place de C)
+    ext, bad, severity = three_prime_extensible("ATGCATGC", "TACGTACT", enz)
     assert ext is False
     assert bad == 1
+    assert severity == "block"
     
-    # Veto pénultième (pos 2)
-    ext, bad = three_prime_extensible("ATGC", "TATG", enz)
-    assert ext is False
-    assert bad == 2
-    
-    # Veto antépénultième (pos 3)
-    ext, bad = three_prime_extensible("ATGC", "TTCG", enz)
-    assert ext is False
-    assert bad == 3
-    
-    # Loin du 3'
-    ext, bad = three_prime_extensible("ATGCATGC", "AACGTACG", enz)
+    # Mésappariement position 3 (pénalité forte mais pas de blocage absolu)
+    # TACGTACG -> TACGTCCG (A remplacé par C à l'index 5, soit pos 3 depuis la fin)
+    ext, bad, severity = three_prime_extensible("ATGCATGC", "TACGTCCG", enz)
     assert ext is True
+    assert bad == 3
+    assert severity == "weak"
+    
+    # Loin du 3' (hors fenêtre)
+    # TACGTACG -> AACGTACG (T remplacé par A au début)
+    ext, bad, severity = three_prime_extensible("ATGCATGC", "AACGTACG", enz)
+    assert ext is True
+    assert bad is None
+    assert severity is None

@@ -12,7 +12,7 @@ from labcraft.thermo.backends.vienna import ViennaRNABackend
 from labcraft.solver.dual import solve_dual
 from labcraft.metrics.fractions import compute_fractions
 from labcraft.diagnostics.enzyme import BST_2_0, TAQ, PolymeraseProfile
-from labcraft.diagnostics.amplifiable_dimer import is_amplifiable_dimer
+from labcraft.diagnostics.amplifiable_dimer import is_amplifiable_dimer, evaluate_pair_amplifiable
 from labcraft.metrics.risk import evaluate_risks
 from labcraft.metrics.verdict import generate_verdict
 from labcraft.report.renderer import render_report
@@ -96,7 +96,7 @@ def analyze(
         backend_kwargs = {
             'na_mm': buffer_conf.get('na_mM', 50.0),
             'k_mm': buffer_conf.get('k_mM', 0.0),
-            'tris_mm': buffer_conf.get('tris_mm', 0.0),
+            'tris_mm': buffer_conf.get('tris_mM', 0.0),
             'mg_mm': buffer_conf.get('mg_mM', 0.0),
             'dntp_mm': buffer_conf.get('dntp_mM', 0.0)
         }
@@ -173,29 +173,19 @@ def analyze(
                 p1_name = "_".join(parts[:2]) if len(parts) >= 2 else parts[0]
                 if "homo" in c_name:
                     p_a_seq = next(p.sequence for p in primers if p.name == p1_name)
-                    res_homo = backend.calc_homodimer(p_a_seq, temp_celsius=temp_celsius, **backend_kwargs)
-                    struct, mfe = res_homo.structure, res_homo.dg_kcal
-                    is_amp, dg_3p = is_amplifiable_dimer(p_a_seq, p_a_seq, struct, mfe, enzyme, temp_celsius)
+                    is_amp, dg_3p, details = evaluate_pair_amplifiable(p_a_seq, p_a_seq, backend, enzyme, temp_celsius, **backend_kwargs)
                     from labcraft.report.alignment import dotbracket_to_alignment
-                    details = {
-                        "seq_a": p_a_seq, "seq_b": p_a_seq, "structure": struct, 
-                        "delta_g": mfe, "delta_g_3p": dg_3p,
-                        "alignment": dotbracket_to_alignment(p_a_seq, p_a_seq, struct)
-                    }
+                    if 'alignment' not in details:
+                        details['alignment'] = dotbracket_to_alignment(details['seq_a'], details['seq_b'], details['structure'])
                 elif len(parts) >= 4:
                     p2_name = "_".join(parts[2:4])
                     try:
                         p_a_seq = next(p.sequence for p in primers if p.name == p1_name)
                         p_b_seq = next(p.sequence for p in primers if p.name == p2_name)
-                        res_hetero = backend.calc_heterodimer(p_a_seq, p_b_seq, temp_celsius=temp_celsius, **backend_kwargs)
-                        struct, mfe = res_hetero.structure, res_hetero.dg_kcal
-                        is_amp, dg_3p = is_amplifiable_dimer(p_a_seq, p_b_seq, struct, mfe, enzyme, temp_celsius)
+                        is_amp, dg_3p, details = evaluate_pair_amplifiable(p_a_seq, p_b_seq, backend, enzyme, temp_celsius, **backend_kwargs)
                         from labcraft.report.alignment import dotbracket_to_alignment
-                        details = {
-                            "seq_a": p_a_seq, "seq_b": p_b_seq, "structure": struct, 
-                            "delta_g": mfe, "delta_g_3p": dg_3p,
-                            "alignment": dotbracket_to_alignment(p_a_seq, p_b_seq, struct)
-                        }
+                        if 'alignment' not in details:
+                            details['alignment'] = dotbracket_to_alignment(details['seq_a'], details['seq_b'], details['structure'])
                     except StopIteration:
                         pass
             amplifiable_flags.append(is_amp)

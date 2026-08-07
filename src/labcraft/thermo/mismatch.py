@@ -143,15 +143,18 @@ def three_prime_extensible(
     template_under_primer: str, 
     enzyme: PolymeraseProfile,
     window: Optional[int] = None
-) -> Tuple[bool, Optional[int]]:
+) -> Tuple[bool, Optional[int], Optional[str]]:
     """Évalue l'extensibilité du 3' selon la présence de mésappariements.
     
-    Cette fonction est un veto cinétique (lié à l'enzyme) et non thermodynamique.
+    Cette fonction implémente le veto cinétique basé sur le modèle ARMS
+    (Newton et al. 1989, NAR 17(7):2503-2516).
     
     Returns:
-        (extensible, first_bad_pos)
-        first_bad_pos est la position (1-indexé depuis le 3') du premier mismatch fautif,
-        ou None si tout est OK.
+        (extensible, first_bad_pos, severity)
+        - first_bad_pos est la position (1-indexé depuis le 3') du premier mismatch fautif,
+          ou None si tout est OK.
+        - severity peut valoir "block" (zone absolue, ext bloquée), "weak" (zone pénalisée),
+          ou None.
     """
     complement = {'A': 'T', 'T': 'A', 'C': 'G', 'G': 'C'}
     
@@ -173,11 +176,14 @@ def three_prime_extensible(
         is_match = complement.get(p_base, '') == t_base
         
         if not is_match:
-            # Pos 1 et 2 sont des vetos absolus, pos 3+ dépendent de `window`
-            # Comme on s'arrête à `window`, tout mismatch trouvé ici est un veto.
-            return False, pos_from_3p
+            if pos_from_3p <= enzyme.three_prime_absolute_window:
+                # Blocage absolu selon ARMS
+                return False, pos_from_3p, "block"
+            else:
+                # Pénalité forte mais extension possible (fuite ARMS)
+                return True, pos_from_3p, "weak"
             
-    return True, None
+    return True, None, None
 
 
 def evaluate_primer_target_binding(
@@ -209,14 +215,16 @@ def evaluate_primer_target_binding(
     _, _, dg_binding = nn_duplex_energy(primer_5to3, bottom_under, temp_celsius)
     
     # Veto 3'
-    extensible, bad_pos = three_prime_extensible(primer_5to3, bottom_under, enzyme)
+    extensible, bad_pos, severity = three_prime_extensible(primer_5to3, bottom_under, enzyme)
     
-    covered = (n_mismatches <= max_mismatches) and extensible and (dg_binding <= dg_cutoff)
+    # Pour la couverture cible, tout mismatch dans la fenêtre pose problème (sévérité "weak" ou "block")
+    # On considère que la variante n'est pas bien couverte.
+    covered = (n_mismatches <= max_mismatches) and (severity is None) and (dg_binding <= dg_cutoff)
     
     return {
         "n_mismatches": n_mismatches,
         "dg_binding": dg_binding,
-        "three_prime_ok": extensible,
+        "three_prime_ok": severity is None,
         "first_bad_pos": bad_pos,
         "covered": covered
     }
