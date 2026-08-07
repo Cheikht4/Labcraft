@@ -79,7 +79,7 @@ def generate_verdict(
                 issues.append(PrimerIssue(
                     primer_name=primer_name,
                     target_site="Compétition Sans Cible",
-                    occupation=0.0,
+                    occupation=f.free,
                     cause=cause,
                     is_critical=True
                 ))

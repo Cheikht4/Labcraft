@@ -259,7 +259,12 @@
                 <h3>Cible : {{ target }}</h3>
                 {% for issue in issues %}
                 <div class="issue-item">
-                    <strong>Amorce : {{ issue.primer_name }}</strong> (Occupation: {{ issue.occupation|pct }})<br>
+                    <strong>Amorce : {{ issue.primer_name }}</strong> 
+                    {% if target == "Compétition Sans Cible" %}
+                        (Fraction libre : {{ issue.occupation|pct }})
+                    {% else %}
+                        (Occupation : {{ issue.occupation|pct }})
+                    {% endif %}<br>
                     Mécanisme dominant : {{ issue.cause }}
                 </div>
                 {% endfor %}
