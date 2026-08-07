@@ -24,13 +24,14 @@ class ComplexInfo:
 
 
 def enumerate_complexes(
-    primers: Sequence[PhysicalPrimer],
+    primers: List[PhysicalPrimer],
     target_seq: str,
     backend: DuplexEnergyBackend,
     profile: ConcentrationProfile = LAMP_DEFAULT_PROFILE,
     temp_celsius: float = 65.0,
-    mon_molar: float | None = None
-) -> tuple[EquilibriumProblem, list[str], list[str], dict[str, float]]:
+    mon_molar: float | None = None,
+    buffer: dict | None = None
+) -> Tuple[EquilibriumProblem, List[str], List[str], Dict[str, float]]:
     """Énumère toutes les espèces et génère le problème d'équilibre.
     
     1. Espèces de base = chaque amorce + sites cibles identifiés.
@@ -45,6 +46,16 @@ def enumerate_complexes(
     target_sites = []
     primer_to_site = {}
     
+    backend_kwargs = {}
+    if buffer:
+        backend_kwargs = {
+            'na_mm': buffer.get('na_mM', 50.0),
+            'k_mm': buffer.get('k_mM', 0.0),
+            'tris_mm': buffer.get('tris_mM', 0.0),
+            'mg_mm': buffer.get('mg_mM', 0.0),
+            'dntp_mm': buffer.get('dntp_mM', 0.0)
+        }
+
     if target_seq:
         target_seq_upper = target_seq.upper()
         target_rc = _revcomp(target_seq_upper)
@@ -128,9 +139,9 @@ def enumerate_complexes(
             
             try:
                 if i != j:
-                    res = backend.calc_heterodimer(p1.sequence, p2.sequence, temp_celsius=temp_celsius)
+                    res = backend.calc_heterodimer(p1.sequence, p2.sequence, temp_celsius=temp_celsius, **backend_kwargs)
                 else:
-                    res = backend.calc_homodimer(p1.sequence, temp_celsius=temp_celsius)
+                    res = backend.calc_homodimer(p1.sequence, temp_celsius=temp_celsius, **backend_kwargs)
                 dg = res.dg_kcal
             except ValueError:
                 dg = 1.0 # Ignorer ce complexe
@@ -155,7 +166,7 @@ def enumerate_complexes(
             
             # Le backend calcule l'hybridation sur le domaine de liaison SEUL
             # On passe p.binding_domain et son reverse complement exact
-            res_hyb = backend.calc_duplex(p.binding_domain, _revcomp(p.binding_domain), temp_celsius=temp_celsius)
+            res_hyb = backend.calc_duplex(p.binding_domain, _revcomp(p.binding_domain), temp_celsius=temp_celsius, **backend_kwargs)
             dg_hyb = res_hyb.dg_kcal
             
             # Le calcul de l'accessibilité

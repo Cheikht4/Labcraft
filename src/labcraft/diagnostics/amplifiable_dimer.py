@@ -130,7 +130,28 @@ def is_amplifiable_dimer(
         temp_k = temp_celsius + 273.15
         local_dg = dh_total - temp_k * (ds_total / 1000.0)
         
-        is_amp = local_dg <= enzyme.dimer_dg_threshold
+        # Application du veto 3'
+        # Le veto stipule que les 'window' premières bases depuis le 3' DOIVENT être appariées
+        # consécutivement au partenaire.
+        window = enzyme.three_prime_window
+        passed_veto = True
+        for k in range(window):
+            idx_k = idx_3p - k
+            expected_partner_k = partner_idx + k if is_primer_a else partner_idx - k
+            
+            # Limites
+            if is_primer_a and idx_k < 0:
+                passed_veto = False
+                break
+            if not is_primer_a and idx_k < l_a:
+                passed_veto = False
+                break
+                
+            if idx_k not in pairs or pairs[idx_k] != expected_partner_k:
+                passed_veto = False
+                break
+                
+        is_amp = (local_dg <= enzyme.dimer_dg_threshold) and passed_veto
         return is_amp, local_dg
         
     amp_a, dg_a = check_3p_end(True)

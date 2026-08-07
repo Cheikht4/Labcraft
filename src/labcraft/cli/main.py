@@ -82,8 +82,46 @@ def analyze(
                 primers.append(PhysicalPrimer(name, seq, role_enum, seq))
                 
     # 3. Setup Thermodynamic Engine
-    temp_celsius = data.get("experiment", {}).get("temperature_C", 65.0)
-    backend = ViennaRNABackend()
+    experiment = data.get("experiment", {})
+    temp_celsius = experiment.get("temperature_C", 65.0)
+    
+    # Configuration du tampon salin
+    buffer_conf = experiment.get("buffer", None)
+    backend_kwargs = {}
+    if buffer_conf:
+        from labcraft.thermo.salt import UnifiedSaltModel
+        from labcraft.thermo.backends.base import SaltCorrectedBackend
+        
+        backend = SaltCorrectedBackend(ViennaRNABackend(), UnifiedSaltModel())
+        backend_kwargs = {
+            'na_mm': buffer_conf.get('na_mM', 50.0),
+            'k_mm': buffer_conf.get('k_mM', 0.0),
+            'tris_mm': buffer_conf.get('tris_mm', 0.0),
+            'mg_mm': buffer_conf.get('mg_mM', 0.0),
+            'dntp_mm': buffer_conf.get('dntp_mM', 0.0)
+        }
+        from labcraft.buffer.monovalent import get_total_monovalent
+        mon_molar = get_total_monovalent(backend_kwargs['na_mm'], backend_kwargs['k_mm'], backend_kwargs['tris_mm']) / 1000.0
+    else:
+        backend = ViennaRNABackend()
+        mon_molar = None
+
+    # Configuration de l'enzyme
+    from labcraft.diagnostics.enzyme import get_enzyme
+    enzyme_spec = experiment.get("enzyme", "bst2.0")
+    enzyme = get_enzyme(enzyme_spec)
+    
+    # Configuration des concentrations
+    conc_conf = data.get("concentrations", {})
+    unit = conc_conf.get("unit", "uM")
+    multiplier = 1e-6 if unit.lower() == "um" else 1e-9
+    
+    profile = ConcentrationProfile(
+        target=target_copies_to_molar(conc_conf.get("target_copies_per_uL", 1000)),
+        fip_bip=conc_conf.get("fip_bip", 1.6) * multiplier if "fip_bip" in conc_conf else 1.6e-6,
+        f3_b3=conc_conf.get("f3_b3", 0.2) * multiplier if "f3_b3" in conc_conf else 0.2e-6,
+        lf_lb=conc_conf.get("lf_lb", 0.8) * multiplier if "lf_lb" in conc_conf else 0.8e-6
+    )
     
     # 4. Simulation
     typer.echo("Building complex network and solving thermodynamic equilibrium...")
@@ -106,16 +144,8 @@ def analyze(
     
     for t_id, t_seq in targets.items():
         typer.echo(f"Solving for target {t_id}...")
-        # Enumerate with the full primer multiplex but only one target
-        profile = ConcentrationProfile(
-            target=target_copies_to_molar(1000), 
-            fip_bip=1.6e-6, 
-            f3_b3=0.2e-6, 
-            lf_lb=0.8e-6
-        )
-        
         prob, strands, complexes, unfolding_penalties = enumerate_complexes(
-            primers, t_seq, backend, profile=profile, temp_celsius=temp_celsius
+            primers, t_seq, backend, profile=profile, temp_celsius=temp_celsius, mon_molar=mon_molar, buffer=buffer_conf
         )
         
         res = solve_dual(prob)
@@ -143,9 +173,9 @@ def analyze(
                 p1_name = "_".join(parts[:2]) if len(parts) >= 2 else parts[0]
                 if "homo" in c_name:
                     p_a_seq = next(p.sequence for p in primers if p.name == p1_name)
-                    res_homo = backend.calc_homodimer(p_a_seq, temp_celsius=temp_celsius)
+                    res_homo = backend.calc_homodimer(p_a_seq, temp_celsius=temp_celsius, **backend_kwargs)
                     struct, mfe = res_homo.structure, res_homo.dg_kcal
-                    is_amp, dg_3p = is_amplifiable_dimer(p_a_seq, p_a_seq, struct, mfe, BST_2_0, temp_celsius)
+                    is_amp, dg_3p = is_amplifiable_dimer(p_a_seq, p_a_seq, struct, mfe, enzyme, temp_celsius)
                     from labcraft.report.alignment import dotbracket_to_alignment
                     details = {
                         "seq_a": p_a_seq, "seq_b": p_a_seq, "structure": struct, 
@@ -157,9 +187,9 @@ def analyze(
                     try:
                         p_a_seq = next(p.sequence for p in primers if p.name == p1_name)
                         p_b_seq = next(p.sequence for p in primers if p.name == p2_name)
-                        res_hetero = backend.calc_heterodimer(p_a_seq, p_b_seq, temp_celsius=temp_celsius)
+                        res_hetero = backend.calc_heterodimer(p_a_seq, p_b_seq, temp_celsius=temp_celsius, **backend_kwargs)
                         struct, mfe = res_hetero.structure, res_hetero.dg_kcal
-                        is_amp, dg_3p = is_amplifiable_dimer(p_a_seq, p_b_seq, struct, mfe, BST_2_0, temp_celsius)
+                        is_amp, dg_3p = is_amplifiable_dimer(p_a_seq, p_b_seq, struct, mfe, enzyme, temp_celsius)
                         from labcraft.report.alignment import dotbracket_to_alignment
                         details = {
                             "seq_a": p_a_seq, "seq_b": p_b_seq, "structure": struct, 
@@ -199,9 +229,9 @@ def analyze(
                 interaction_matrix[p1.name] = {}
                 for p2 in primers:
                     if p1.name == p2.name:
-                        res = backend.calc_homodimer(p1.sequence, temp_celsius=temp_celsius)
+                        res = backend.calc_homodimer(p1.sequence, temp_celsius=temp_celsius, **backend_kwargs)
                     else:
-                        res = backend.calc_heterodimer(p1.sequence, p2.sequence, temp_celsius=temp_celsius)
+                        res = backend.calc_heterodimer(p1.sequence, p2.sequence, temp_celsius=temp_celsius, **backend_kwargs)
                     interaction_matrix[p1.name][p2.name] = res.dg_kcal
 
     # 5. Verdict
@@ -216,6 +246,11 @@ def analyze(
         "file_hash": file_hash,
         "max_residual": max_residual_global,
         "temperature": temp_celsius,
+        "buffer": buffer_conf if buffer_conf else "Reference conditions (1.0 M Na+, 0 mM Mg2+)",
+        "enzyme": enzyme.name,
+        "dimer_dg_threshold": enzyme.dimer_dg_threshold,
+        "concentrations_fip_bip": profile.get_concentration(PrimerRole.FIP),
+        "concentrations_target": profile.target,
         "interaction_matrix": interaction_matrix,
         "primer_names": [p.name for p in primers],
         "unfolding_penalties": all_unfolding_penalties
