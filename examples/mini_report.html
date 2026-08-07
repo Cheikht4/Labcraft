@@ -198,7 +198,8 @@
             background-color: var(--color-border);
             border: 1px solid var(--color-border);
             margin-bottom: 30px;
-            width: max-content; /* S'assure que la grille prend toute sa place sans zone vide */
+            max-width: 100%;
+            overflow-x: auto;
             padding: 1px;
         }
         .heatmap-cell {
@@ -224,9 +225,6 @@
             padding: 0 5px;
             text-align: right;
             white-space: nowrap;
-            display: flex;
-            align-items: center;
-            justify-content: flex-end;
         }
         
         /* Traçabilité */
@@ -244,15 +242,30 @@
 <body>
     <div class="container">
         <!-- En-tête / Verdict -->
-        <div class="verdict-banner OK">
-            <h1>Verdict Global : OK</h1>
-            <p><strong>Cause dominante globale :</strong> Equilibre thermodynamique favorable.</p>
+        <div class="verdict-banner FAILURE">
+            <h1>Verdict Global : FAILURE</h1>
+            <p><strong>Cause dominante globale :</strong> Échec critique sur une ou plusieurs cibles (voir détails).</p>
         </div>
 
         <!-- Amorces en difficulté par cible -->
         <h2>Diagnostic par Cible</h2>
         
-            <p>Toutes les cibles présentent une occupation favorable.</p>
+            
+            <div class="target-box">
+                <h3>Cible : TargetX</h3>
+                
+                <div class="issue-item">
+                    <strong>Amorce : F3_TargetX</strong> (Occupation: 0.0%)<br>
+                    Mécanisme dominant : Inaccessibilité du site cible pour F3_TargetX (barrière d'ouverture structurale ou thermodynamique défavorable).
+                </div>
+                
+                <div class="issue-item">
+                    <strong>Amorce : B3_TargetX</strong> (Occupation: 0.0%)<br>
+                    Mécanisme dominant : Inaccessibilité du site cible pour B3_TargetX (barrière d'ouverture structurale ou thermodynamique défavorable).
+                </div>
+                
+            </div>
+            
         
 
         <!-- Décomposition d'occupation -->
@@ -269,18 +282,175 @@
         </div>
         
         
+        <div class="fraction-row">
+            <div class="primer-name">F3_TargetX</div>
+            <div class="bar-container">
+                
+                <div class="bar-segment bar-free" style="width: 99.60472063164559%">99.6%</div>
+                
+                
+                
+            </div>
+        </div>
+        
+        <div class="fraction-row">
+            <div class="primer-name">B3_TargetX</div>
+            <div class="bar-container">
+                
+                <div class="bar-segment bar-free" style="width: 99.682996438362%">99.7%</div>
+                
+                
+                
+            </div>
+        </div>
+        
         
         <!-- Accessibilité Cible -->
         
+        <h2>Accessibilité Structurale des Cibles ($\Delta G_{\text{unfolding}}$)</h2>
+        <p style="font-size: 13px; color: var(--color-muted);">
+            Énergie requise pour ouvrir la structure secondaire de la cible au niveau du site de liaison. Une valeur > 0 indique une pénalité s'opposant à l'hybridation.
+        </p>
+        
+        <div class="target-box">
+            <h4>Cible : TargetX</h4>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Site d'Amorce</th>
+                        <th>$\Delta G_{\text{unfold}}$ (kcal/mol)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    
+                </tbody>
+            </table>
+        </div>
+        
+        
 
         <!-- Heatmap -->
+        
+        <h2>Matrice d'Interactions ($\Delta G$)</h2>
+        <p style="font-size: 13px; color: var(--color-muted);">
+            Énergie d'hybridation entre chaque paire d'amorces. Plus la couleur est foncée, plus l'interaction est forte (thermodynamiquement stable).
+        </p>
+        
+        
+        <div style="overflow-x: auto;">
+            <div class="heatmap-container" style="grid-template-columns: auto repeat(2, 30px);">
+                <!-- Coin vide -->
+                <div class="heatmap-cell" style="background-color: transparent;"></div>
+                
+                <!-- En-têtes colonnes -->
+                
+                <div class="heatmap-cell heatmap-header" title="F3_TargetX">F3_Tar..</div>
+                
+                <div class="heatmap-cell heatmap-header" title="B3_TargetX">B3_Tar..</div>
+                
+                
+                <!-- Lignes -->
+                
+                <div class="heatmap-cell heatmap-row-header" title="F3_TargetX">F3_TargetX</div>
+                
+                    
+                    <!-- Calcul simple d'opacité pour la heatmap (palette bleue: séquentielle accessible) -->
+                    <!-- Si dg > 0 (pas d'interaction), blanc. Sinon de 0 à -15 kcal/mol -->
+                    
+                    
+                        
+                        
+                    
+                    <div class="heatmap-cell" style="background-color: rgba(0, 114, 178, 0.3433333396911621); border: none;" title="F3_TargetX x F3_TargetX: -5.2 kcal/mol">
+                        
+                    </div>
+                
+                    
+                    <!-- Calcul simple d'opacité pour la heatmap (palette bleue: séquentielle accessible) -->
+                    <!-- Si dg > 0 (pas d'interaction), blanc. Sinon de 0 à -15 kcal/mol -->
+                    
+                    
+                        
+                        
+                    
+                    <div class="heatmap-cell" style="background-color: rgba(0, 114, 178, 0.4326666514078776); border: none;" title="F3_TargetX x B3_TargetX: -6.5 kcal/mol">
+                        
+                    </div>
+                
+                
+                <div class="heatmap-cell heatmap-row-header" title="B3_TargetX">B3_TargetX</div>
+                
+                    
+                    <!-- Calcul simple d'opacité pour la heatmap (palette bleue: séquentielle accessible) -->
+                    <!-- Si dg > 0 (pas d'interaction), blanc. Sinon de 0 à -15 kcal/mol -->
+                    
+                    
+                        
+                        
+                    
+                    <div class="heatmap-cell" style="background-color: rgba(0, 114, 178, 0.4326666514078776); border: none;" title="B3_TargetX x F3_TargetX: -6.5 kcal/mol">
+                        
+                    </div>
+                
+                    
+                    <!-- Calcul simple d'opacité pour la heatmap (palette bleue: séquentielle accessible) -->
+                    <!-- Si dg > 0 (pas d'interaction), blanc. Sinon de 0 à -15 kcal/mol -->
+                    
+                    
+                        
+                        
+                    
+                    <div class="heatmap-cell" style="background-color: rgba(0, 114, 178, 0.22666667302449545); border: none;" title="B3_TargetX x B3_TargetX: -3.4 kcal/mol">
+                        
+                    </div>
+                
+                
+            </div>
+        </div>
         
 
         <!-- Artefacts détaillés -->
         <h2>Fiches d'Artefacts Détaillées</h2>
         
         
-        <p><em>Aucun dimère amplifiable détecté.</em></p>
+        <h3>Dimères Amplifiables (3' Extensible) - CRITIQUE</h3>
+        
+        <div class="artefact-card artefact-amp">
+            <div class="artefact-header">
+                <h4>F3_TargetX_B3_TargetX</h4>
+                <strong style="color: var(--color-failure);">[CRITIQUE]</strong>
+            </div>
+            <p style="margin-top: 0; margin-bottom: 10px;">Dimère amplifiable (3' extensible)</p>
+            <div class="artefact-stats">
+                <div><strong>Concentration:</strong> 6.21e-10 M</div>
+                <div><strong>$\Delta G$ global:</strong> -6.49 kcal/mol</div>
+                <div><strong>$\Delta G$ (3'-end):</strong> -4.11 kcal/mol</div>
+            </div>
+            
+            <div class="alignment-block">5' GATCGATCGGCCTTAAAAA    3'
+           |||||||||||   
+3' --------CCGGAATTTTTTTT 5'</div>
+            
+        </div>
+        
+        <div class="artefact-card artefact-amp">
+            <div class="artefact-header">
+                <h4>B3_TargetX_homo</h4>
+                <strong style="color: var(--color-failure);">[CRITIQUE]</strong>
+            </div>
+            <p style="margin-top: 0; margin-bottom: 10px;">Dimère amplifiable (3' extensible)</p>
+            <div class="artefact-stats">
+                <div><strong>Concentration:</strong> 6.26e-12 M</div>
+                <div><strong>$\Delta G$ global:</strong> -3.40 kcal/mol</div>
+                <div><strong>$\Delta G$ (3'-end):</strong> -3.05 kcal/mol</div>
+            </div>
+            
+            <div class="alignment-block">5' TTTTTTTTAAGGCC           3'
+             ||||          
+3' ----------CCGGAATTTTTTTT 5'</div>
+            
+        </div>
+        
         
 
         
@@ -289,12 +459,12 @@
         <div class="footer">
             <div>
                 <strong>LabCraft</strong> v0.0.1<br>
-                Généré le : 2026-08-07 17:52:18 UTC
+                Généré le : 2026-08-07 16:51:05 UTC
             </div>
             <div style="text-align: right;">
                 Température : 65.0 °C<br>
-                Max Residual (Solveur) : 0.00e+00<br>
-                Empreinte d'entrée (SHA256) : <code>29a6a5bb...</code>
+                Max Residual (Solveur) : 8.31e-14<br>
+                Empreinte d'entrée (SHA256) : <code>d6acae4d...</code>
             </div>
         </div>
     </div>
