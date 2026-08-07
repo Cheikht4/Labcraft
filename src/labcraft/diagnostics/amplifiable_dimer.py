@@ -84,14 +84,14 @@ def is_amplifiable_dimer(
             return False, 0.0
             
         # 3. Calcul de l'énergie locale du 3'
-        # On extrait les 5 derniers nucléotides de l'amorce
+        # On extrait les 6 derniers nucléotides de l'amorce
         seq_primer = primer_a if is_primer_a else primer_b
-        sub_primer = seq_primer[-5:]
+        sub_primer = seq_primer[-6:]
         
         # On extrait la région correspondante sur le partenaire
-        # On cherche les index min et max du partenaire pour ces 5 bases
+        # On cherche les index min et max du partenaire pour ces 6 bases
         partner_indices = []
-        start_idx = (l_a - 5) if is_primer_a else (l_a + l_b - 5)
+        start_idx = (l_a - 6) if is_primer_a else (l_a + l_b - 6)
         end_idx = idx_3p
         
         for i in range(max(0 if is_primer_a else l_a, start_idx), end_idx + 1):
