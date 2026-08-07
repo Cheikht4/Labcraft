@@ -76,7 +76,7 @@ def main():
 
     # Résolution globale sur SynthA (avec tous les primers du multiplex)
     # On ajoute la cible A
-    prob_a, strands_a, complexes_a = enumerate_complexes(
+    prob_a, strands_a, complexes_a, _ = enumerate_complexes(
         primers, targets["SynthA"], backend, profile=profile, temp_celsius=65.0
     )
     res_a = solve_dual(prob_a)

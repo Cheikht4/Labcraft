@@ -53,7 +53,7 @@ def test_complex_enumeration_counts():
     
     # Énumération
     profile = ConcentrationProfile(target=1e-12, fip_bip=1.6e-6, f3_b3=0.2e-6, lf_lb=0.4e-6)
-    prob, strand_names, complex_names = enumerate_complexes(
+    prob, strand_names, complex_names, _ = enumerate_complexes(
         primers, target, backend, profile=profile, temp_celsius=65.0
     )
     
@@ -64,7 +64,7 @@ def test_complex_enumeration_counts():
     target_match = primers[0].binding_domain
     target = target_match + "ATGC" * 20
     
-    prob, strand_names, complex_names = enumerate_complexes(
+    prob, strand_names, complex_names, _ = enumerate_complexes(
         primers, target, backend, profile=profile, temp_celsius=65.0
     )
     
@@ -101,8 +101,8 @@ def test_target_trace_consistency():
     profile_no_target = ConcentrationProfile(target=1e-25, fip_bip=0, f3_b3=1e-6, lf_lb=0)
     profile_trace_target = ConcentrationProfile(target=target_copies_to_molar(1e5), fip_bip=0, f3_b3=1e-6, lf_lb=0) # 1e5 copies/µL
     
-    prob_no, _, _ = enumerate_complexes([p_clean], target, backend, profile_no_target)
-    prob_with, _, _ = enumerate_complexes([p_clean], target, backend, profile_trace_target)
+    prob_no, _, _, _ = enumerate_complexes([p_clean], target, backend, profile_no_target)
+    prob_with, _, _, _ = enumerate_complexes([p_clean], target, backend, profile_trace_target)
     
     res_no = solve_dual(prob_no)
     res_with = solve_dual(prob_with)
@@ -142,8 +142,8 @@ def test_strong_dimer_depletion():
     
     profile = ConcentrationProfile(target=target_copies_to_molar(1e5), fip_bip=0, f3_b3=1e-6, lf_lb=0)
     
-    prob_clean, _, _ = enumerate_complexes([p_clean], target_clean, backend, profile)
-    prob_dimer, _, _ = enumerate_complexes([p_dimer], target_dimer, backend, profile)
+    prob_clean, _, _, _ = enumerate_complexes([p_clean], target_clean, backend, profile)
+    prob_dimer, _, _, _ = enumerate_complexes([p_dimer], target_dimer, backend, profile)
     
     res_clean = solve_dual(prob_clean)
     res_dimer = solve_dual(prob_dimer)
