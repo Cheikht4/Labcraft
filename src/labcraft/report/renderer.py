@@ -33,7 +33,7 @@ def render_report(
         issues_by_target[issue.target_site].append(issue)
         
     # Séparation des dimères amplifiables et bloquants pour un affichage clair
-    amplifiable_dimers = [r for r in risks if r.severity == 10.0]
+    amplifiable_dimers = [r for r in risks if r.severity >= 10.0]
     blocking_dimers = [r for r in risks if r.severity < 10.0]
     
     return template.render(
