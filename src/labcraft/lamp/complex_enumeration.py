@@ -45,46 +45,47 @@ def enumerate_complexes(
     target_sites = []
     primer_to_site = {}
     
-    target_seq_upper = target_seq.upper()
-    target_rc = _revcomp(target_seq_upper)
-    
-    for p in primers:
-        regex = _iupac_to_regex(p.binding_domain)
-        # Chercher d'abord sur le brin +
-        match = re.search(regex, target_seq_upper)
-        strand = "+"
-        if not match:
-            # Chercher sur le brin - (donc dans target_rc, mais il faut remaper les indices)
-            match = re.search(regex, target_rc)
-            strand = "-"
-            
-        if match:
-            if strand == "+":
-                start, end = match.start(), match.end()
-            else:
-                # Si match sur le RC, l'indice 0 du RC est len - 1 du +.
-                # rc_start .. rc_end (exclusif) correspond à len - rc_end .. len - rc_start
-                start = len(target_seq) - match.end()
-                end = len(target_seq) - match.start()
+    if target_seq:
+        target_seq_upper = target_seq.upper()
+        target_rc = _revcomp(target_seq_upper)
+        
+        for p in primers:
+            regex = _iupac_to_regex(p.binding_domain)
+            # Chercher d'abord sur le brin +
+            match = re.search(regex, target_seq_upper)
+            strand = "+"
+            if not match:
+                # Chercher sur le brin - (donc dans target_rc, mais il faut remaper les indices)
+                match = re.search(regex, target_rc)
+                strand = "-"
                 
-            site_name = f"{p.name}_site"
-            target_sites.append({
-                "name": site_name,
-                "start": start,
-                "end": end,
-                "strand": strand
-            })
-            primer_to_site[p.name] = site_name
-        else:
-            warnings.warn(f"Le domaine de liaison de {p.name} n'est pas trouvé sur la cible.")
+            if match:
+                if strand == "+":
+                    start, end = match.start(), match.end()
+                else:
+                    # Si match sur le RC, l'indice 0 du RC est len - 1 du +.
+                    # rc_start .. rc_end (exclusif) correspond à len - rc_end .. len - rc_start
+                    start = len(target_seq) - match.end()
+                    end = len(target_seq) - match.start()
+                    
+                site_name = f"{p.name}_site"
+                target_sites.append({
+                    "name": site_name,
+                    "start": start,
+                    "end": end,
+                    "strand": strand
+                })
+                primer_to_site[p.name] = site_name
+            else:
+                warnings.warn(f"Le domaine de liaison de {p.name} n'est pas trouvé sur la cible.")
 
-    # Détection de chevauchement stérique (Avertissement)
-    for i, s1 in enumerate(target_sites):
-        for j, s2 in enumerate(target_sites):
-            if i < j and s1["strand"] == s2["strand"]:
-                overlap = max(0, min(s1["end"], s2["end"]) - max(s1["start"], s2["start"]))
-                if overlap > 0:
-                    warnings.warn(f"Compétition stérique : {s1['name']} et {s2['name']} se chevauchent de {overlap} bases.")
+        # Détection de chevauchement stérique (Avertissement)
+        for i, s1 in enumerate(target_sites):
+            for j, s2 in enumerate(target_sites):
+                if i < j and s1["strand"] == s2["strand"]:
+                    overlap = max(0, min(s1["end"], s2["end"]) - max(s1["start"], s2["start"]))
+                    if overlap > 0:
+                        warnings.warn(f"Compétition stérique : {s1['name']} et {s2['name']} se chevauchent de {overlap} bases.")
                     
     # Espèces de base = amorces + sites cibles
     n_primers = len(primers)
@@ -143,34 +144,35 @@ def enumerate_complexes(
     # --- 4. Complexes amorce-cible ---
     unfolding_penalties = {}
     
-    for p in primers:
-        site_name = primer_to_site.get(p.name)
-        if not site_name:
-            continue
+    if target_seq:
+        for p in primers:
+            site_name = primer_to_site.get(p.name)
+            if not site_name:
+                continue
+                
+            site_idx = n_primers + next(k for k, s in enumerate(target_sites) if s["name"] == site_name)
+            site_info = next(s for s in target_sites if s["name"] == site_name)
             
-        site_idx = n_primers + next(k for k, s in enumerate(target_sites) if s["name"] == site_name)
-        site_info = next(s for s in target_sites if s["name"] == site_name)
-        
-        # Le backend calcule l'hybridation sur le domaine de liaison SEUL
-        # On passe p.binding_domain et son reverse complement exact
-        res_hyb = backend.calc_duplex(p.binding_domain, _revcomp(p.binding_domain), temp_celsius=temp_celsius)
-        dg_hyb = res_hyb.dg_kcal
-        
-        # Le calcul de l'accessibilité
-        dg_unfold = calc_unfolding_penalty(
-            target_seq, site_info["start"], site_info["end"], 
-            temp_celsius=temp_celsius, mon_molar=mon_molar
-        )
-        unfolding_penalties[site_name] = dg_unfold
-        
-        # Couplage
-        dg_eff = dg_hyb + dg_unfold
-        
-        if dg_eff < 0:
-            stoich = [0] * n_strands
-            stoich[i] = 1
-            stoich[site_idx] = 1
-            complexes.append(ComplexInfo(f"{p.name}_on_{site_name}", stoich, dg_eff))
+            # Le backend calcule l'hybridation sur le domaine de liaison SEUL
+            # On passe p.binding_domain et son reverse complement exact
+            res_hyb = backend.calc_duplex(p.binding_domain, _revcomp(p.binding_domain), temp_celsius=temp_celsius)
+            dg_hyb = res_hyb.dg_kcal
+            
+            # Le calcul de l'accessibilité
+            dg_unfold = calc_unfolding_penalty(
+                target_seq, site_info["start"], site_info["end"], 
+                temp_celsius=temp_celsius, mon_molar=mon_molar
+            )
+            unfolding_penalties[site_name] = dg_unfold
+            
+            # Couplage
+            dg_eff = dg_hyb + dg_unfold
+            
+            if dg_eff < 0:
+                stoich = [0] * n_strands
+                stoich[i] = 1
+                stoich[site_idx] = 1
+                complexes.append(ComplexInfo(f"{p.name}_on_{site_name}", stoich, dg_eff))
 
     stoich_matrix = np.array([c.stoichiometry for c in complexes], dtype=np.float64)
     dg_vector = np.array([c.delta_g for c in complexes], dtype=np.float64)
