@@ -55,8 +55,10 @@ def generate_verdict(
                         cause = f"Séquestration de {primer_name} à {dom_frac_pct:.1f}% dans {f.dominant_complex}."
                 else:
                     # L'amorce est libre en solution, mais ne se lie pas à la cible.
-                    # C'est donc le coût d'ouverture de la cible (unfolding) qui bloque.
-                    cause = f"Inaccessibilité du site cible pour {primer_name} (barrière d'ouverture structurale ou thermodynamique défavorable)."
+                    if site_name not in occupations:
+                        cause = f"Site absent de la cible ou amorce non appariée."
+                    else:
+                        cause = f"Inaccessibilité du site cible pour {primer_name} (barrière d'ouverture structurale ou thermodynamique défavorable)."
                     
                 issues.append(PrimerIssue(
                     primer_name=primer_name,

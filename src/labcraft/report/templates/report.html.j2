@@ -198,8 +198,7 @@
             background-color: var(--color-border);
             border: 1px solid var(--color-border);
             margin-bottom: 30px;
-            max-width: 100%;
-            overflow-x: auto;
+            width: max-content; /* S'assure que la grille prend toute sa place sans zone vide */
             padding: 1px;
         }
         .heatmap-cell {
@@ -225,6 +224,9 @@
             padding: 0 5px;
             text-align: right;
             white-space: nowrap;
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
         }
         
         /* Traçabilité */
@@ -293,7 +295,7 @@
         
         <!-- Accessibilité Cible -->
         {% if metadata.unfolding_penalties %}
-        <h2>Accessibilité Structurale des Cibles ($\Delta G_{\text{unfolding}}$)</h2>
+        <h2>Accessibilité Structurale des Cibles (ΔG_unfolding)</h2>
         <p style="font-size: 13px; color: var(--color-muted);">
             Énergie requise pour ouvrir la structure secondaire de la cible au niveau du site de liaison. Une valeur > 0 indique une pénalité s'opposant à l'hybridation.
         </p>
@@ -304,7 +306,7 @@
                 <thead>
                     <tr>
                         <th>Site d'Amorce</th>
-                        <th>$\Delta G_{\text{unfold}}$ (kcal/mol)</th>
+                        <th>ΔG_unfold (kcal/mol)</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -324,7 +326,7 @@
 
         <!-- Heatmap -->
         {% if metadata.interaction_matrix %}
-        <h2>Matrice d'Interactions ($\Delta G$)</h2>
+        <h2>Matrice d'Interactions (ΔG)</h2>
         <p style="font-size: 13px; color: var(--color-muted);">
             Énergie d'hybridation entre chaque paire d'amorces. Plus la couleur est foncée, plus l'interaction est forte (thermodynamiquement stable).
         </p>
@@ -375,8 +377,8 @@
             <p style="margin-top: 0; margin-bottom: 10px;">{{ risk.description }}</p>
             <div class="artefact-stats">
                 <div><strong>Concentration:</strong> {{ "%.2e"|format(risk.concentration) }} M</div>
-                <div><strong>$\Delta G$ global:</strong> {{ "%.2f"|format(risk.delta_g) }} kcal/mol</div>
-                <div><strong>$\Delta G$ (3'-end):</strong> {{ "%.2f"|format(risk.delta_g_3p) }} kcal/mol</div>
+                <div><strong>ΔG global:</strong> {{ "%.2f"|format(risk.delta_g) }} kcal/mol</div>
+                <div><strong>ΔG (3'-end):</strong> {{ "%.2f"|format(risk.delta_g_3p) }} kcal/mol</div>
             </div>
             {% if risk.alignment_ascii %}
             <div class="alignment-block">{{ risk.alignment_ascii }}</div>
@@ -398,7 +400,7 @@
             <p style="margin-top: 0; margin-bottom: 10px;">{{ risk.description }}</p>
             <div class="artefact-stats">
                 <div><strong>Concentration:</strong> {{ "%.2e"|format(risk.concentration) }} M</div>
-                <div><strong>$\Delta G$ global:</strong> {{ "%.2f"|format(risk.delta_g) }} kcal/mol</div>
+                <div><strong>ΔG global:</strong> {{ "%.2f"|format(risk.delta_g) }} kcal/mol</div>
             </div>
             {% if risk.alignment_ascii %}
             <div class="alignment-block">{{ risk.alignment_ascii }}</div>

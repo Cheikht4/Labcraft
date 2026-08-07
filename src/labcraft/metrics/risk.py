@@ -35,8 +35,12 @@ def evaluate_risks(
         severity = 0.0
         desc = ""
         
+        details = dimer_details[i] if dimer_details and i < len(dimer_details) else {}
+
         if is_amp:
-            severity = 10.0 # Dimère amplifiable = risque majeur
+            # Sévérité pondérée par la marge d'amplifiabilité (ΔG 3' end) et la concentration
+            margin = max(0.0, - (details.get("delta_g_3p", 0.0) + 3.0)) # ex: dg_3p=-5 -> margin = 2
+            severity = 10.0 + margin
             desc = "Dimère amplifiable (3' extensible)"
             if is_warm_start:
                 # La WarmStart ne change pas la thermodynamique à 65°C, 
@@ -48,8 +52,6 @@ def evaluate_risks(
             desc = "Dimère bloquant (non extensible)"
             if "homo" in c_name:
                 desc = "Homodimère bloquant"
-                
-        details = dimer_details[i] if dimer_details and i < len(dimer_details) else {}
         
         if is_amp or conc > 1e-9:
             risks.append(RiskItem(
