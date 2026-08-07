@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rapport LabCraft - Diagnostic Thermodynamique</title>
+    <style>
+        :root {
+            --color-bg: #f8f9fa;
+            --color-surface: #ffffff;
+            --color-text: #212529;
+            --color-muted: #6c757d;
+            --color-border: #dee2e6;
+            
+            /* Palette Colorblind-friendly (Okabe-Ito inspired) */
+            --color-ok: #009E73;
+            --color-warning: #F0E442; /* Yellow */
+            --color-warning-text: #8a7a00;
+            --color-failure: #D55E00; /* Vermillion */
+            
+            /* Fractions */
+            --color-free: #56B4E9; /* Sky Blue */
+            --color-bound: #009E73; /* Bluish Green */
+            --color-homo: #E69F00; /* Orange */
+            --color-hetero-intra: #CC79A7; /* Reddish Purple */
+            --color-hetero-inter: #D55E00; /* Vermillion */
+            
+            /* Artefacts */
+            --color-amp-bg: #fff5f5;
+            --color-amp-border: #D55E00;
+            --color-block-bg: #f8f9fa;
+            --color-block-border: #adb5bd;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--color-bg);
+            color: var(--color-text);
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            background-color: var(--color-surface);
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+        }
+        
+        h1, h2, h3 { margin-top: 0; }
+        
+        /* Verdict Global */
+        .verdict-banner {
+            padding: 20px;
+            border-radius: 6px;
+            margin-bottom: 30px;
+            color: #fff;
+        }
+        .verdict-banner.OK { background-color: var(--color-ok); }
+        .verdict-banner.WARNING { background-color: var(--color-warning); color: var(--color-warning-text); }
+        .verdict-banner.FAILURE { background-color: var(--color-failure); }
+        
+        /* Cibles et Amorces en difficulté */
+        .target-box {
+            border: 1px solid var(--color-border);
+            border-radius: 6px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        .issue-item {
+            margin-bottom: 10px;
+            padding: 10px;
+            background: #fff;
+            border-left: 4px solid var(--color-failure);
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        
+        /* Barres de fractions */
+        .fraction-row {
+            display: flex;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        .primer-name {
+            width: 100px;
+            font-weight: bold;
+        }
+        .bar-container {
+            flex-grow: 1;
+            height: 24px;
+            background-color: #e9ecef;
+            display: flex;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .bar-segment {
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 11px;
+            font-weight: bold;
+            overflow: hidden;
+            white-space: nowrap;
+        }
+        .bar-free { background-color: var(--color-free); }
+        .bar-bound { background-color: var(--color-bound); }
+        .bar-homo { background-color: var(--color-homo); }
+        .bar-intra { background-color: var(--color-hetero-intra); }
+        .bar-inter { background-color: var(--color-hetero-inter); }
+        
+        .legend {
+            display: flex;
+            gap: 15px;
+            font-size: 12px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .legend-color {
+            width: 12px; height: 12px; border-radius: 2px;
+        }
+        
+        /* Tableaux d'artefacts */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 20px;
+            font-size: 14px;
+        }
+        th, td {
+            text-align: left;
+            padding: 10px;
+            border-bottom: 1px solid var(--color-border);
+        }
+        th { background-color: #f1f3f5; }
+        
+        .artefact-amp {
+            background-color: var(--color-amp-bg);
+            border-left: 4px solid var(--color-amp-border);
+        }
+        .artefact-block {
+            background-color: var(--color-block-bg);
+            border-left: 4px solid var(--color-block-border);
+        }
+        
+        /* Traçabilité */
+        .footer {
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 1px solid var(--color-border);
+            font-size: 12px;
+            color: var(--color-muted);
+            display: flex;
+            justify-content: space-between;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- En-tête / Verdict -->
+        <div class="verdict-banner {{ verdict.status }}">
+            <h1>Verdict Global : {{ verdict.status }}</h1>
+            <p><strong>Cause dominante globale :</strong> {{ verdict.global_cause }}</p>
+        </div>
+
+        <!-- Amorces en difficulté par cible -->
+        <h2>Diagnostic par Cible</h2>
+        {% if not issues_by_target %}
+            <p>Toutes les cibles présentent une occupation favorable.</p>
+        {% else %}
+            {% for target, issues in issues_by_target.items() %}
+            <div class="target-box">
+                <h3>Cible : {{ target }}</h3>
+                {% for issue in issues %}
+                <div class="issue-item">
+                    <strong>Amorce : {{ issue.primer_name }}</strong> (Occupation: {{ issue.occupation|pct }})<br>
+                    Mécanisme dominant : {{ issue.cause }}
+                </div>
+                {% endfor %}
+            </div>
+            {% endfor %}
+        {% endif %}
+
+        <!-- Décomposition d'occupation -->
+        <h2>Décomposition d'Occupation (Fractions)</h2>
+        <div class="legend">
+            <div class="legend-item"><div class="legend-color bar-bound"></div> Cible</div>
+            <div class="legend-item"><div class="legend-color bar-free"></div> Libre</div>
+            <div class="legend-item"><div class="legend-color bar-homo"></div> Homodimère</div>
+            <div class="legend-item"><div class="legend-color bar-intra"></div> Hétérodimère (Intra-panel)</div>
+            <div class="legend-item"><div class="legend-color bar-inter"></div> Hybridation croisée (Inter-panel)</div>
+        </div>
+        
+        {% for primer, f in fractions.items() %}
+        <div class="fraction-row">
+            <div class="primer-name">{{ primer }}</div>
+            <div class="bar-container">
+                {% if f.target_bound > 0.01 %}<div class="bar-segment bar-bound" style="width: {{ f.target_bound * 100 }}%">{{ f.target_bound|pct }}</div>{% endif %}
+                {% if f.free > 0.01 %}<div class="bar-segment bar-free" style="width: {{ f.free * 100 }}%">{{ f.free|pct }}</div>{% endif %}
+                {% if f.homodimer > 0.01 %}<div class="bar-segment bar-homo" style="width: {{ f.homodimer * 100 }}%">{{ f.homodimer|pct }}</div>{% endif %}
+                {% if f.heterodimer_intra > 0.01 %}<div class="bar-segment bar-intra" style="width: {{ f.heterodimer_intra * 100 }}%">{{ f.heterodimer_intra|pct }}</div>{% endif %}
+                {% if f.heterodimer_inter > 0.01 %}<div class="bar-segment bar-inter" style="width: {{ f.heterodimer_inter * 100 }}%">{{ f.heterodimer_inter|pct }}</div>{% endif %}
+            </div>
+        </div>
+        {% endfor %}
+
+        <!-- Artefacts -->
+        <h2>Fiches d'Artefacts</h2>
+        
+        {% if amplifiable_dimers %}
+        <h3>Dimères Amplifiables (3' Extensible) - CRITIQUE</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Complexe</th>
+                    <th>Concentration (M)</th>
+                    <th>Description</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for risk in amplifiable_dimers %}
+                <tr class="artefact-amp">
+                    <td><strong>{{ risk.complex_name }}</strong></td>
+                    <td>{{ "%.2e"|format(risk.concentration) }}</td>
+                    <td>{{ risk.description }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+
+        {% if blocking_dimers %}
+        <h3>Dimères Bloquants Majeurs (> 1 nM)</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Complexe</th>
+                    <th>Concentration (M)</th>
+                    <th>Description</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for risk in blocking_dimers %}
+                <tr class="artefact-block">
+                    <td><strong>{{ risk.complex_name }}</strong></td>
+                    <td>{{ "%.2e"|format(risk.concentration) }}</td>
+                    <td>{{ risk.description }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+
+        <!-- Pied de page / Traçabilité -->
+        <div class="footer">
+            <div>
+                <strong>LabCraft</strong> v{{ metadata.version }}<br>
+                Généré le : {{ metadata.timestamp }}
+            </div>
+            <div style="text-align: right;">
+                Température : {{ metadata.temperature }} °C<br>
+                Max Residual (Solveur) : {{ "%.2e"|format(metadata.max_residual) }}<br>
+                Empreinte d'entrée (SHA256) : <code>{{ metadata.file_hash[:8] }}...</code>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

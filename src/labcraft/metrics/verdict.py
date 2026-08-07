@@ -2,54 +2,90 @@ from dataclasses import dataclass
 from typing import List, Dict
 from labcraft.metrics.fractions import PrimerFractions
 from labcraft.metrics.risk import RiskItem
-from labcraft.metrics.balance import calculate_balance_index, find_limiting_primer
+
+@dataclass
+class PrimerIssue:
+    primer_name: str
+    target_site: str
+    occupation: float
+    cause: str
+    is_critical: bool
 
 @dataclass
 class PanelVerdict:
     status: str # "OK", "WARNING", "FAILURE"
-    dominant_cause: str
-    balance_index: float
-    limiting_primer: str
+    issues: List[PrimerIssue]
+    global_cause: str
 
 def generate_verdict(
     fractions: Dict[str, PrimerFractions], 
-    risks: List[RiskItem],
-    target_concentration_molar: float = 1e-15
+    target_occupations: Dict[str, Dict[str, float]],
+    risks: List[RiskItem]
 ) -> PanelVerdict:
     """
-    Génère le verdict global d'un panel sur une cible donnée.
+    Évalue le panel et identifie toutes les amorces en difficulté
+    en nommant le mécanisme dominant réel pour chacune.
     """
-    balance = calculate_balance_index(fractions)
-    lim_primer, lim_bound = find_limiting_primer(fractions)
+    issues = []
     
-    status = "OK"
-    cause = "Equilibre thermodynamique favorable."
-    
-    # 1. Vérification de l'accessibilité de la cible (Si un primer lié à la cible a une occupation < 1%)
-    # lim_bound est la fraction de l'amorce limitante liée à la cible.
-    # Mais attention : l'occupation de la cible est T_bound / T_total.
-    # T_bound / T_total = lim_bound * P_total / T_total.
-    # Pour faire simple : on va utiliser les fractions.
-    # Si la fraction liée productive d'une amorce clé est excessivement faible (ex: < 1e-6)
-    if lim_bound < 1e-6:
-        status = "FAILURE"
-        cause = f"Échec d'accessibilité ou hybridation impossible : {lim_primer} ne peut pas se lier à la cible."
-        return PanelVerdict(status, cause, balance, lim_primer)
-        
-    # 2. Vérification des risques d'artefacts
-    if risks:
-        top_risk = risks[0]
-        if top_risk.severity == 10.0:
-            status = "FAILURE"
-            cause = f"Échec probable : Dimère amplifiable massif détecté ({top_risk.complex_name})."
-        elif top_risk.severity >= 1.0 and top_risk.concentration > 1e-7:
-            if status != "FAILURE":
-                status = "WARNING"
-                cause = f"Risque de perte d'efficacité : compétition par hybridation croisée ou homodimère ({top_risk.complex_name})."
+    for target_id, occupations in target_occupations.items():
+        for primer_name, f in fractions.items():
+            site_name = f"{primer_name}_site"
+            occ = occupations.get(site_name, 0.0)
+            
+            # Si le primer est censé cibler cette cible (ex: se termine par _A pour SynthA)
+            # ou s'il est physiquement en difficulté
+            if occ < 0.1: # Moins de 10% d'occupation = amorce en difficulté
+                # Filtrons pour ne signaler que les amorces qui SONT du panel de la cible
+                # (On suppose ici que F3_A cible SynthA, etc.)
+                target_suffix = target_id.replace("Synth", "")
+                if not primer_name.endswith(f"_{target_suffix}"):
+                    continue
                 
-    # 3. Déséquilibre du panel
-    if status == "OK" and balance > 100.0:
+                is_crit = occ < 0.01
+                
+                # Déterminer la cause dominante
+                # Si l'amorce est séquestrée (moins de 10% de forme libre productive potentielle)
+                if f.free < 0.1:
+                    # La cause est la séquestration. Quel est le type ?
+                    dom_frac_pct = f.dominant_fraction * 100
+                    if f.heterodimer_inter > f.homodimer and f.heterodimer_inter > f.heterodimer_intra:
+                        cause = f"Hybridation croisée inter-jeux séquestrant {primer_name} à {dom_frac_pct:.1f}% dans {f.dominant_complex}."
+                    else:
+                        cause = f"Séquestration de {primer_name} à {dom_frac_pct:.1f}% dans {f.dominant_complex}."
+                else:
+                    # L'amorce est libre en solution, mais ne se lie pas à la cible.
+                    # C'est donc le coût d'ouverture de la cible (unfolding) qui bloque.
+                    cause = f"Inaccessibilité du site cible pour {primer_name} (barrière d'ouverture structurale ou thermodynamique défavorable)."
+                    
+                issues.append(PrimerIssue(
+                    primer_name=primer_name,
+                    target_site=target_id,
+                    occupation=occ,
+                    cause=cause,
+                    is_critical=is_crit
+                ))
+            
+    # Détermination du statut global
+    status = "OK"
+    global_cause = "Equilibre thermodynamique favorable."
+    
+    if any(issue.is_critical for issue in issues):
+        status = "FAILURE"
+        global_cause = "Échec critique sur une ou plusieurs cibles (voir détails)."
+    elif issues:
         status = "WARNING"
-        cause = f"Déséquilibre thermodynamique sévère (Indice {balance:.1f})."
+        global_cause = "Occupation sous-optimale sur certaines cibles."
         
-    return PanelVerdict(status, cause, balance, lim_primer)
+    # Surcharge du verdict si on a des dimères amplifiables massifs
+    has_amplifiable = False
+    for r in risks:
+        if r.severity == 10.0 and r.concentration > 1e-9:
+            has_amplifiable = True
+            break
+            
+    if has_amplifiable:
+        status = "FAILURE"
+        global_cause = "Échec probable : Présence de dimères amplifiables massifs."
+        
+    return PanelVerdict(status, issues, global_cause)
