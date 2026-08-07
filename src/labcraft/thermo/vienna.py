@@ -17,6 +17,19 @@ except ImportError as err:
     _VIENNA_IMPORT_ERROR = err
 
 _VIENNA_LOCK = threading.Lock()
+_vienna_local = threading.local()
+
+def _get_depth() -> int:
+    if not hasattr(_vienna_local, 'depth'):
+        _vienna_local.depth = 0
+    return _vienna_local.depth
+
+def _inc_depth():
+    _vienna_local.depth = _get_depth() + 1
+
+def _dec_depth():
+    _vienna_local.depth = _get_depth() - 1
+
 
 
 def _ensure_vienna():
@@ -42,7 +55,17 @@ def dna_params(temp_celsius: float = 65.0, mon_molar: float | None = None):
         mon_molar: Concentration totale en cations monovalents (Na+ + K+ + Tris/2).
     """
     _ensure_vienna()
+    
+    if _get_depth() > 0:
+        _inc_depth()
+        try:
+            yield
+        finally:
+            _dec_depth()
+        return
+        
     with _VIENNA_LOCK:
+        _inc_depth()
         # Snapshot
         saved_temp = RNA.cvar.temperature
         saved_salt = RNA.cvar.salt if hasattr(RNA.cvar, 'salt') else None
@@ -55,6 +78,7 @@ def dna_params(temp_celsius: float = 65.0, mon_molar: float | None = None):
             RNA.params_load_DNA_Mathews2004()
             yield
         finally:
+            _dec_depth()
             # Restauration
             RNA.cvar.temperature = saved_temp
             if saved_salt is not None:
@@ -66,7 +90,17 @@ def dna_params(temp_celsius: float = 65.0, mon_molar: float | None = None):
 def rna_params(temp_celsius: float = 37.0, mon_molar: float | None = None):
     """Context manager pour charger les paramètres ARN par défaut."""
     _ensure_vienna()
+    
+    if _get_depth() > 0:
+        _inc_depth()
+        try:
+            yield
+        finally:
+            _dec_depth()
+        return
+        
     with _VIENNA_LOCK:
+        _inc_depth()
         saved_temp = RNA.cvar.temperature
         saved_salt = RNA.cvar.salt if hasattr(RNA.cvar, 'salt') else None
         
@@ -78,6 +112,7 @@ def rna_params(temp_celsius: float = 37.0, mon_molar: float | None = None):
             RNA.params_load_RNA_Turner2004()
             yield
         finally:
+            _dec_depth()
             RNA.cvar.temperature = saved_temp
             if saved_salt is not None:
                 RNA.cvar.salt = saved_salt

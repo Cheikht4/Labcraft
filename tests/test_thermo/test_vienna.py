@@ -65,3 +65,28 @@ def test_vienna_state_leak_deliberate_failure():
     
     # Restauration propre pour les autres tests
     RNA.params_load_RNA_Turner2004()
+
+
+@pytest.mark.skipif(not HAS_VIENNA, reason="ViennaRNA non installé")
+def test_vienna_dna_params_reentrant():
+    """Test anti-regression pour le deadlock de dna_params imbriqué."""
+    import threading
+    
+    result = []
+    
+    def worker():
+        try:
+            with dna_params(63.0):
+                # Premier appel (depth 1)
+                with dna_params(63.0):
+                    # Deuxième appel imbriqué (depth 2)
+                    result.append("success")
+        except Exception as e:
+            result.append(str(e))
+            
+    t = threading.Thread(target=worker)
+    t.start()
+    t.join(timeout=2.0)
+    
+    assert not t.is_alive(), "Deadlock détecté ! Le thread est bloqué."
+    assert result == ["success"], f"Erreur pendant l'exécution: {result}"

@@ -30,31 +30,30 @@ def run_analysis(serotype, primers, skip_flp=False):
         
     amplifiable_dimers = []
     
-    with dna_params(63.0):
-        for i in range(len(primers)):
-            for j in range(i, len(primers)):
-                p1 = primers[i]
-                p2 = primers[j]
-                seq1 = p1['sequence']
-                seq2 = p2['sequence']
-                
-                backend = ViennaRNABackend()
-                
-                is_amp, min_dg_3p, details = evaluate_pair_amplifiable(
-                    seq1, seq2, backend, BST, temp_celsius=63.0
-                )
-                
-                if is_amp:
-                    amplifiable_dimers.append({
-                        'primer1': p1['name'],
-                        'primer2': p2['name'],
-                        'seq1': details['seq_a'],
-                        'seq2': details['seq_b'],
-                        'structure': details['structure'],
-                        'mfe': details['delta_g'],
-                        'dg_3p': min_dg_3p,
-                        'concentration': max(float(p1['conc_uM']), float(p2['conc_uM'])) * 1e-6
-                    })
+    for i in range(len(primers)):
+        for j in range(i, len(primers)):
+            p1 = primers[i]
+            p2 = primers[j]
+            seq1 = p1['sequence']
+            seq2 = p2['sequence']
+            
+            backend = ViennaRNABackend()
+            
+            is_amp, min_dg_3p, details = evaluate_pair_amplifiable(
+                seq1, seq2, backend, BST, temp_celsius=63.0
+            )
+            
+            if is_amp:
+                amplifiable_dimers.append({
+                    'primer1': p1['name'],
+                    'primer2': p2['name'],
+                    'seq1': details['seq_a'],
+                    'seq2': details['seq_b'],
+                    'structure': details['structure'],
+                    'mfe': details['delta_g'],
+                    'dg_3p': min_dg_3p,
+                    'concentration': max(float(p1['conc_uM']), float(p2['conc_uM'])) * 1e-6
+                })
                     
     # Sort by dg_3p (most negative first)
     amplifiable_dimers.sort(key=lambda x: x['dg_3p'])
