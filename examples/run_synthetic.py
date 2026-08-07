@@ -12,6 +12,12 @@ from labcraft.lamp.stoichiometry import ConcentrationProfile, target_copies_to_m
 from labcraft.lamp.complex_enumeration import enumerate_complexes
 from labcraft.thermo.backends.vienna import ViennaRNABackend
 from labcraft.solver.dual import solve_dual
+from labcraft.metrics.fractions import compute_fractions
+from labcraft.diagnostics.enzyme import BST_2_0
+from labcraft.diagnostics.amplifiable_dimer import is_amplifiable_dimer
+from labcraft.metrics.risk import evaluate_risks
+from labcraft.metrics.verdict import generate_verdict
+import numpy as np
 
 def read_fasta(filepath):
     with open(filepath, 'r') as f:
@@ -84,40 +90,63 @@ def main():
     occupation_a = (f3a_site_tot - f3a_site_free) / f3a_site_tot
     print(f"Occupation du site cible par F3_A : {occupation_a*100:.4f}%")
     if occupation_a < 0.1:
-        print("-> Artefact confirmé : le site est enfoui, F3_A ne peut pas s'hybrider de manière compétitive.")
-    print("")
-
-    # Affichons les complexes majeurs (artefacts dimériques)
-    print("--- 2. DIMÈRES ET HYBRIDATIONS CROISÉES MAJEURES ---")
-    # Trier par concentration
-    complex_concs = []
+        print("-> Artefact confirmé : le site F3_A est enfoui dans la cible, empêchant la liaison.")
+    
+    print("\n--- 2. DIAGNOSTIC DES ARTEFACTS (DIMÈRES) ---")
+    R = 0.00198720425864083
+    RT = R * (273.15 + 65.0)
+    u = np.log(res_a.free_concentrations)
+    
+    amplifiable_flags = []
+    concs = []
+    
     for i, name in enumerate(complexes_a):
         stoich = prob_a.stoichiometry[i]
-        # concentration = exp(-dg/RT) * prod(free_i ** stoich_i)
-        # Mais le solveur nous donne-t-il les concentrations des complexes ?
-        # x_i = exp(-dg/RT + stoich \cdot u)
-        import numpy as np
-        R = 0.00198720425864083
-        RT = R * (273.15 + 65.0)
-        u = np.log(res_a.free_concentrations)
         conc = np.exp(-prob_a.delta_g[i] / RT + np.dot(stoich, u))
-        if "_free" not in name and conc > 1e-12: # Ne pas afficher les monomères libres
-            complex_concs.append((name, prob_a.delta_g[i], conc))
-
-    complex_concs.sort(key=lambda x: x[2], reverse=True)
-    for name, dg, conc in complex_concs[:5]:
-        print(f"Complexe : {name:20s} | ΔG° : {dg:6.2f} kcal/mol | Conc : {conc:.2e} M")
-    
-    # Vérifier la présence de FIP_A_BIP_B (cross-hybridization)
-    fip_a_bip_b = any(n == "FIP_A_BIP_B" or n == "BIP_B_FIP_A" for n, dg, conc in complex_concs)
-    if fip_a_bip_b:
-        print("-> Artefact confirmé : forte hybridation croisée entre FIP_A et BIP_B.")
+        concs.append(conc)
         
-    # Vérifier la présence de FIP_B_homo ou FIP_B_BIP_B
-    fip_b_homo = any("FIP_B_homo" in n for n, dg, conc in complex_concs)
-    fip_b_bip_b = any((n == "FIP_B_BIP_B" or n == "BIP_B_FIP_B") for n, dg, conc in complex_concs)
-    if fip_b_homo or fip_b_bip_b:
-        print("-> Artefact confirmé : dimères impliquant FIP_B formés à l'équilibre.")
+        # Test amplifiabilité
+        is_amp = False
+        if "_on_" not in name and "_free" not in name:
+            # C'est un dimère.
+            # Pour l'instant, on lance un avertissement simple (simplification d'usage pour la démo)
+            # Dans le vrai cas, on devrait récupérer la structure exacte. 
+            # Comme enumerate_complexes ne renvoie pas la structure, on refait un cofold rapide.
+            parts = name.split('_')
+            # Extraire les noms des amorces
+            p1_name = "_".join(parts[:2]) if len(parts) >= 2 else parts[0]
+            if "homo" in name:
+                p_a_seq = next(p.sequence for p in primers if p.name == p1_name)
+                struct, mfe = backend.calc_homodimer(p_a_seq, temp_celsius=65.0).structure, backend.calc_homodimer(p_a_seq, temp_celsius=65.0).dg_kcal
+                is_amp, _ = is_amplifiable_dimer(p_a_seq, p_a_seq, struct, mfe, BST_2_0)
+            elif len(parts) >= 4: # Heterodimer ex: FIP_A_BIP_B
+                p2_name = "_".join(parts[2:4])
+                try:
+                    p_a_seq = next(p.sequence for p in primers if p.name == p1_name)
+                    p_b_seq = next(p.sequence for p in primers if p.name == p2_name)
+                    struct, mfe = backend.calc_heterodimer(p_a_seq, p_b_seq, temp_celsius=65.0).structure, backend.calc_heterodimer(p_a_seq, p_b_seq, temp_celsius=65.0).dg_kcal
+                    is_amp, _ = is_amplifiable_dimer(p_a_seq, p_b_seq, struct, mfe, BST_2_0)
+                except StopIteration:
+                    pass
+        
+        amplifiable_flags.append(is_amp)
+        
+    risks = evaluate_risks(complexes_a, concs, amplifiable_flags, is_warm_start=False)
+    for risk in risks[:5]:
+        print(f"Complexe : {risk.complex_name:20s} | Conc : {risk.concentration:.2e} M | Verdict : {risk.description}")
+
+    print("\n--- 3. MÉTRIQUES ET DÉCOMPOSITION (LOI DE CONSERVATION) ---")
+    fractions = compute_fractions(strands_a, complexes_a, prob_a.stoichiometry, res_a.free_concentrations, prob_a.delta_g, 65.0)
+    
+    for p_name in ["F3_A", "FIP_A", "BIP_A", "FIP_B", "BIP_B"]:
+        if p_name in fractions:
+            f = fractions[p_name]
+            print(f"Amorce {p_name:6s} | Libre: {f.free*100:5.2f}% | Dimères: {(f.homodimer+f.heterodimer)*100:5.2f}% | Somme: {f.sum*100:6.2f}%")
+            
+    verdict = generate_verdict(fractions, risks)
+    print("\n--- 4. VERDICT DU PANEL ---")
+    print(f"Statut : {verdict.status}")
+    print(f"Cause  : {verdict.dominant_cause}")
 
 if __name__ == "__main__":
     main()
