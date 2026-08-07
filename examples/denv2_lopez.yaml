@@ -1,0 +1,38 @@
+experiment:
+  name: "DENV2 LAMP 6-plex (Lopez-Jimena 2018)"
+  chemistry: LAMP
+  temperature_C: 65.0
+  enzyme: bst2.0
+  buffer:
+    na_mM: 50.0
+    k_mM: 10.0
+    tris_mM: 20.0
+    mg_mM: 6.0
+    dntp_mM: 1.4
+
+targets:
+  - id: DENV2
+    sequence_file: examples/synth_target_b.fasta  # Note: Replace with true genome for real analysis
+    copies_per_uL: 1000.0
+
+primer_sets:
+  - target: DENV2
+    primers:
+      F3:
+        seq: AGACTGTTGGTGCAACTCCACGT
+        conc_uM: 0.05
+      B3:
+        seq: GGCAGGCTGTTTGGCTTCCGT
+        conc_uM: 0.05
+      FIP:
+        seq: GCCATTATGGTGAAGCCTGGATGTAAAAGATCAGTGGCACTCGTTCCAC
+        conc_uM: 0.40
+      BIP:
+        seq: ACACCATAGGGACGACACATTTCCATGCCATCGTCGTCACACAGCT
+        conc_uM: 0.40
+      LF:
+        seq: CGCGTCTCCAGTCCCATTCCC
+        conc_uM: 0.20
+      LB:
+        seq: AGGGGTTTCAGGAGGAAGTTGGGT
+        conc_uM: 0.20

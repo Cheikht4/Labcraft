@@ -65,10 +65,20 @@ BST_3_0 = PolymeraseProfile(
 ENZYME_REGISTRY = {
     "bst": BST,
     "bst2.0": BST_2_0,
+    "bst 2.0": BST_2_0,
+    "bst2.0ws": BST_2_0_WARM_START,
+    "bst2.0warmstart": BST_2_0_WARM_START,
     "bst2.0_ws": BST_2_0_WARM_START,
+    "bst2.0_warmstart": BST_2_0_WARM_START,
+    "warmstart": BST_2_0_WARM_START,
     "bst3.0": BST_3_0,
+    "bst 3.0": BST_3_0,
     "taq": TAQ
 }
+
+def normalize_enzyme_name(name: str) -> str:
+    # Retire les espaces, tirets et majuscules
+    return name.lower().replace(" ", "").replace("-", "")
 
 def get_enzyme(spec) -> PolymeraseProfile:
     """
@@ -76,7 +86,11 @@ def get_enzyme(spec) -> PolymeraseProfile:
     Permet de surcharger certains paramètres (dimer_dg_threshold, three_prime_window).
     """
     if isinstance(spec, str):
-        name_key = spec.lower()
+        name_key = normalize_enzyme_name(spec)
+        # Fallback pour certains alias avec underscores (si on n'a pas tout remplacé)
+        if name_key not in ENZYME_REGISTRY and spec.lower() in ENZYME_REGISTRY:
+            name_key = spec.lower()
+            
         if name_key not in ENZYME_REGISTRY:
             raise ValueError(f"Enzyme inconnue: {spec}. Disponibles: {list(ENZYME_REGISTRY.keys())}")
         return ENZYME_REGISTRY[name_key]
@@ -85,7 +99,10 @@ def get_enzyme(spec) -> PolymeraseProfile:
         if "name" not in spec:
             raise ValueError("La spécification de l'enzyme doit contenir une clé 'name'.")
         
-        name_key = spec["name"].lower()
+        name_key = normalize_enzyme_name(spec["name"])
+        if name_key not in ENZYME_REGISTRY and spec["name"].lower() in ENZYME_REGISTRY:
+            name_key = spec["name"].lower()
+            
         if name_key not in ENZYME_REGISTRY:
             raise ValueError(f"Enzyme inconnue: {spec['name']}. Disponibles: {list(ENZYME_REGISTRY.keys())}")
             

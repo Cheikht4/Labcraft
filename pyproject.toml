@@ -53,10 +53,10 @@ dev = [
 labcraft = "labcraft.cli.main:app"
 
 [project.urls]
-Homepage = "https://github.com/labcraft-dev/labcraft"
-Documentation = "https://labcraft-dev.github.io/labcraft"
-Repository = "https://github.com/labcraft-dev/labcraft"
-Issues = "https://github.com/labcraft-dev/labcraft/issues"
+Homepage = "https://github.com/Cheikht4/Labcraft"
+Documentation = "https://github.com/Cheikht4/Labcraft"
+Repository = "https://github.com/Cheikht4/Labcraft"
+Issues = "https://github.com/Cheikht4/Labcraft/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/labcraft"]

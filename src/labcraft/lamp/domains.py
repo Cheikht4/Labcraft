@@ -118,7 +118,8 @@ class PhysicalPrimer:
                     best_binding_len = len(suffix)
                     
         if best_binding_len == 0:
-            warnings.warn(f"Impossible d'autodétecter le domaine 3' pour {name}. Veuillez utiliser from_domains.", UserWarning)
+            if target_seq: # Only warn if we genuinely couldn't find it when target is provided
+                warnings.warn(f"Le domaine de liaison de {name} n'est pas trouvé sur la cible.", UserWarning)
             return cls.from_simple(name, sequence, role)
             
         # Chercher le préfixe (tail domain)
@@ -132,7 +133,8 @@ class PhysicalPrimer:
                 best_tail_len = i
                 
         if best_tail_len == 0:
-            warnings.warn(f"Impossible d'autodétecter le domaine 5' pour {name}.", UserWarning)
+            if target_seq:
+                warnings.warn(f"Impossible d'autodétecter le domaine 5' pour {name}.", UserWarning)
             # On fallback sur une séparation brutale (tout ce qui n'est pas binding est tail)
             tail = sequence[:binding_idx]
             binding = sequence[binding_idx:]

@@ -1,0 +1,150 @@
+"""Configuration models for LabCraft CLI.
+
+Modèles Pydantic pour la configuration YAML/JSON.
+"""
+from typing import Dict, List, Optional, Any, Union
+from pydantic import BaseModel, Field
+
+class BufferConfig(BaseModel):
+    na_mM: float = 50.0
+    k_mM: float = 0.0
+    tris_mM: float = 0.0
+    mg_mM: float = 0.0
+    dntp_mM: float = 0.0
+
+class ExperimentConfig(BaseModel):
+    name: Optional[str] = None
+    chemistry: str = "LAMP"
+    temperature_C: float = 65.0
+    enzyme: str = "bst2.0"
+    buffer: Optional[BufferConfig] = None
+    
+    model_config = {"extra": "allow"}
+
+class TargetConfig(BaseModel):
+    id: str
+    sequence_file: str
+    copies_per_uL: float = 1000.0
+
+class PrimerDomains(BaseModel):
+    F2: Optional[str] = None
+    B2: Optional[str] = None
+    F1c: Optional[str] = None
+    B1c: Optional[str] = None
+    linker: Optional[str] = ""
+
+class PrimerConfig(BaseModel):
+    seq: str
+    conc_uM: Optional[float] = None
+    domains: Union[PrimerDomains, str, None] = None
+
+class PrimerSetConfig(BaseModel):
+    target: str
+    primers: Dict[str, PrimerConfig]
+
+class PanelConfig(BaseModel):
+    experiment: ExperimentConfig = Field(default_factory=ExperimentConfig)
+    targets: List[TargetConfig] = Field(default_factory=list)
+    primer_sets: List[PrimerSetConfig] = Field(default_factory=list)
+    
+    model_config = {"extra": "allow"}
+
+from typing import Tuple
+from labcraft.lamp.domains import PhysicalPrimer, PrimerRole
+from labcraft.lamp.stoichiometry import ConcentrationProfile, target_copies_to_molar
+from labcraft.thermo.backends.vienna import ViennaRNABackend
+from labcraft.diagnostics.enzyme import get_enzyme, PolymeraseProfile
+from labcraft.thermo.backends.base import DuplexEnergyBackend
+
+def build_engine_from_config(
+    config: PanelConfig, 
+    targets: Dict[str, str]
+) -> Tuple[List[PhysicalPrimer], Dict[str, str], DuplexEnergyBackend, Dict[str, Any], float, PolymeraseProfile, float, Dict[str, ConcentrationProfile]]:
+    """Construit les structures internes à partir d'une configuration.
+    
+    Returns:
+        primers: Liste d'amorces physiques.
+        primer_to_panel: Dictionnaire associant chaque nom d'amorce à l'ID de sa cible.
+        backend: Backend thermodynamique (avec ou sans sel).
+        backend_kwargs: Dictionnaire des paramètres de sel (na_mm, mg_mm, etc.) si applicable.
+        mon_molar: Molarité des monovalents si applicable.
+        enzyme: Profil de la polymérase.
+        temp_celsius: Température de l'expérience.
+        profiles: Dictionnaire des profils de concentration par cible.
+    """
+    temp_celsius = config.experiment.temperature_C
+    
+    # 1. Tampon Salin
+    buffer_conf = config.experiment.buffer
+    backend_kwargs = {}
+    if buffer_conf:
+        from labcraft.thermo.salt import UnifiedSaltModel, SaltCorrectedBackend
+        from labcraft.buffer.monovalent import get_total_monovalent
+        
+        backend = SaltCorrectedBackend(ViennaRNABackend(), UnifiedSaltModel())
+        backend_kwargs = {
+            'na_mm': buffer_conf.na_mM,
+            'k_mm': buffer_conf.k_mM,
+            'tris_mm': buffer_conf.tris_mM,
+            'mg_mm': buffer_conf.mg_mM,
+            'dntp_mm': buffer_conf.dntp_mM
+        }
+        mon_molar = get_total_monovalent(backend_kwargs['na_mm'], backend_kwargs['k_mm'], backend_kwargs['tris_mm']) / 1000.0
+    else:
+        backend = ViennaRNABackend()
+        mon_molar = None
+
+    # 2. Enzyme
+    enzyme = get_enzyme(config.experiment.enzyme)
+    
+    # 3. Amorces et profils de concentration
+    primers = []
+    primer_to_panel = {}
+    profiles = {}
+    
+    # Création du dictionnaire de copies par cible
+    target_copies = {t.id: t.copies_per_uL for t in config.targets}
+    
+    for pset in config.primer_sets:
+        t_id = pset.target
+        p_dict = pset.primers
+        
+        copies_uL = target_copies.get(t_id, 1000.0)
+        target_molar = target_copies_to_molar(copies_uL)
+        
+        # On garde une trace des concentrations pour le profile de cette cible
+        conc_map = {}
+        
+        for role_name, p_data in p_dict.items():
+            name = f"{role_name}_{t_id.replace('Synth', '')}"
+            seq = p_data.seq
+            primer_to_panel[name] = t_id
+            
+            try:
+                role_enum = PrimerRole[role_name.upper()]
+            except KeyError:
+                role_enum = PrimerRole.F3
+                
+            # Détermination de la concentration
+            if p_data.conc_uM is not None:
+                conc_map[role_enum] = p_data.conc_uM * 1e-6
+            
+            if role_name.upper() in ("FIP", "BIP") and isinstance(p_data.domains, PrimerDomains):
+                d = p_data.domains
+                primers.append(PhysicalPrimer(name, seq, role_enum, d.F2 or d.B2 or "", d.F1c or d.B1c or "", d.linker or ""))
+            elif role_name.upper() in ("FIP", "BIP"):
+                target_seq = targets.get(t_id, "")
+                primers.append(PhysicalPrimer.from_alignment(name, seq, role_enum, target_seq))
+            else:
+                primers.append(PhysicalPrimer(name, seq, role_enum, seq))
+                
+        # Création du profil pour la cible, avec fallback par défaut si absent
+        profile = ConcentrationProfile(
+            target=target_molar,
+            fip_bip=conc_map.get(PrimerRole.FIP, conc_map.get(PrimerRole.BIP, 1.6e-6)),
+            f3_b3=conc_map.get(PrimerRole.F3, conc_map.get(PrimerRole.B3, 0.2e-6)),
+            lf_lb=conc_map.get(PrimerRole.LF, conc_map.get(PrimerRole.LB, 0.8e-6))
+        )
+        profiles[t_id] = profile
+
+    return primers, primer_to_panel, backend, backend_kwargs, mon_molar, enzyme, temp_celsius, profiles

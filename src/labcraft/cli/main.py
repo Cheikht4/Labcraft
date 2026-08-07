@@ -5,17 +5,16 @@ import time
 import importlib.metadata
 import os
 
-from labcraft.lamp.domains import PhysicalPrimer, PrimerRole
-from labcraft.lamp.stoichiometry import ConcentrationProfile, target_copies_to_molar
+from labcraft.lamp.domains import PrimerRole
 from labcraft.lamp.complex_enumeration import enumerate_complexes
-from labcraft.thermo.backends.vienna import ViennaRNABackend
 from labcraft.solver.dual import solve_dual
 from labcraft.metrics.fractions import compute_fractions
-from labcraft.diagnostics.enzyme import BST_2_0, TAQ, PolymeraseProfile
 from labcraft.diagnostics.amplifiable_dimer import is_amplifiable_dimer, evaluate_pair_amplifiable
 from labcraft.metrics.risk import evaluate_risks
 from labcraft.metrics.verdict import generate_verdict
 from labcraft.report.renderer import render_report
+from labcraft.cli.config import PanelConfig, build_engine_from_config
+from pydantic import ValidationError
 
 app = typer.Typer(help="LabCraft CLI - Thermodynamic multiplex primer panel design engine.")
 
@@ -48,80 +47,20 @@ def analyze(
     with open(config, "r") as f:
         data = yaml.safe_load(f)
 
+    try:
+        config_obj = PanelConfig.model_validate(data)
+    except ValidationError as e:
+        typer.echo(f"Erreur de validation de la configuration :\n{e}")
+        raise typer.Exit(code=1)
+
     # 1. Parse Targets
     targets = {}
-    for t in data.get("targets", []):
-        seq = read_fasta(t["sequence_file"])
-        targets[t["id"]] = seq
+    for t in config_obj.targets:
+        seq = read_fasta(t.sequence_file)
+        targets[t.id] = seq
 
-    # 2. Parse Primers & Panel Mapping
-    primers = []
-    primer_to_panel = {}
-    
-    # Simple hardcoded parser for the YAML structure (In production, use Pydantic models)
-    for pset in data.get("primer_sets", []):
-        t_id = pset["target"]
-        p_dict = pset["primers"]
-        
-        for role_name, p_data in p_dict.items():
-            name = f"{role_name}_{t_id.replace('Synth', '')}" # e.g. F3_A
-            seq = p_data["seq"]
-            
-            primer_to_panel[name] = t_id
-            
-            if role_name in ("FIP", "BIP") and "domains" in p_data and p_data["domains"] != "auto":
-                d = p_data["domains"]
-                primers.append(PhysicalPrimer(name, seq, PrimerRole[role_name], d["F2"], d["F1c"], d.get("linker", "")))
-            elif role_name in ("FIP", "BIP"):
-                primers.append(PhysicalPrimer.from_alignment(name, seq, PrimerRole[role_name], targets[t_id]))
-            else:
-                try:
-                    role_enum = PrimerRole[role_name]
-                except KeyError:
-                    role_enum = PrimerRole.F3
-                primers.append(PhysicalPrimer(name, seq, role_enum, seq))
-                
-    # 3. Setup Thermodynamic Engine
-    experiment = data.get("experiment", {})
-    temp_celsius = experiment.get("temperature_C", 65.0)
-    
-    # Configuration du tampon salin
-    buffer_conf = experiment.get("buffer", None)
-    backend_kwargs = {}
-    if buffer_conf:
-        from labcraft.thermo.salt import UnifiedSaltModel
-        from labcraft.thermo.backends.base import SaltCorrectedBackend
-        
-        backend = SaltCorrectedBackend(ViennaRNABackend(), UnifiedSaltModel())
-        backend_kwargs = {
-            'na_mm': buffer_conf.get('na_mM', 50.0),
-            'k_mm': buffer_conf.get('k_mM', 0.0),
-            'tris_mm': buffer_conf.get('tris_mM', 0.0),
-            'mg_mm': buffer_conf.get('mg_mM', 0.0),
-            'dntp_mm': buffer_conf.get('dntp_mM', 0.0)
-        }
-        from labcraft.buffer.monovalent import get_total_monovalent
-        mon_molar = get_total_monovalent(backend_kwargs['na_mm'], backend_kwargs['k_mm'], backend_kwargs['tris_mm']) / 1000.0
-    else:
-        backend = ViennaRNABackend()
-        mon_molar = None
-
-    # Configuration de l'enzyme
-    from labcraft.diagnostics.enzyme import get_enzyme
-    enzyme_spec = experiment.get("enzyme", "bst2.0")
-    enzyme = get_enzyme(enzyme_spec)
-    
-    # Configuration des concentrations
-    conc_conf = data.get("concentrations", {})
-    unit = conc_conf.get("unit", "uM")
-    multiplier = 1e-6 if unit.lower() == "um" else 1e-9
-    
-    profile = ConcentrationProfile(
-        target=target_copies_to_molar(conc_conf.get("target_copies_per_uL", 1000)),
-        fip_bip=conc_conf.get("fip_bip", 1.6) * multiplier if "fip_bip" in conc_conf else 1.6e-6,
-        f3_b3=conc_conf.get("f3_b3", 0.2) * multiplier if "f3_b3" in conc_conf else 0.2e-6,
-        lf_lb=conc_conf.get("lf_lb", 0.8) * multiplier if "lf_lb" in conc_conf else 0.8e-6
-    )
+    # 2. & 3. Build Internal Engine Components
+    primers, primer_to_panel, backend, backend_kwargs, mon_molar, enzyme, temp_celsius, profiles = build_engine_from_config(config_obj, targets)
     
     # 4. Simulation
     typer.echo("Building complex network and solving thermodynamic equilibrium...")
@@ -145,7 +84,7 @@ def analyze(
     for t_id, t_seq in targets.items():
         typer.echo(f"Solving for target {t_id}...")
         prob, strands, complexes, unfolding_penalties = enumerate_complexes(
-            primers, t_seq, backend, profile=profile, temp_celsius=temp_celsius, mon_molar=mon_molar, buffer=buffer_conf
+            primers, t_seq, backend, profile=profiles[t_id], temp_celsius=temp_celsius, mon_molar=mon_molar, buffer=config_obj.experiment.buffer.model_dump() if config_obj.experiment.buffer else None
         )
         
         res = solve_dual(prob)
@@ -236,11 +175,11 @@ def analyze(
         "file_hash": file_hash,
         "max_residual": max_residual_global,
         "temperature": temp_celsius,
-        "buffer": buffer_conf if buffer_conf else "Reference conditions (1.0 M Na+, 0 mM Mg2+)",
+        "buffer": config_obj.experiment.buffer.model_dump() if config_obj.experiment.buffer else "Reference conditions (1.0 M Na+, 0 mM Mg2+)",
         "enzyme": enzyme.name,
         "dimer_dg_threshold": enzyme.dimer_dg_threshold,
-        "concentrations_fip_bip": profile.get_concentration(PrimerRole.FIP),
-        "concentrations_target": profile.target,
+        "concentrations_fip_bip": "Per target (check config)",
+        "concentrations_target": "Per target (check config)",
         "interaction_matrix": interaction_matrix,
         "primer_names": [p.name for p in primers],
         "unfolding_penalties": all_unfolding_penalties

@@ -249,6 +249,20 @@
             <p><strong>Cause dominante globale :</strong> {{ verdict.global_cause }}</p>
         </div>
 
+        <!-- Conditions de réaction -->
+        <h2>Conditions de Réaction</h2>
+        <div class="target-box">
+            <p><strong>Température :</strong> {{ metadata.temperature }} °C</p>
+            <p><strong>Enzyme :</strong> {{ metadata.enzyme }} (Seuil dimère : {{ "%.2f"|format(metadata.dimer_dg_threshold) }} kcal/mol)</p>
+            <p><strong>Tampon :</strong> 
+            {% if metadata.buffer is string %}
+                {{ metadata.buffer }}
+            {% else %}
+                Na+: {{ metadata.buffer.na_mM }} mM, K+: {{ metadata.buffer.k_mM }} mM, Tris: {{ metadata.buffer.tris_mM }} mM, Mg++: {{ metadata.buffer.mg_mM }} mM, dNTPs: {{ metadata.buffer.dntp_mM }} mM
+            {% endif %}
+            </p>
+        </div>
+
         <!-- Amorces en difficulté par cible -->
         <h2>Diagnostic par Cible</h2>
         {% if not fractions %}
