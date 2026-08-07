@@ -66,7 +66,9 @@ def main():
     
     # 4. Affichage Avant/Après
     print("\n--- Tableau Avant/Après (Top 3 Variants) ---")
-    print(f"{'Rang':<4} | {'Séquence':<20} | {'Muts':<4} | {'A/T':<3} | {'ΔG_3\' Intr.':<12} | {'Pire ΔG_3\' (kcal/mol)'}")
+    col_intr = "ΔG_3' Intr."
+    col_worst = "Pire ΔG_3' (kcal/mol)"
+    print(f"{'Rang':<4} | {'Séquence':<20} | {'Muts':<4} | {'A/T':<3} | {col_intr:<12} | {col_worst}")
     print("-" * 75)
     
     from labcraft.optimize.constraints import calc_intrinsic_3p_dg
