@@ -84,44 +84,52 @@ def is_amplifiable_dimer(
             return False, 0.0
             
         # 3. Calcul de l'énergie locale du 3'
-        # On extrait les 6 derniers nucléotides de l'amorce
-        seq_primer = primer_a if is_primer_a else primer_b
-        sub_primer = seq_primer[-6:]
+        # Parcourt jusqu'à 6 paires contiguës depuis le 3' end
+        paired_indices = []
+        c_idx = idx_3p
+        c_partner = partner_idx
         
-        # On extrait la région correspondante sur le partenaire
-        # On cherche les index min et max du partenaire pour ces 6 bases
-        partner_indices = []
-        start_idx = (l_a - 6) if is_primer_a else (l_a + l_b - 6)
-        end_idx = idx_3p
-        
-        for i in range(max(0 if is_primer_a else l_a, start_idx), end_idx + 1):
-            if i in pairs:
-                p = pairs[i]
-                # S'assurer que le partenaire est bien sur l'autre brin ou plus loin dans le même brin
-                partner_indices.append(p)
+        while len(paired_indices) < 6:
+            paired_indices.append(c_idx)
+            next_idx = c_idx - 1
+            expected_partner = c_partner + 1
+            
+            # Limite 5' de l'amorce courante
+            if is_primer_a and next_idx < 0:
+                break
+            if not is_primer_a and next_idx < l_a:
+                break
                 
-        if not partner_indices:
-            return False, 0.0
+            # Vérifie la contiguïté
+            if next_idx not in pairs or pairs[next_idx] != expected_partner:
+                break
+                
+            c_idx = next_idx
+            c_partner = expected_partner
             
-        min_p = min(partner_indices)
-        max_p = max(partner_indices)
+        paired_indices.reverse() # Remettre en 5' -> 3'
         
-        # Extraction de la séquence partenaire
-        concat_seq = primer_a + primer_b
-        sub_partner = concat_seq[min_p:max_p+1]
+        seq_concat = primer_a + primer_b
+        segment_seq = "".join(seq_concat[i] for i in paired_indices)
         
-        # Calcul du dG local avec RNA.cofold
-        # RNA.cvar.temperature est supposé être déjà géré par le context manager dna_params
-        # Mais on le set par précaution si on est appelé hors du context manager
-        saved_temp = RNA.cvar.temperature
-        RNA.cvar.temperature = temp_celsius
+        # Calcul NN SantaLucia 1998 (sans pénalités d'initiation)
+        dh_total = 0.0
+        ds_total = 0.0
         
-        try:
-            # Évaluation locale
-            _, local_dg = RNA.cofold(f"{sub_primer}&{sub_partner}")
-        finally:
-            RNA.cvar.temperature = saved_temp
-            
+        from labcraft.thermo.backends.native import _NN_PARAMS, _SEQ_TO_NN_KEY
+        
+        for i in range(len(segment_seq) - 1):
+            dinuc = segment_seq[i:i+2]
+            key = _SEQ_TO_NN_KEY.get(dinuc)
+            if key:
+                dh, ds = _NN_PARAMS[key]
+                dh_total += dh
+                ds_total += ds
+                
+        # dG = dH - T*dS
+        temp_k = temp_celsius + 273.15
+        local_dg = dh_total - temp_k * (ds_total / 1000.0)
+        
         is_amp = local_dg <= enzyme.dimer_dg_threshold
         return is_amp, local_dg
         

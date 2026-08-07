@@ -2,6 +2,7 @@ import csv
 import itertools
 from collections import defaultdict
 import RNA
+import hashlib
 
 from labcraft.diagnostics.amplifiable_dimer import is_amplifiable_dimer
 from labcraft.diagnostics.enzyme import BST
@@ -114,6 +115,10 @@ def main():
     verdict = PanelVerdict("FAILURE", [], "Présence de dimères amplifiables multiples, notamment avec FLP.")
     
     import time
+    
+    with open(path, "rb") as f:
+        file_hash = hashlib.sha256(f.read()).hexdigest()
+        
     metadata = {
         "experiment_name": "Parida 2005 - DEN-3",
         "description": f"Validation sur le jeu DEN-3. Limite: le tampon de Parida contient de la bétaïne qui atténue les structures GC (non modélisé).<br><br><b>Comparaison des 4 sérotypes:</b><br>{table_html}",
@@ -122,7 +127,7 @@ def main():
         "interaction_matrix": {},
         "max_residual": 0.0,
         "unfolding_penalties": {},
-        "file_hash": "N/A",
+        "file_hash": file_hash,
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime()),
         "version": "0.0.1"
     }

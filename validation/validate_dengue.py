@@ -1,6 +1,7 @@
 import csv
 import matplotlib.pyplot as plt
 import numpy as np
+import hashlib
 
 from labcraft.lamp.domains import PhysicalPrimer, PrimerRole
 from labcraft.thermo.backends.vienna import ViennaRNABackend
@@ -160,6 +161,10 @@ if __name__ == "__main__":
                 interaction_matrix[p1.name][p2.name] = 0.0
 
     import time
+    
+    with open("validation/reference_data/DENV2_primers.csv", "rb") as f:
+        file_hash = hashlib.sha256(f.read()).hexdigest()
+        
     metadata = {
         "experiment_name": "DENV2 LAVA 72plex",
         "description": "Validation sur les amorces DENV2 de Lopez-Jimena 2018",
@@ -168,7 +173,7 @@ if __name__ == "__main__":
         "interaction_matrix": interaction_matrix,
         "max_residual": sol.max_residual,
         "unfolding_penalties": {},
-        "file_hash": "N/A",
+        "file_hash": file_hash,
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime()),
         "version": "0.0.1"
     }

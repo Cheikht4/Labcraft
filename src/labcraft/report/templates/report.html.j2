@@ -251,7 +251,9 @@
 
         <!-- Amorces en difficulté par cible -->
         <h2>Diagnostic par Cible</h2>
-        {% if not issues_by_target %}
+        {% if not fractions %}
+            <p>Mode sans cible. Consultez les fiches d'artefacts ci-dessous.</p>
+        {% elif not issues_by_target %}
             <p>Toutes les cibles présentent une occupation favorable.</p>
         {% else %}
             {% for target, issues in issues_by_target.items() %}
@@ -428,7 +430,7 @@
                 Généré le : {{ metadata.timestamp }}
             </div>
             <div style="text-align: right;">
-                Température : {{ metadata.temperature }} °C<br>
+                Température : {{ metadata.temperature_C }} °C<br>
                 Max Residual (Solveur) : {{ "%.2e"|format(metadata.max_residual) }}<br>
                 Empreinte d'entrée (SHA256) : <code>{{ metadata.file_hash[:8] }}...</code>
             </div>
