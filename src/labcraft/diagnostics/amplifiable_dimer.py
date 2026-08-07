@@ -137,7 +137,16 @@ def is_amplifiable_dimer(
     amp_b, dg_b = check_3p_end(False)
     
     is_amplifiable = amp_a or amp_b
-    min_dg = min(dg_a, dg_b) if (amp_a or amp_b) else 0.0
+    
+    # Pour le dG_3p, on veut remonter la pire (plus négative) énergie parmi celles 
+    # qui ont une template extensible, même si ce n'est pas "amplifiable" (< seuil).
+    valid_dgs = []
+    if dg_a != 0.0:
+        valid_dgs.append(dg_a)
+    if dg_b != 0.0:
+        valid_dgs.append(dg_b)
+        
+    min_dg = min(valid_dgs) if valid_dgs else 0.0
     
     return is_amplifiable, min_dg
 
