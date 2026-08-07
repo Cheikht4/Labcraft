@@ -30,7 +30,7 @@ def enumerate_complexes(
     profile: ConcentrationProfile = LAMP_DEFAULT_PROFILE,
     temp_celsius: float = 65.0,
     mon_molar: float | None = None
-) -> tuple[EquilibriumProblem, list[str], list[str]]:
+) -> tuple[EquilibriumProblem, list[str], list[str], dict[str, float]]:
     """Énumère toutes les espèces et génère le problème d'équilibre.
     
     1. Espèces de base = chaque amorce + sites cibles identifiés.
@@ -39,7 +39,7 @@ def enumerate_complexes(
     4. Complexes amorce-cible (domaine de liaison vs cible).
     
     Returns:
-        (EquilibriumProblem, noms_des_especes, noms_des_complexes)
+        (EquilibriumProblem, noms_des_especes, noms_des_complexes, unfolding_penalties)
     """
     # 1. Identifier les sites cibles (et gérer les chevauchements)
     target_sites = []
@@ -140,11 +140,14 @@ def enumerate_complexes(
                 cname = f"{p1.name}_{p2.name}" if i != j else f"{p1.name}_homo"
                 complexes.append(ComplexInfo(cname, stoich, dg))
 
-    # --- 4. Complexes Amorce-Cible ---
-    for i, p in enumerate(primers):
-        if p.name not in primer_to_site: continue
-        
-        site_name = primer_to_site[p.name]
+    # --- 4. Complexes amorce-cible ---
+    unfolding_penalties = {}
+    
+    for p in primers:
+        site_name = primer_to_site.get(p.name)
+        if not site_name:
+            continue
+            
         site_idx = n_primers + next(k for k, s in enumerate(target_sites) if s["name"] == site_name)
         site_info = next(s for s in target_sites if s["name"] == site_name)
         
@@ -158,6 +161,7 @@ def enumerate_complexes(
             target_seq, site_info["start"], site_info["end"], 
             temp_celsius=temp_celsius, mon_molar=mon_molar
         )
+        unfolding_penalties[site_name] = dg_unfold
         
         # Couplage
         dg_eff = dg_hyb + dg_unfold
@@ -180,7 +184,7 @@ def enumerate_complexes(
         total_concentrations=concentrations,
         temperature_kelvin=273.15 + temp_celsius
     )
-    return prob, strand_names, complex_names
+    return prob, strand_names, complex_names, unfolding_penalties
 
 def _revcomp(seq: str) -> str:
     complement = {'A': 'T', 'T': 'A', 'C': 'G', 'G': 'C'}

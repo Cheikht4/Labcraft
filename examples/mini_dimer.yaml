@@ -1,0 +1,38 @@
+experiment:
+  name: "Mini Panel Dimer"
+  chemistry: LAMP
+  temperature_C: 65.0
+  enzyme: Bst2.0_WarmStart
+
+buffer:
+  Na_mM: 50.0
+  K_mM: 10.0
+  Tris_mM: 20.0
+  Mg_total_mM: 8.0
+  dNTP_total_mM: 1.4
+  EDTA_mM: 0.0
+  chelation_model: simple
+
+targets:
+  - id: TargetX
+    sequence_file: examples/synth_target_b.fasta
+    type: DNA
+    copies_per_uL: 1000
+
+primer_sets:
+  - target: TargetX
+    primers:
+      F3:
+        seq: "GATCGATCGGCCTTAAAAA"
+        conc_uM: 0.2
+      B3:
+        # 3' end pairs to internal region of F3, 
+        # leaving GATCGATC as a 5' template for polymerase extension.
+        seq: "TTTTTTTTAAGGCC"
+        conc_uM: 0.2
+
+analysis:
+  temperature_scan: [50.0, 70.0, 0.5]
+  amplifiable_dimer_threshold_kcal: -2.0
+  duplex_backend: primer3
+  max_complex_size: 2

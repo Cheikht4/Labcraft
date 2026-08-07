@@ -1,25 +1,34 @@
 from dataclasses import dataclass
-from typing import List
+from typing import List, Optional
 
 @dataclass
 class RiskItem:
     complex_name: str
-    severity: float
     concentration: float
+    severity: float 
     description: str
+    
+    # Nouvelles métriques pour les fiches (Jalon 6.1)
+    seq_a: str = ""
+    seq_b: str = ""
+    structure: str = ""
+    delta_g: float = 0.0
+    delta_g_3p: float = 0.0
+    alignment_ascii: str = ""
 
 def evaluate_risks(
     complex_names: List[str], 
     concentrations: List[float], 
     amplifiable_flags: List[bool],
-    is_warm_start: bool = False
+    is_warm_start: bool = True,
+    dimer_details: Optional[List[dict]] = None
 ) -> List[RiskItem]:
     """
     Évalue le risque d'artefacts basé sur la concentration et l'extensibilité.
     """
     risks = []
     
-    for c_name, conc, is_amp in zip(complex_names, concentrations, amplifiable_flags):
+    for i, (c_name, conc, is_amp) in enumerate(zip(complex_names, concentrations, amplifiable_flags)):
         if "_free" in c_name or "_on_" in c_name:
             continue # Pas de risque pour les espèces libres ou liées à la cible
             
@@ -40,8 +49,21 @@ def evaluate_risks(
             if "homo" in c_name:
                 desc = "Homodimère bloquant"
                 
-        if conc > 1e-9: # Ne reporter que les artefacts ayant une concentration > 1 nM
-            risks.append(RiskItem(c_name, severity, conc, desc))
+        details = dimer_details[i] if dimer_details and i < len(dimer_details) else {}
+        
+        if is_amp or conc > 1e-9:
+            risks.append(RiskItem(
+                complex_name=c_name,
+                concentration=conc,
+                severity=severity,
+                description=desc,
+                seq_a=details.get("seq_a", ""),
+                seq_b=details.get("seq_b", ""),
+                structure=details.get("structure", ""),
+                delta_g=details.get("delta_g", 0.0),
+                delta_g_3p=details.get("delta_g_3p", 0.0),
+                alignment_ascii=details.get("alignment", "")
+            ))
             
     # Trier par risque global (sévérité * concentration)
     risks.sort(key=lambda r: r.severity * r.concentration, reverse=True)

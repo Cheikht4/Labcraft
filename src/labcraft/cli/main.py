@@ -93,6 +93,10 @@ def analyze(
     all_fractions = {}
     all_risks = []
     max_residual_global = 0.0
+    all_unfolding_penalties = {}
+    
+    # Interaction matrix for heatmap
+    interaction_matrix = {}
     
     # For now, we simulate everything together against each target to get the target occupation.
     # Actually, a full multiplex solve computes everything in one matrix!
@@ -110,7 +114,7 @@ def analyze(
             lf_lb=0.8e-6
         )
         
-        prob, strands, complexes = enumerate_complexes(
+        prob, strands, complexes, unfolding_penalties = enumerate_complexes(
             primers, t_seq, backend, profile=profile, temp_celsius=temp_celsius
         )
         
@@ -125,6 +129,7 @@ def analyze(
         
         amplifiable_flags = []
         concs = []
+        dimer_details = []
         
         for i, c_name in enumerate(complexes):
             stoich = prob.stoichiometry[i]
@@ -132,25 +137,41 @@ def analyze(
             concs.append(conc)
             
             is_amp = False
+            details = {}
             if "_on_" not in c_name and "_free" not in c_name:
                 parts = c_name.split('_')
                 p1_name = "_".join(parts[:2]) if len(parts) >= 2 else parts[0]
                 if "homo" in c_name:
                     p_a_seq = next(p.sequence for p in primers if p.name == p1_name)
-                    struct, mfe = backend.calc_homodimer(p_a_seq, temp_celsius=temp_celsius).structure, backend.calc_homodimer(p_a_seq, temp_celsius=temp_celsius).dg_kcal
-                    is_amp, _ = is_amplifiable_dimer(p_a_seq, p_a_seq, struct, mfe, BST_2_0, temp_celsius)
+                    res_homo = backend.calc_homodimer(p_a_seq, temp_celsius=temp_celsius)
+                    struct, mfe = res_homo.structure, res_homo.dg_kcal
+                    is_amp, dg_3p = is_amplifiable_dimer(p_a_seq, p_a_seq, struct, mfe, BST_2_0, temp_celsius)
+                    from labcraft.report.alignment import dotbracket_to_alignment
+                    details = {
+                        "seq_a": p_a_seq, "seq_b": p_a_seq, "structure": struct, 
+                        "delta_g": mfe, "delta_g_3p": dg_3p,
+                        "alignment": dotbracket_to_alignment(p_a_seq, p_a_seq, struct)
+                    }
                 elif len(parts) >= 4:
                     p2_name = "_".join(parts[2:4])
                     try:
                         p_a_seq = next(p.sequence for p in primers if p.name == p1_name)
                         p_b_seq = next(p.sequence for p in primers if p.name == p2_name)
-                        struct, mfe = backend.calc_heterodimer(p_a_seq, p_b_seq, temp_celsius=temp_celsius).structure, backend.calc_heterodimer(p_a_seq, p_b_seq, temp_celsius=temp_celsius).dg_kcal
-                        is_amp, _ = is_amplifiable_dimer(p_a_seq, p_b_seq, struct, mfe, BST_2_0, temp_celsius)
+                        res_hetero = backend.calc_heterodimer(p_a_seq, p_b_seq, temp_celsius=temp_celsius)
+                        struct, mfe = res_hetero.structure, res_hetero.dg_kcal
+                        is_amp, dg_3p = is_amplifiable_dimer(p_a_seq, p_b_seq, struct, mfe, BST_2_0, temp_celsius)
+                        from labcraft.report.alignment import dotbracket_to_alignment
+                        details = {
+                            "seq_a": p_a_seq, "seq_b": p_b_seq, "structure": struct, 
+                            "delta_g": mfe, "delta_g_3p": dg_3p,
+                            "alignment": dotbracket_to_alignment(p_a_seq, p_b_seq, struct)
+                        }
                     except StopIteration:
                         pass
             amplifiable_flags.append(is_amp)
+            dimer_details.append(details)
             
-        risks = evaluate_risks(complexes, concs, amplifiable_flags, is_warm_start=False)
+        risks = evaluate_risks(complexes, concs, amplifiable_flags, is_warm_start=False, dimer_details=dimer_details)
         fractions = compute_fractions(strands, complexes, prob.stoichiometry, res.free_concentrations, prob.delta_g, temp_celsius, primer_to_panel)
         
         # Update globals
@@ -169,6 +190,19 @@ def analyze(
                 target_occupations[t_id][s] = occ
                 
         all_fractions.update(fractions)
+        if t_id not in all_unfolding_penalties:
+            all_unfolding_penalties[t_id] = unfolding_penalties
+            
+        # Extract interaction matrix (only need to do it once, as it's target-independent for dimer interactions)
+        if not interaction_matrix:
+            for p1 in primers:
+                interaction_matrix[p1.name] = {}
+                for p2 in primers:
+                    if p1.name == p2.name:
+                        res = backend.calc_homodimer(p1.sequence, temp_celsius=temp_celsius)
+                    else:
+                        res = backend.calc_heterodimer(p1.sequence, p2.sequence, temp_celsius=temp_celsius)
+                    interaction_matrix[p1.name][p2.name] = res.dg_kcal
 
     # 5. Verdict
     verdict = generate_verdict(all_fractions, target_occupations, all_risks)
@@ -181,7 +215,10 @@ def analyze(
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime()),
         "file_hash": file_hash,
         "max_residual": max_residual_global,
-        "temperature": temp_celsius
+        "temperature": temp_celsius,
+        "interaction_matrix": interaction_matrix,
+        "primer_names": [p.name for p in primers],
+        "unfolding_penalties": all_unfolding_penalties
     }
     
     html = render_report(verdict, all_fractions, all_risks, metadata)

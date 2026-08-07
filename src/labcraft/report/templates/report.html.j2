@@ -20,7 +20,7 @@
             
             /* Fractions */
             --color-free: #56B4E9; /* Sky Blue */
-            --color-bound: #009E73; /* Bluish Green */
+            --color-bound: #009E73; /* Bluish Green (Mise en évidence) */
             --color-homo: #E69F00; /* Orange */
             --color-hetero-intra: #CC79A7; /* Reddish Purple */
             --color-hetero-inter: #D55E00; /* Vermillion */
@@ -50,7 +50,7 @@
             box-shadow: 0 4px 6px rgba(0,0,0,0.05);
         }
         
-        h1, h2, h3 { margin-top: 0; }
+        h1, h2, h3, h4 { margin-top: 0; }
         
         /* Verdict Global */
         .verdict-banner {
@@ -94,7 +94,7 @@
             background-color: #e9ecef;
             display: flex;
             border-radius: 4px;
-            overflow: hidden;
+            align-items: center; /* Centrer verticalement les segments */
         }
         .bar-segment {
             height: 100%;
@@ -107,8 +107,15 @@
             overflow: hidden;
             white-space: nowrap;
         }
+        
+        /* Cible mise en évidence */
+        .bar-bound { 
+            background-color: var(--color-bound); 
+            height: 110%; /* Légèrement plus épais */
+            box-shadow: 0 0 5px rgba(0, 158, 115, 0.5);
+            z-index: 2;
+        }
         .bar-free { background-color: var(--color-free); }
-        .bar-bound { background-color: var(--color-bound); }
         .bar-homo { background-color: var(--color-homo); }
         .bar-intra { background-color: var(--color-hetero-intra); }
         .bar-inter { background-color: var(--color-hetero-inter); }
@@ -129,7 +136,48 @@
             width: 12px; height: 12px; border-radius: 2px;
         }
         
-        /* Tableaux d'artefacts */
+        /* Fiches d'artefacts */
+        .artefact-card {
+            border: 1px solid var(--color-border);
+            border-radius: 6px;
+            padding: 15px;
+            margin-bottom: 15px;
+        }
+        .artefact-amp {
+            background-color: var(--color-amp-bg);
+            border-left: 4px solid var(--color-amp-border);
+        }
+        .artefact-block {
+            background-color: var(--color-block-bg);
+            border-left: 4px solid var(--color-block-border);
+        }
+        .artefact-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            margin-bottom: 10px;
+        }
+        .artefact-stats {
+            display: flex;
+            gap: 20px;
+            font-size: 13px;
+            background: rgba(255,255,255,0.6);
+            padding: 8px;
+            border-radius: 4px;
+            margin-bottom: 10px;
+        }
+        .alignment-block {
+            background-color: #272822;
+            color: #f8f8f2;
+            padding: 10px;
+            border-radius: 4px;
+            font-family: "Courier New", Courier, monospace;
+            font-size: 13px;
+            overflow-x: auto;
+            white-space: pre;
+        }
+        
+        /* Tableaux standards */
         table {
             width: 100%;
             border-collapse: collapse;
@@ -143,13 +191,40 @@
         }
         th { background-color: #f1f3f5; }
         
-        .artefact-amp {
-            background-color: var(--color-amp-bg);
-            border-left: 4px solid var(--color-amp-border);
+        /* Heatmap */
+        .heatmap-container {
+            display: grid;
+            gap: 1px;
+            background-color: var(--color-border);
+            border: 1px solid var(--color-border);
+            margin-bottom: 30px;
+            max-width: 100%;
+            overflow-x: auto;
+            padding: 1px;
         }
-        .artefact-block {
-            background-color: var(--color-block-bg);
-            border-left: 4px solid var(--color-block-border);
+        .heatmap-cell {
+            width: 30px;
+            height: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+        }
+        .heatmap-header {
+            background-color: #f8f9fa;
+            font-weight: bold;
+            font-size: 11px;
+            writing-mode: vertical-rl;
+            transform: rotate(180deg);
+            padding: 5px;
+        }
+        .heatmap-row-header {
+            background-color: #f8f9fa;
+            font-weight: bold;
+            font-size: 11px;
+            padding: 0 5px;
+            text-align: right;
+            white-space: nowrap;
         }
         
         /* Traçabilité */
@@ -192,6 +267,9 @@
 
         <!-- Décomposition d'occupation -->
         <h2>Décomposition d'Occupation (Fractions)</h2>
+        <p style="font-size: 13px; color: var(--color-muted); margin-bottom: 10px;">
+            La fraction "Cible" (verte, légèrement surélevée) représente la part productive de l'amorce. C'est l'indicateur principal de performance.
+        </p>
         <div class="legend">
             <div class="legend-item"><div class="legend-color bar-bound"></div> Cible</div>
             <div class="legend-item"><div class="legend-color bar-free"></div> Libre</div>
@@ -212,52 +290,128 @@
             </div>
         </div>
         {% endfor %}
+        
+        <!-- Accessibilité Cible -->
+        {% if metadata.unfolding_penalties %}
+        <h2>Accessibilité Structurale des Cibles ($\Delta G_{\text{unfolding}}$)</h2>
+        <p style="font-size: 13px; color: var(--color-muted);">
+            Énergie requise pour ouvrir la structure secondaire de la cible au niveau du site de liaison. Une valeur > 0 indique une pénalité s'opposant à l'hybridation.
+        </p>
+        {% for target, penalties in metadata.unfolding_penalties.items() %}
+        <div class="target-box">
+            <h4>Cible : {{ target }}</h4>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Site d'Amorce</th>
+                        <th>$\Delta G_{\text{unfold}}$ (kcal/mol)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for site_name, penalty in penalties.items() %}
+                    <tr>
+                        <td>{{ site_name }}</td>
+                        <td style="color: {% if penalty > 3.0 %}var(--color-failure){% elif penalty > 1.0 %}var(--color-warning-text){% else %}var(--color-ok){% endif %}; font-weight: bold;">
+                            {{ "%.2f"|format(penalty) }}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endfor %}
+        {% endif %}
 
-        <!-- Artefacts -->
-        <h2>Fiches d'Artefacts</h2>
+        <!-- Heatmap -->
+        {% if metadata.interaction_matrix %}
+        <h2>Matrice d'Interactions ($\Delta G$)</h2>
+        <p style="font-size: 13px; color: var(--color-muted);">
+            Énergie d'hybridation entre chaque paire d'amorces. Plus la couleur est foncée, plus l'interaction est forte (thermodynamiquement stable).
+        </p>
+        {% set p_names = metadata.primer_names %}
+        {% set N = p_names|length %}
+        <div style="overflow-x: auto;">
+            <div class="heatmap-container" style="grid-template-columns: auto repeat({{ N }}, 30px);">
+                <!-- Coin vide -->
+                <div class="heatmap-cell" style="background-color: transparent;"></div>
+                
+                <!-- En-têtes colonnes -->
+                {% for p in p_names %}
+                <div class="heatmap-cell heatmap-header" title="{{ p }}">{{ p[:6] }}..</div>
+                {% endfor %}
+                
+                <!-- Lignes -->
+                {% for p1 in p_names %}
+                <div class="heatmap-cell heatmap-row-header" title="{{ p1 }}">{{ p1 }}</div>
+                {% for p2 in p_names %}
+                    {% set dg = metadata.interaction_matrix[p1][p2] %}
+                    <!-- Calcul simple d'opacité pour la heatmap (palette bleue: séquentielle accessible) -->
+                    <!-- Si dg > 0 (pas d'interaction), blanc. Sinon de 0 à -15 kcal/mol -->
+                    {% set intensity = 0 %}
+                    {% if dg < 0 %}
+                        {% set intensity = (dg / -15.0) %}
+                        {% if intensity > 1 %}{% set intensity = 1 %}{% endif %}
+                    {% endif %}
+                    <div class="heatmap-cell" style="background-color: rgba(0, 114, 178, {{ intensity }}); border: {% if dg < -10 %}2px solid var(--color-failure){% else %}none{% endif %};" title="{{ p1 }} x {{ p2 }}: {{ '%.1f'|format(dg) }} kcal/mol">
+                        {% if dg < -10 %}!{% endif %}
+                    </div>
+                {% endfor %}
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Artefacts détaillés -->
+        <h2>Fiches d'Artefacts Détaillées</h2>
         
         {% if amplifiable_dimers %}
         <h3>Dimères Amplifiables (3' Extensible) - CRITIQUE</h3>
-        <table>
-            <thead>
-                <tr>
-                    <th>Complexe</th>
-                    <th>Concentration (M)</th>
-                    <th>Description</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for risk in amplifiable_dimers %}
-                <tr class="artefact-amp">
-                    <td><strong>{{ risk.complex_name }}</strong></td>
-                    <td>{{ "%.2e"|format(risk.concentration) }}</td>
-                    <td>{{ risk.description }}</td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
+        {% for risk in amplifiable_dimers %}
+        <div class="artefact-card artefact-amp">
+            <div class="artefact-header">
+                <h4>{{ risk.complex_name }}</h4>
+                <strong style="color: var(--color-failure);">[CRITIQUE]</strong>
+            </div>
+            <p style="margin-top: 0; margin-bottom: 10px;">{{ risk.description }}</p>
+            <div class="artefact-stats">
+                <div><strong>Concentration:</strong> {{ "%.2e"|format(risk.concentration) }} M</div>
+                <div><strong>$\Delta G$ global:</strong> {{ "%.2f"|format(risk.delta_g) }} kcal/mol</div>
+                <div><strong>$\Delta G$ (3'-end):</strong> {{ "%.2f"|format(risk.delta_g_3p) }} kcal/mol</div>
+            </div>
+            {% if risk.alignment_ascii %}
+            <div class="alignment-block">{{ risk.alignment_ascii }}</div>
+            {% endif %}
+        </div>
+        {% endfor %}
+        {% else %}
+        <p><em>Aucun dimère amplifiable détecté.</em></p>
         {% endif %}
 
         {% if blocking_dimers %}
         <h3>Dimères Bloquants Majeurs (> 1 nM)</h3>
-        <table>
-            <thead>
-                <tr>
-                    <th>Complexe</th>
-                    <th>Concentration (M)</th>
-                    <th>Description</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for risk in blocking_dimers %}
-                <tr class="artefact-block">
-                    <td><strong>{{ risk.complex_name }}</strong></td>
-                    <td>{{ "%.2e"|format(risk.concentration) }}</td>
-                    <td>{{ risk.description }}</td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
+        {% set top_blockers = blocking_dimers[:10] %}
+        {% for risk in top_blockers %}
+        <div class="artefact-card artefact-block">
+            <div class="artefact-header">
+                <h4>{{ risk.complex_name }}</h4>
+            </div>
+            <p style="margin-top: 0; margin-bottom: 10px;">{{ risk.description }}</p>
+            <div class="artefact-stats">
+                <div><strong>Concentration:</strong> {{ "%.2e"|format(risk.concentration) }} M</div>
+                <div><strong>$\Delta G$ global:</strong> {{ "%.2f"|format(risk.delta_g) }} kcal/mol</div>
+            </div>
+            {% if risk.alignment_ascii %}
+            <div class="alignment-block">{{ risk.alignment_ascii }}</div>
+            {% endif %}
+        </div>
+        {% endfor %}
+        
+        {% if blocking_dimers|length > 10 %}
+        <p style="color: var(--color-muted); font-style: italic;">
+            + {{ blocking_dimers|length - 10 }} autres dimères mineurs omis.
+        </p>
+        {% endif %}
+        
         {% endif %}
 
         <!-- Pied de page / Traçabilité -->
