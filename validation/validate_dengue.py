@@ -110,25 +110,73 @@ if __name__ == "__main__":
     print("\nGénération du rapport HTML pour DENV2 (avec heatmap 72x72)...")
     
     import yaml
+    from labcraft.lamp.complex_enumeration import enumerate_complexes
+    from labcraft.thermo.backends.vienna import ViennaRNABackend
+    from labcraft.lamp.stoichiometry import ConcentrationProfile
+    from labcraft.solver.dual import solve_dual
+    from labcraft.metrics.fractions import compute_fractions
+    from labcraft.metrics.verdict import generate_verdict
+    from labcraft.report.renderer import render_report
+    import dataclasses
+
     primers, base_concs = load_primers("validation/reference_data/DENV2_primers.csv")
     
-    yaml_data = {
+    backend = ViennaRNABackend()
+    profile = ConcentrationProfile(target=0.0, fip_bip=1.6, f3_b3=0.2, lf_lb=0.8)
+    prob, strand_names, complex_names, _ = enumerate_complexes(primers, "", backend, profile, 65.0)
+    c_tot_arr = np.zeros(prob.n_strands)
+    for i, s in enumerate(strand_names):
+        if s in base_concs:
+            c_tot_arr[i] = base_concs[s]
+    prob = dataclasses.replace(prob, total_concentrations=c_tot_arr)
+    
+    sol = solve_dual(prob)
+    fractions = compute_fractions(
+        primer_names=[p.name for p in primers],
+        complex_names=complex_names,
+        stoichiometry=prob.stoichiometry,
+        free_concentrations=sol.free_concentrations,
+        delta_g=prob.delta_g,
+        temp_celsius=65.0
+    )
+    risks = []
+    verdict = generate_verdict(fractions, {}, risks)
+    
+    interaction_matrix = {}
+    for p1 in primers:
+        interaction_matrix[p1.name] = {}
+        for p2 in primers:
+            if p1.name == p2.name:
+                c_name = f"{p1.name}_homo"
+            else:
+                p1_idx = primers.index(p1)
+                p2_idx = primers.index(p2)
+                c_name = f"{primers[min(p1_idx, p2_idx)].name}_{primers[max(p1_idx, p2_idx)].name}"
+            
+            try:
+                c_idx = complex_names.index(c_name)
+                interaction_matrix[p1.name][p2.name] = prob.delta_g[c_idx]
+            except ValueError:
+                interaction_matrix[p1.name][p2.name] = 0.0
+
+    import time
+    metadata = {
         "experiment_name": "DENV2 LAVA 72plex",
         "description": "Validation sur les amorces DENV2 de Lopez-Jimena 2018",
-        "temperature_celsius": 65.0,
-        "primers": [
-            {
-                "name": p.name,
-                "sequence": p.sequence,
-                "role": p.role.value
-            } for p in primers
-        ],
-        "targets": []
+        "temperature_C": 65.0,
+        "primer_names": [p.name for p in primers],
+        "interaction_matrix": interaction_matrix,
+        "max_residual": sol.max_residual,
+        "unfolding_penalties": {},
+        "file_hash": "N/A",
+        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime()),
+        "version": "0.0.1"
     }
     
-    with open("validation/DENV2.yaml", "w") as f:
-        yaml.dump(yaml_data, f, sort_keys=False)
+    html = render_report(verdict, fractions, risks, metadata)
+    
+    with open("validation/report_DENV2.html", "w") as f:
+        f.write(html)
         
-    import os
-    os.system("python3 src/labcraft/cli/main.py validation/DENV2.yaml -o validation/report_DENV2.html")
+    print("Rapport enregistré dans validation/report_DENV2.html")
 
