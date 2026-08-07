@@ -66,19 +66,21 @@ def main():
     
     # 4. Affichage Avant/Après
     print("\n--- Tableau Avant/Après (Top 3 Variants) ---")
-    print(f"{'Rang':<4} | {'Séquence':<20} | {'Muts':<4} | {'A/T':<3} | {'Pire ΔG_3\' (kcal/mol)'}")
-    print("-" * 65)
+    print(f"{'Rang':<4} | {'Séquence':<20} | {'Muts':<4} | {'A/T':<3} | {'ΔG_3\' Intr.':<12} | {'Pire ΔG_3\' (kcal/mol)'}")
+    print("-" * 75)
     
-    print(f"{'Orig':<4} | {original_seq:<20} | {'0':<4} | {'0':<3} | {-3.65:.2f} (Échec)")
+    from labcraft.optimize.constraints import calc_intrinsic_3p_dg
+    orig_int = calc_intrinsic_3p_dg(original_seq, window_3p=6, temp_celsius=63.0)
+    print(f"{'Orig':<4} | {original_seq:<20} | {'0':<4} | {'0':<3} | {orig_int:>-12.2f} | {-3.65:.2f} (Échec)")
     
     for i, var in enumerate(top_variants):
         seq = var['sequence']
         muts = var['num_mutations']
-        at = var['num_at']
+        at = var.get('num_at', sum(1 for _, _, nb in var['mutations'] if nb in ('A', 'T')))
         dg = var['worst_dg_3p']
+        int_dg = var['intrinsic_dg']
         
-        # Surligner la mutation dans la séquence pour l'affichage (optionnel, on laisse brut)
-        print(f"{i+1:<4} | {seq:<20} | {muts:<4} | {at:<3} | {dg:>.2f}")
+        print(f"{i+1:<4} | {seq:<20} | {muts:<4} | {at:<3} | {int_dg:>-12.2f} | {dg:>.2f}")
         
     if top_variants:
         best_seq = top_variants[0]['sequence']

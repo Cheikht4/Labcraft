@@ -7,6 +7,32 @@ import RNA
 
 from labcraft.diagnostics.amplifiable_dimer import is_amplifiable_dimer
 from labcraft.diagnostics.enzyme import PolymeraseProfile
+from labcraft.thermo.backends.native import _NN_PARAMS, _SEQ_TO_NN_KEY
+
+def calc_intrinsic_3p_dg(seq: str, window_3p: int = 6, temp_celsius: float = 63.0) -> float:
+    """
+    Calcule la stabilité intrinsèque (dG) des `window_3p` dernières bases
+    appariées à leur complément parfait (modèle NN SantaLucia sans pénalité d'initiation).
+    Plus c'est négatif, plus c'est "collant".
+    """
+    if len(seq) < window_3p:
+        window_3p = len(seq)
+        
+    segment = seq[-window_3p:]
+    
+    dh_total = 0.0
+    ds_total = 0.0
+    
+    for i in range(len(segment) - 1):
+        dinuc = segment[i:i+2]
+        key = _SEQ_TO_NN_KEY.get(dinuc)
+        if key:
+            dh, ds = _NN_PARAMS[key]
+            dh_total += dh
+            ds_total += ds
+            
+    temp_k = temp_celsius + 273.15
+    return dh_total - temp_k * (ds_total / 1000.0)
 
 def evaluate_variant_dimers(
     variant_seq: str,
