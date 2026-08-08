@@ -213,9 +213,7 @@
             background-color: #f8f9fa;
             font-weight: bold;
             font-size: 11px;
-            writing-mode: vertical-rl;
-            transform: rotate(180deg);
-            padding: 5px;
+            text-align: center;
         }
         .heatmap-row-header {
             background-color: #f8f9fa;
@@ -511,33 +509,52 @@
         </p>
         {% set p_names = metadata.primer_names %}
         {% set N = p_names|length %}
-        <div style="overflow-x: auto;">
-            <div class="heatmap-container" style="grid-template-columns: auto repeat({{ N }}, 30px);">
-                <!-- Coin vide -->
-                <div class="heatmap-cell" style="background-color: transparent;"></div>
-                
-                <!-- En-têtes colonnes -->
-                {% for p in p_names %}
-                <div class="heatmap-cell heatmap-header" title="{{ p }}">{{ p[:6] }}..</div>
-                {% endfor %}
-                
-                <!-- Lignes -->
-                {% for p1 in p_names %}
-                <div class="heatmap-cell heatmap-row-header" title="{{ p1 }}">{{ p1 }}</div>
-                {% for p2 in p_names %}
-                    {% set dg = metadata.interaction_matrix[p1][p2] %}
-                    <!-- Calcul simple d'opacité pour la heatmap (palette bleue: séquentielle accessible) -->
-                    <!-- Si dg > 0 (pas d'interaction), blanc. Sinon de 0 à -15 kcal/mol -->
-                    {% set intensity = 0 %}
-                    {% if dg < 0 %}
-                        {% set intensity = (dg / -15.0) %}
-                        {% if intensity > 1 %}{% set intensity = 1 %}{% endif %}
-                    {% endif %}
-                    <div class="heatmap-cell" style="background-color: rgba(0, 114, 178, {{ intensity }}); border: {% if dg < -10 %}2px solid var(--color-failure){% else %}none{% endif %};" title="{{ p1 }} x {{ p2 }}: {{ '%.1f'|format(dg) }} kcal/mol">
-                        {% if dg < -10 %}!{% endif %}
-                    </div>
-                {% endfor %}
-                {% endfor %}
+        
+        <div style="display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap;">
+            <div style="overflow-x: auto;">
+                <div class="heatmap-container" style="grid-template-columns: auto repeat({{ N }}, 30px);">
+                    <!-- Coin vide -->
+                    <div class="heatmap-cell" style="background-color: transparent;"></div>
+                    
+                    <!-- En-têtes colonnes -->
+                    {% for p in p_names %}
+                    <div class="heatmap-cell heatmap-header" title="{{ p }}">P{{ loop.index }}</div>
+                    {% endfor %}
+                    
+                    <!-- Lignes -->
+                    {% for p1 in p_names %}
+                    {% set i = loop.index %}
+                    <div class="heatmap-cell heatmap-row-header" title="{{ p1 }}">P{{ i }}</div>
+                    {% for p2 in p_names %}
+                        {% set dg = metadata.interaction_matrix[p1][p2] %}
+                        <!-- Calcul simple d'opacité pour la heatmap (palette bleue: séquentielle accessible) -->
+                        <!-- Si dg > 0 (pas d'interaction), blanc. Sinon de 0 à -15 kcal/mol -->
+                        {% set intensity = 0 %}
+                        {% if dg < 0 %}
+                            {% set intensity = (dg / -15.0) %}
+                            {% if intensity > 1 %}{% set intensity = 1 %}{% endif %}
+                        {% endif %}
+                        <div class="heatmap-cell" style="background-color: rgba(0, 114, 178, {{ intensity }}); border: {% if dg < -10 %}2px solid var(--color-failure){% else %}none{% endif %};" title="{{ p1 }} x {{ p2 }}: {{ '%.1f'|format(dg) }} kcal/mol">
+                            {% if dg < -10 %}!{% endif %}
+                        </div>
+                    {% endfor %}
+                    {% endfor %}
+                </div>
+            </div>
+            
+            <!-- Légende des amorces -->
+            <div style="background: #fff; border: 1px solid var(--color-border); border-radius: 4px; padding: 10px; font-size: 12px; max-height: 400px; overflow-y: auto;">
+                <strong style="display:block; margin-bottom: 5px;">Légende (Amorces)</strong>
+                <table style="margin: 0; width: auto;">
+                    <tbody>
+                        {% for p in p_names %}
+                        <tr>
+                            <td style="padding: 2px 8px; border: none; font-weight: bold; color: var(--color-muted);">P{{ loop.index }}</td>
+                            <td style="padding: 2px 8px; border: none;">{{ p }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
             </div>
         </div>
         {% endif %}

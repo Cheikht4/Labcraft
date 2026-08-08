@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, Optional
 
 @dataclass
@@ -15,6 +15,7 @@ class RiskItem:
     delta_g: float = 0.0
     delta_g_3p: float = 0.0
     alignment_ascii: str = ""
+    alignment_columns: list = field(default_factory=list)
 
 def evaluate_risks(
     complex_names: List[str], 
@@ -64,7 +65,8 @@ def evaluate_risks(
                 structure=details.get("structure", ""),
                 delta_g=details.get("delta_g", 0.0),
                 delta_g_3p=details.get("delta_g_3p", 0.0),
-                alignment_ascii=details.get("alignment", "")
+                alignment_ascii=details.get("alignment", ""),
+                alignment_columns=details.get("alignment_columns", [])
             ))
             
     # Trier par risque global (sévérité * concentration)

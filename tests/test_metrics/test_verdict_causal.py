@@ -66,3 +66,23 @@ def test_causal_verdict_attribution():
     
     # FIP_B est dans un hétérodimère interpanel -> Hybridation croisée
     assert "Hybridation croisée inter-jeux séquestrant FIP_B à 90.0% dans FIP_B_BIP_A" in issues_by_primer["FIP_B"]
+
+from labcraft.metrics.risk import evaluate_risks, RiskItem
+
+def test_risk_item_alignment_columns():
+    """Vérifie que les colonnes d'alignement sont bien transmises au RiskItem"""
+    complexes = ["dimer_A_B"]
+    concs = [1e-6]
+    flags = [True]
+    details = [{
+        "seq_a": "ATGC",
+        "seq_b": "GCAT",
+        "structure": "((&))",
+        "delta_g": -3.0,
+        "delta_g_3p": -3.0,
+        "alignment_columns": [{"top": "A", "bottom": "T", "paired": True, "role": "three_prime"}]
+    }]
+    
+    risks = evaluate_risks(complexes, concs, flags, is_warm_start=False, dimer_details=details)
+    assert len(risks) == 1
+    assert risks[0].alignment_columns == [{"top": "A", "bottom": "T", "paired": True, "role": "three_prime"}]
