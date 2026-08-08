@@ -9,8 +9,8 @@ import warnings
 import numpy as np
 
 from dataclasses import dataclass
-from typing import Sequence
-from labcraft.lamp.domains import PhysicalPrimer, _iupac_to_regex
+from typing import Sequence, List, Tuple, Dict
+from labcraft.lamp.domains import PhysicalPrimer, PrimerRole, _iupac_to_regex
 from labcraft.lamp.stoichiometry import ConcentrationProfile, LAMP_DEFAULT_PROFILE
 from labcraft.target.unfolding import calc_unfolding_penalty
 from labcraft.thermo.backends.base import DuplexEnergyBackend
@@ -200,19 +200,23 @@ def enumerate_complexes(
             dg_hyb = res_hyb.dg_kcal
             
             # Le calcul de l'accessibilité
-            W = unfolding_window
-            s0 = site_info["start"]
-            e0 = site_info["end"]
-            win_start = max(0, s0 - W)
-            win_end = min(len(target_seq), e0 + W)
-            target_window = target_seq[win_start:win_end]
-            local_start = s0 - win_start
-            local_end = e0 - win_start
-
-            dg_unfold = calc_unfolding_penalty(
-                target_window, local_start, local_end, 
-                temp_celsius=temp_celsius, mon_molar=mon_molar
-            )
+            if p.role in (PrimerRole.LF, PrimerRole.LB):
+                dg_unfold = 0.0
+            else:
+                W = unfolding_window
+                s0 = site_info["start"]
+                e0 = site_info["end"]
+                win_start = max(0, s0 - W)
+                win_end = min(len(target_seq), e0 + W)
+                target_window = target_seq[win_start:win_end]
+                local_start = s0 - win_start
+                local_end = e0 - win_start
+    
+                dg_unfold = calc_unfolding_penalty(
+                    target_window, local_start, local_end, 
+                    temp_celsius=temp_celsius, mon_molar=mon_molar
+                )
+                
             unfolding_penalties[site_name] = dg_unfold
             
             # Couplage

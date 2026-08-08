@@ -436,7 +436,7 @@
                     {% if target == "Compétition Sans Cible" %}
                         (Fraction libre : {{ issue.occupation|pct }})
                     {% else %}
-                        (Occupation : {{ issue.occupation|pct }})
+                        (Accessibilité : {{ issue.occupation|pct }})
                     {% endif %}<br>
                     Mécanisme dominant : {{ issue.cause }}
                 </div>
@@ -492,7 +492,7 @@
         {% endif %}
 
         <!-- Décomposition d'occupation -->
-        <h2>Décomposition d'Occupation (Fractions)</h2>
+        <h2>Décomposition d'Accessibilité à l'Initiation (Fractions)</h2>
         <p style="font-size: 13px; color: var(--color-muted); margin-bottom: 10px;">
             La fraction "Cible" (verte, légèrement surélevée) représente la part productive de l'amorce. C'est l'indicateur principal de performance.
         </p>
@@ -540,9 +540,10 @@
         <h2>Accessibilité Structurale des Cibles (ΔG_unfolding)</h2>
         <p style="font-size: 13px; color: var(--color-muted);">
             Énergie requise pour ouvrir la structure secondaire de la cible au niveau du site de liaison. Une valeur > 0 indique une pénalité s'opposant à l'hybridation. Le coût d'ouverture de la cible tient désormais compte du Mg2+ (via un équivalent sodium cohérent avec le modèle Owczarzy Na+Mg de l'hybridation).
+            Cette pénalité ne concerne QUE les amorces d'initiation (F3, B3, parties F2/B2 des FIP/BIP). Les amorces de boucle (LF, LB) agissant sur des boucles simple brin sont affichées comme non pénalisées (n/a).
         </p>
         <p style="font-size: 13px; color: var(--color-muted);">
-            <b>Prudence :</b> L'occupation calculée est un équilibre. Sous polymérase à déplacement de brin (ex. Bst en LAMP), l'accessibilité réelle est supérieure à l'accessibilité d'équilibre. Une occupation d'équilibre modérée ne signifie pas nécessairement qu'une amorce échouera.
+            <b>Prudence :</b> Cet indice est une accessibilité à l'ÉQUILIBRE du premier évènement d'initiation sur la matrice native. Il ne prédit pas un rendement. Sous polymérase à déplacement de brin (ex. Bst en LAMP), l'accessibilité réelle est supérieure à l'accessibilité d'équilibre, et les amorces de boucle agissent sur des boucles simple brin (non pénalisées ici). Les valeurs sont un signal COMPARATIF entre sites, borné par la thermodynamique ; la composante cinétique relève d'une validation LAMP en temps réel.
         </p>
         {% for target, penalties in metadata.unfolding_penalties.items() %}
         <div class="target-box">
@@ -558,9 +559,13 @@
                     {% for site_name, penalty in penalties.items() %}
                     <tr>
                         <td>{{ site_name }}</td>
-                        <td style="color: {% if penalty > 3.0 %}var(--color-failure){% elif penalty > 1.0 %}var(--color-warning-text){% else %}var(--color-ok){% endif %}; font-weight: bold;">
-                            {{ "%.2f"|format(penalty) }}
-                        </td>
+                        {% if "LF" in site_name or "LB" in site_name %}
+                            <td style="color: var(--color-muted); font-style: italic;">n/a, brin simple (boucle)</td>
+                        {% else %}
+                            <td style="color: {% if penalty > 3.0 %}var(--color-failure){% elif penalty > 1.0 %}var(--color-warning-text){% else %}var(--color-ok){% endif %}; font-weight: bold;">
+                                {{ "%.2f"|format(penalty) }}
+                            </td>
+                        {% endif %}
                     </tr>
                     {% endfor %}
                 </tbody>

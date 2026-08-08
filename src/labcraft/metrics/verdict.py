@@ -37,7 +37,7 @@ def generate_verdict(
                 
                 # Si le primer est censé cibler cette cible (ex: se termine par _A pour SynthA)
                 # ou s'il est physiquement en difficulté
-                if occ < 0.1: # Moins de 10% d'occupation = amorce en difficulté
+                if occ < 0.1 and not ("LF" in primer_name or "LB" in primer_name): # Moins de 10% d'occupation = amorce d'initiation en difficulté
                     # Filtrons pour ne signaler que les amorces qui SONT du panel de la cible
                     # (On suppose ici que F3_A cible SynthA, etc.)
                     target_suffix = target_id.replace("Synth", "")
@@ -86,14 +86,17 @@ def generate_verdict(
             
     # Détermination du statut global
     status = "OK"
-    global_cause = "Equilibre thermodynamique favorable."
+    if target_occupations:
+        global_cause = "Tous les sites d'initiation présentent une accessibilité favorable."
+    else:
+        global_cause = "Equilibre thermodynamique favorable."
     
     if any(issue.is_critical for issue in issues):
         status = "FAILURE"
         global_cause = "Échec critique sur une ou plusieurs cibles (voir détails)."
     elif issues:
         status = "WARNING"
-        global_cause = "Occupation sous-optimale sur certaines cibles."
+        global_cause = "Accessibilité d'initiation réduite sur certains sites."
         
     # Surcharge du verdict si on a des dimères amplifiables massifs
     has_amplifiable = False
