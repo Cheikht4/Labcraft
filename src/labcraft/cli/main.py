@@ -241,6 +241,7 @@ def analyze(
         "interaction_matrix": interaction_matrix,
         "primer_names": list(interaction_matrix.keys()),
         "unfolding_penalties": all_unfolding_penalties,
+        "target_occupations": target_occupations,
         "has_true_target": has_true_target
     }
     

@@ -492,14 +492,11 @@
         {% endif %}
 
         <!-- Décomposition d'occupation -->
-        <h2>Décomposition d'Accessibilité à l'Initiation (Fractions)</h2>
+        <h2>Disponibilité et compétition des amorces</h2>
         <p style="font-size: 13px; color: var(--color-muted); margin-bottom: 10px;">
-            La fraction "Cible" (verte, légèrement surélevée) représente la part productive de l'amorce. C'est l'indicateur principal de performance.
+            Décomposition du devenir de chaque amorce à l'équilibre. Une amorce est saine si elle est massivement LIBRE et absente des dimères dangereux (amplifiables ou appariés en 3'). Ce bloc ne dépend pas de la présence d'une cible.
         </p>
         <div class="legend">
-            {% if metadata.has_true_target %}
-            <div class="legend-item"><div class="legend-color bar-bound"></div> Cible</div>
-            {% endif %}
             <div class="legend-item"><div class="legend-color bar-free"></div> Libre</div>
             <div class="legend-item"><div class="legend-color bar-homo"></div> Homodimère</div>
             <div class="legend-item"><div class="legend-color bar-intra"></div> Hétérodimère (Intra-panel)</div>
@@ -526,7 +523,6 @@
                 {% endif %}
             </div>
             <div class="bar-container">
-                {% if f.target_bound > 0.01 %}<div class="bar-segment bar-bound" style="width: {{ f.target_bound * 100 }}%">{{ f.target_bound|pct }}</div>{% endif %}
                 {% if f.free > 0.01 %}<div class="bar-segment bar-free" style="width: {{ f.free * 100 }}%">{{ f.free|pct }}</div>{% endif %}
                 {% if f.homodimer > 0.01 %}<div class="bar-segment bar-homo" style="width: {{ f.homodimer * 100 }}%">{{ f.homodimer|pct }}</div>{% endif %}
                 {% if f.heterodimer_intra > 0.01 %}<div class="bar-segment bar-intra" style="width: {{ f.heterodimer_intra * 100 }}%">{{ f.heterodimer_intra|pct }}</div>{% endif %}
@@ -537,13 +533,13 @@
         
         <!-- Accessibilité Cible -->
         {% if metadata.has_true_target and metadata.unfolding_penalties %}
-        <h2>Accessibilité Structurale des Cibles (ΔG_unfolding)</h2>
+        <h2>Accessibilité à l'initiation de la cible</h2>
         <p style="font-size: 13px; color: var(--color-muted);">
             Énergie requise pour ouvrir la structure secondaire de la cible au niveau du site de liaison. Une valeur > 0 indique une pénalité s'opposant à l'hybridation. Le coût d'ouverture de la cible tient désormais compte du Mg2+ (via un équivalent sodium cohérent avec le modèle Owczarzy Na+Mg de l'hybridation).
             Cette pénalité ne concerne QUE les amorces d'initiation (F3, B3, parties F2/B2 des FIP/BIP). Les amorces de boucle (LF, LB) agissant sur des boucles simple brin sont affichées comme non pénalisées (n/a).
         </p>
         <p style="font-size: 13px; color: var(--color-muted);">
-            <b>Prudence :</b> Cet indice est une accessibilité à l'ÉQUILIBRE du premier évènement d'initiation sur la matrice native. Il ne prédit pas un rendement. Sous polymérase à déplacement de brin (ex. Bst en LAMP), l'accessibilité réelle est supérieure à l'accessibilité d'équilibre, et les amorces de boucle agissent sur des boucles simple brin (non pénalisées ici). Les valeurs sont un signal COMPARATIF entre sites, borné par la thermodynamique ; la composante cinétique relève d'une validation LAMP en temps réel.
+            <b>Prudence :</b> Ce pourcentage est l'occupation à l'équilibre du site sur la matrice native, c'est-à-dire la part des copies de cible amorcées pour un PREMIER évènement d'initiation. LAMP étant exponentiel, une valeur non nulle même modeste suffit à lancer l'amplification : ce n'est pas un seuil de réussite mais un signal COMPARATIF entre sites. L'accessibilité réelle est de plus supérieure à cette borne d'équilibre (déplacement de brin par la Bst, ouverture coopérative de proche en proche).
         </p>
         {% for target, penalties in metadata.unfolding_penalties.items() %}
         <div class="target-box">
@@ -553,17 +549,23 @@
                     <tr>
                         <th>Site d'Amorce</th>
                         <th>ΔG_unfold (kcal/mol)</th>
+                        <th>Accès à l'initiation</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for site_name, penalty in penalties.items() %}
+                    {% set target_occ = metadata.target_occupations.get(target, {}).get(site_name, 0.0) %}
                     <tr>
                         <td>{{ site_name }}</td>
                         {% if "LF" in site_name or "LB" in site_name %}
                             <td style="color: var(--color-muted); font-style: italic;">n/a, brin simple (boucle)</td>
+                            <td style="color: var(--color-muted); font-style: italic;">n/a, brin simple (boucle)</td>
                         {% else %}
                             <td style="color: {% if penalty > 3.0 %}var(--color-failure){% elif penalty > 1.0 %}var(--color-warning-text){% else %}var(--color-ok){% endif %}; font-weight: bold;">
                                 {{ "%.2f"|format(penalty) }}
+                            </td>
+                            <td style="color: {% if target_occ < 0.1 %}var(--color-failure){% else %}var(--color-ok){% endif %}; font-weight: bold;">
+                                {{ target_occ|pct }}
                             </td>
                         {% endif %}
                     </tr>
