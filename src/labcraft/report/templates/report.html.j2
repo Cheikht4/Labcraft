@@ -531,6 +531,45 @@
         </div>
         {% endfor %}
         
+        <!-- Comparaison des panels -->
+        {% if metadata.panel_summaries and metadata.panel_summaries|length > 1 %}
+        <h2>Comparaison des panels (multiplexe)</h2>
+        <p style="font-size: 13px; color: var(--color-muted);">
+            En multiplexe, l'objectif est la BALANCE : les panels doivent avoir des accès à l'initiation comparables pour être tous détectés. Un panel très en avance peut monopoliser enzyme, dNTP et Mg, et étouffer l'autre. Ces valeurs sont des accessibilités d'équilibre comparatives, pas des vitesses ; l'ordre temporel réel dépend aussi des concentrations, du nombre de copies et de la cinétique.
+        </p>
+        
+        <table style="margin-bottom: 20px;">
+            <thead>
+                <tr>
+                    <th>Panel</th>
+                    <th>Accès initiation (Moyen)</th>
+                    <th>Amorce Limitante</th>
+                    <th>Occupation Limitante</th>
+                    <th>Fraction Libre Moyenne</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for panel, summary in metadata.panel_summaries.items() %}
+                <tr>
+                    <td><strong>{{ panel }}</strong></td>
+                    <td>{{ summary.mean_occupation|pct }}</td>
+                    <td>{{ summary.limiting_primer }}</td>
+                    <td style="color: {% if summary.min_occupation < 0.1 %}var(--color-failure){% else %}var(--color-ok){% endif %};">{{ summary.min_occupation|pct }}</td>
+                    <td>{{ summary.mean_free|pct }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        
+        <p style="font-size: 13px; margin-bottom: 30px;">
+            <strong>Indice de balance inter-panels (CV) :</strong> 
+            <span style="font-weight: bold; color: {% if metadata.balance_cv > 0.5 %}var(--color-failure){% elif metadata.balance_cv > 0.2 %}var(--color-warning-text){% else %}var(--color-ok){% endif %};">
+                {{ "%.2f"|format(metadata.balance_cv) }}
+            </span>
+            <span style="color: var(--color-muted); font-size: 12px; margin-left: 10px;">(Proche de 0 = panels bien équilibrés)</span>
+        </p>
+        {% endif %}
+        
         <!-- Accessibilité Cible -->
         {% if metadata.has_true_target and metadata.unfolding_penalties %}
         <h2>Accessibilité à l'initiation de la cible</h2>

@@ -224,6 +224,11 @@ def analyze(
     # 5. Verdict
     verdict = generate_verdict(all_fractions, target_occupations, all_risks)
     
+    # 5.5 Multiplex Balance
+    from labcraft.metrics.balance import calculate_multiplex_balance
+    free_fractions = {p: f.free for p, f in all_fractions.items()}
+    panel_summaries, balance_cv = calculate_multiplex_balance(primer_to_panel, target_occupations, free_fractions)
+    
     # 6. Generate Report
     typer.echo("Generating HTML report...")
     
@@ -242,7 +247,10 @@ def analyze(
         "primer_names": list(interaction_matrix.keys()),
         "unfolding_penalties": all_unfolding_penalties,
         "target_occupations": target_occupations,
-        "has_true_target": has_true_target
+        "has_true_target": has_true_target,
+        "primer_to_panel": primer_to_panel,
+        "panel_summaries": panel_summaries,
+        "balance_cv": balance_cv
     }
     
     html = render_report(verdict, all_fractions, all_risks, metadata)
