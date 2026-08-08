@@ -539,7 +539,10 @@
         {% if metadata.has_true_target and metadata.unfolding_penalties %}
         <h2>Accessibilité Structurale des Cibles (ΔG_unfolding)</h2>
         <p style="font-size: 13px; color: var(--color-muted);">
-            Énergie requise pour ouvrir la structure secondaire de la cible au niveau du site de liaison. Une valeur > 0 indique une pénalité s'opposant à l'hybridation.
+            Énergie requise pour ouvrir la structure secondaire de la cible au niveau du site de liaison. Une valeur > 0 indique une pénalité s'opposant à l'hybridation. Le coût d'ouverture de la cible tient désormais compte du Mg2+ (via un équivalent sodium cohérent avec le modèle Owczarzy Na+Mg de l'hybridation).
+        </p>
+        <p style="font-size: 13px; color: var(--color-muted);">
+            <b>Prudence :</b> L'occupation calculée est un équilibre. Sous polymérase à déplacement de brin (ex. Bst en LAMP), l'accessibilité réelle est supérieure à l'accessibilité d'équilibre. Une occupation d'équilibre modérée ne signifie pas nécessairement qu'une amorce échouera.
         </p>
         {% for target, penalties in metadata.unfolding_penalties.items() %}
         <div class="target-box">

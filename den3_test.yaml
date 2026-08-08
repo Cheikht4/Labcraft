@@ -1,0 +1,50 @@
+experiment:
+  name: "Dengue 3 Target Test"
+  chemistry: "LAMP"
+  temperature_C: 63.0
+  enzyme: "bst2.0"
+  buffer:
+    na_mM: 50.0
+    mg_mM: 8.0
+    dntp_mM: 1.4
+
+targets:
+  - id: "DEN3_M93130"
+    sequence_file: "DEN3_M93130.fasta"
+    copies_per_uL: 100.0
+
+primer_sets:
+  - target: "DEN3_M93130"
+    primers:
+      F3:
+        seq: "GCCACCTTAAGCCACAGTA"
+        conc_uM: 0.2
+        domains:
+          F3: "GCCACCTTAAGCCACAGTA"
+      B3:
+        seq: "GTTGTGTCATGGGAGGG"
+        conc_uM: 0.2
+        domains:
+          B3: "GTTGTGTCATGGGAGGG"
+      FIP:
+        seq: "TGGCTTTTGGGCCTGACTTCTTTTTTGAAGAAGCTGTGCAGCCTG"
+        conc_uM: 1.6
+        domains:
+          F1c: "TGGCTTTTGGGCCTGACTTC"
+          F2: "GAAGAAGCTGTGCAGCCTG"
+      BIP:
+        seq: "CTGTAGCTCCGTCGTGGGGATTTTCTAGTCTGCTACACCGTGC"
+        conc_uM: 1.6
+        domains:
+          B1c: "CTGTAGCTCCGTCGTGGGGA"
+          B2: "CTAGTCTGCTACACCGTGC"
+      LF:
+        seq: "CCTTGGACGGGGCT"
+        conc_uM: 0.8
+        domains:
+          LF: "CCTTGGACGGGGCT"
+      LB:
+        seq: "GGAGGCTGCAAACCGTG"
+        conc_uM: 0.8
+        domains:
+          LB: "GGAGGCTGCAAACCGTG"

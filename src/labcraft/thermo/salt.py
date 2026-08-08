@@ -302,3 +302,33 @@ class SaltCorrectedBackend(DuplexEnergyBackend):
             na_mm=na_mm, mg_mm=mg_mm, k_mm=k_mm, tris_mm=tris_mm, dntp_mm=dntp_mm,
             ct_molar=ct_molar
         )
+
+def sodium_equivalent_for_folding(
+    mon_molar: float, mg_molar: float, dntp_molar: float = 0.0,
+    f_gc: float = 0.5, n_bp: int = 20, cap_molar: float = 1.0
+) -> float:
+    """Monovalent effectif (mol/L) reproduisant la correction saline Owczarzy
+    Na+Mg du tampon réel, pour un repliement ViennaRNA qui ne connaît que le sel
+    monovalent. Dérivé du modèle interne, pas de von Ahsen."""
+    mg_free = get_free_magnesium(mg_molar, dntp_molar)
+    if mg_free <= 0:
+        return mon_molar
+    
+    if mon_molar <= 0:
+        mon_molar = 1e-3
+        
+    model = UnifiedSaltModel()
+    
+    # Target delta inv Tm using actual buffer
+    tgt = model._calc_delta_inv_tm(f_gc, n_bp, mon_molar, mg_free, na_ref_molar=1.0)
+    
+    lo, hi = mon_molar, cap_molar
+    for _ in range(60):
+        mid = (lo * hi) ** 0.5
+        d = model._calc_delta_inv_tm(f_gc, n_bp, mid, 0.0, 1.0)
+        if d > tgt:   # d décroît quand mid augmente
+            lo = mid
+        else:
+            hi = mid
+            
+    return (lo * hi) ** 0.5
