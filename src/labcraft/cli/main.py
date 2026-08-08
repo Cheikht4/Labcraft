@@ -224,10 +224,20 @@ def analyze(
     # 5. Verdict
     verdict = generate_verdict(all_fractions, target_occupations, all_risks)
     
-    # 5.5 Multiplex Balance
+    # 5.5 Multiplex Balance & Mispriming
     from labcraft.metrics.balance import calculate_multiplex_balance
+    from labcraft.diagnostics.mispriming import detect_inter_target_mispriming
+    
     free_fractions = {p: f.free for p, f in all_fractions.items()}
     panel_summaries, balance_cv = calculate_multiplex_balance(primer_to_panel, target_occupations, free_fractions)
+    
+    mispriming_risks = []
+    if config_obj.targets and len(config_obj.targets) > 1:
+        target_dict = {t.id: t.sequence for t in config_obj.targets}
+        mispriming_risks = detect_inter_target_mispriming(
+            primers, primer_to_panel, target_dict, backend, enzyme, temp_celsius, **backend_kwargs
+        )
+    
     
     # 6. Generate Report
     typer.echo("Generating HTML report...")
@@ -250,7 +260,8 @@ def analyze(
         "has_true_target": has_true_target,
         "primer_to_panel": primer_to_panel,
         "panel_summaries": panel_summaries,
-        "balance_cv": balance_cv
+        "balance_cv": balance_cv,
+        "mispriming_risks": mispriming_risks
     }
     
     html = render_report(verdict, all_fractions, all_risks, metadata)

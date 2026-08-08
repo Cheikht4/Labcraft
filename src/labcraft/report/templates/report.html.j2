@@ -677,6 +677,32 @@
         <!-- Artefacts détaillés -->
         <h2>Fiches d'Artefacts Détaillées</h2>
         
+        {% if metadata.mispriming_risks %}
+        <h3>Mésamorçage Inter-Cible (Multiplexe) - CRITIQUE</h3>
+        <p style="font-size: 13px; color: var(--color-failure); font-weight: bold;">
+            ⚠️ Les amorces suivantes s'apparient sur le génome d'une AUTRE cible du multiplexe avec une extrémité 3' extensible et un ΔG sous le seuil de l'enzyme ({{ "%.2f"|format(metadata.dimer_dg_threshold) }} kcal/mol).
+        </p>
+        {% for risk in metadata.mispriming_risks %}
+        <div class="risk-card risk-critical">
+            <div class="risk-header">
+                <span>{{ risk.primer_name }} sur la cible {{ risk.target_id }}</span>
+                <span class="risk-badge badge-critical">MÉSAMORÇAGE INTER-CIBLE</span>
+            </div>
+            <p><strong>ΔG MFE :</strong> {{ "%.2f"|format(risk.delta_g) }} kcal/mol</p>
+            <div class="dimer-viz">
+                <div class="alignment-row">
+                    <span class="alignment-label">Séquence du site (5'->3')</span>
+                    <span class="alignment-seq">{{ risk.site_sequence }}</span>
+                </div>
+                <div class="alignment-row">
+                    <span class="alignment-label">Structure</span>
+                    <span class="alignment-seq">{{ risk.structure }}</span>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+        {% endif %}
+        
         {% if amplifiable_dimers %}
         <h3>Classement des Dimères Amplifiables</h3>
         <div class="barchart-container">
