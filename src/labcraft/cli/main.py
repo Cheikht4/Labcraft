@@ -115,26 +115,31 @@ def analyze(
             
             is_amp = False
             details = {}
-            if "_on_" not in c_name and "_free" not in c_name:
-                parts = c_name.split('_')
-                p1_name = "_".join(parts[:2]) if len(parts) >= 2 else parts[0]
-                if "homo" in c_name:
-                    p_a_seq = next(p.sequence for p in primers if p.name == p1_name)
-                    is_amp, dg_3p, details = evaluate_pair_amplifiable(p_a_seq, p_a_seq, backend, enzyme, temp_celsius, **backend_kwargs)
-                    from labcraft.report.alignment import dotbracket_to_alignment
-                    if 'alignment' not in details:
-                        details['alignment'] = dotbracket_to_alignment(details['seq_a'], details['seq_b'], details['structure'])
-                elif len(parts) >= 4:
-                    p2_name = "_".join(parts[2:4])
-                    try:
-                        p_a_seq = next(p.sequence for p in primers if p.name == p1_name)
-                        p_b_seq = next(p.sequence for p in primers if p.name == p2_name)
+            # Ignore complexes containing target sites
+            has_target = any(k >= len(primers) and val > 0 for k, val in enumerate(prob.stoichiometry[i]))
+            
+            if not has_target:
+                p_counts = {k: prob.stoichiometry[i][k] for k, val in enumerate(prob.stoichiometry[i]) if val > 0 and k < len(primers)}
+                total_primers = sum(p_counts.values())
+                
+                if total_primers == 2:
+                    if len(p_counts) == 1:
+                        # Homodimère
+                        k = list(p_counts.keys())[0]
+                        p_a_seq = primers[k].sequence
+                        is_amp, dg_3p, details = evaluate_pair_amplifiable(p_a_seq, p_a_seq, backend, enzyme, temp_celsius, **backend_kwargs)
+                        from labcraft.report.alignment import dotbracket_to_alignment
+                        if 'alignment' not in details:
+                            details['alignment'] = dotbracket_to_alignment(details['seq_a'], details['seq_b'], details['structure'])
+                    elif len(p_counts) == 2:
+                        # Hétérodimère
+                        k1, k2 = list(p_counts.keys())
+                        p_a_seq = primers[k1].sequence
+                        p_b_seq = primers[k2].sequence
                         is_amp, dg_3p, details = evaluate_pair_amplifiable(p_a_seq, p_b_seq, backend, enzyme, temp_celsius, **backend_kwargs)
                         from labcraft.report.alignment import dotbracket_to_alignment
                         if 'alignment' not in details:
                             details['alignment'] = dotbracket_to_alignment(details['seq_a'], details['seq_b'], details['structure'])
-                    except StopIteration:
-                        pass
             amplifiable_flags.append(is_amp)
             dimer_details.append(details)
             
