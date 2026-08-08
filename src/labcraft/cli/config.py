@@ -55,6 +55,9 @@ from labcraft.lamp.stoichiometry import ConcentrationProfile, target_copies_to_m
 from labcraft.thermo.backends.vienna import ViennaRNABackend
 from labcraft.diagnostics.enzyme import get_enzyme, PolymeraseProfile
 from labcraft.thermo.backends.base import DuplexEnergyBackend
+from labcraft.thermo.salt import UnifiedSaltModel, SaltCorrectedBackend
+from labcraft.thermo.backends.vienna_salt import ViennaSaltShiftBackend
+from labcraft.buffer.monovalent import get_total_monovalent
 
 def build_engine_from_config(
     config: PanelConfig, 
@@ -78,11 +81,6 @@ def build_engine_from_config(
     buffer_conf = config.experiment.buffer
     backend_kwargs = {}
     if buffer_conf:
-        from labcraft.thermo.salt import UnifiedSaltModel, SaltCorrectedBackend
-        from labcraft.thermo.backends.vienna import ViennaRNABackend
-        from labcraft.thermo.backends.vienna_salt import ViennaSaltShiftBackend
-        from labcraft.buffer.monovalent import get_total_monovalent
-        
         backend = ViennaSaltShiftBackend(UnifiedSaltModel())
         backend_kwargs = {
             'na_mm': buffer_conf.na_mM,

@@ -47,3 +47,38 @@ def test_dimer_resolution_stoichiometry():
     finally:
         if os.path.exists(config_path): os.remove(config_path)
         if os.path.exists(out_path): os.remove(out_path)
+
+def test_no_buffer_config():
+    """Test qu'une config sans bloc buffer ne plante pas (UnboundLocalError)."""
+    runner = CliRunner()
+    panel_data = {
+        "experiment": {
+            "name": "Test No Buffer",
+            "chemistry": "LAMP",
+            "temperature_C": 65.0,
+            "enzyme": "bst2.0"
+        },
+        "primer_sets": [
+            {
+                "target": "Target",
+                "primers": {
+                    "FIP": {"seq": "ATGCATGCATGCATGC", "conc_uM": 1.6},
+                    "BIP": {"seq": "GCATGCATGCATGCAT", "conc_uM": 1.6}
+                }
+            }
+        ]
+    }
+    import tempfile, yaml
+    from labcraft.cli.main import app
+    with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f2:
+        yaml.dump(panel_data, f2)
+        config_path = f2.name
+    
+    out_path = config_path.replace(".yaml", "_out.html")
+    try:
+        result = runner.invoke(app, [config_path, "-o", out_path])
+        assert result.exit_code == 0, f"Erreur CLI: {result.stdout}"
+        assert os.path.exists(out_path)
+    finally:
+        if os.path.exists(config_path): os.remove(config_path)
+        if os.path.exists(out_path): os.remove(out_path)
