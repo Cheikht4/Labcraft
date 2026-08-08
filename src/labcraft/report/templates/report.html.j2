@@ -229,7 +229,6 @@
             justify-content: flex-end;
         }
         
-        /* Traçabilité */
         .footer {
             margin-top: 40px;
             padding-top: 20px;
@@ -238,6 +237,161 @@
             color: var(--color-muted);
             display: flex;
             justify-content: space-between;
+        }
+
+        /* Schéma d'alignement */
+        .diagram-container {
+            font-family: monospace;
+            background: #fff;
+            border: 1px solid var(--color-border);
+            border-radius: 4px;
+            padding: 10px;
+            overflow-x: auto;
+            margin-bottom: 10px;
+        }
+        .alignment-row {
+            display: flex;
+            align-items: center;
+            margin: 2px 0;
+        }
+        .alignment-row-label {
+            width: 30px;
+            font-size: 12px;
+            color: var(--color-muted);
+            text-align: right;
+            margin-right: 5px;
+        }
+        .alignment-row-end {
+            width: 30px;
+            font-size: 12px;
+            color: var(--color-muted);
+            text-align: left;
+            margin-left: 5px;
+        }
+        .base-tile {
+            width: 17px;
+            height: 17px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 3px;
+            font-size: 11px;
+            font-weight: bold;
+            color: #fff;
+            margin: 0 1px;
+            position: relative;
+        }
+        .base-A { background-color: #2E7D32; }
+        .base-T { background-color: #C62828; }
+        .base-G { background-color: #E8890C; }
+        .base-C { background-color: #1565C0; }
+        .base-gap {
+            background-color: #f1f3f5;
+            color: #adb5bd;
+        }
+        .col-three-prime .base-tile {
+            box-shadow: 0 0 0 2px #ffc107;
+            z-index: 1;
+        }
+        .col-template .base-tile {
+            background-color: #e3f2fd;
+            color: #1565C0;
+        }
+        .col-three-prime {
+            background-color: #fff3cd;
+            border-radius: 2px;
+        }
+        .col-template {
+            background-color: #e3f2fd;
+        }
+        .pairing-line {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 10px;
+        }
+        .pair-bar {
+            width: 1px;
+            height: 8px;
+            background-color: var(--color-border);
+        }
+        .amplification-arrow-container {
+            display: flex;
+            margin-top: 5px;
+            margin-left: 35px; /* Offset for label */
+        }
+        .amplification-arrow {
+            height: 2px;
+            background-color: var(--color-failure);
+            position: relative;
+            display: flex;
+            align-items: center;
+            font-size: 10px;
+            color: var(--color-failure);
+        }
+        .amplification-arrow::after {
+            content: '▶';
+            position: absolute;
+            right: -5px;
+            top: -4px;
+        }
+        .diagram-legend {
+            display: flex;
+            gap: 15px;
+            font-size: 11px;
+            margin-top: 10px;
+            flex-wrap: wrap;
+        }
+        .diagram-legend-item {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .barchart-container {
+            margin-bottom: 20px;
+            padding: 15px;
+            border: 1px solid var(--color-border);
+            border-radius: 6px;
+            background: #fff;
+        }
+        .barchart-row {
+            display: flex;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        .barchart-label {
+            width: 150px;
+            font-size: 12px;
+            font-weight: bold;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .barchart-bar-wrapper {
+            flex-grow: 1;
+            height: 16px;
+            background: #f8f9fa;
+            position: relative;
+            border-radius: 2px;
+            margin: 0 10px;
+        }
+        .barchart-bar {
+            height: 100%;
+            background: var(--color-failure);
+            border-radius: 2px;
+        }
+        .barchart-value {
+            width: 50px;
+            font-size: 12px;
+            text-align: right;
+        }
+        .barchart-threshold {
+            position: absolute;
+            top: -4px;
+            bottom: -4px;
+            width: 2px;
+            background: red;
+            z-index: 10;
         }
     </style>
 </head>
@@ -264,6 +418,7 @@
         </div>
 
         <!-- Amorces en difficulté par cible -->
+        {% if metadata.has_true_target %}
         <h2>Diagnostic par Cible</h2>
         {% if not fractions %}
             <p>Mode sans cible. Consultez les fiches d'artefacts ci-dessous.</p>
@@ -287,6 +442,7 @@
             </div>
             {% endfor %}
         {% endif %}
+        {% endif %}
 
         <!-- Décomposition d'occupation -->
         <h2>Décomposition d'Occupation (Fractions)</h2>
@@ -294,7 +450,9 @@
             La fraction "Cible" (verte, légèrement surélevée) représente la part productive de l'amorce. C'est l'indicateur principal de performance.
         </p>
         <div class="legend">
+            {% if metadata.has_true_target %}
             <div class="legend-item"><div class="legend-color bar-bound"></div> Cible</div>
+            {% endif %}
             <div class="legend-item"><div class="legend-color bar-free"></div> Libre</div>
             <div class="legend-item"><div class="legend-color bar-homo"></div> Homodimère</div>
             <div class="legend-item"><div class="legend-color bar-intra"></div> Hétérodimère (Intra-panel)</div>
@@ -315,7 +473,7 @@
         {% endfor %}
         
         <!-- Accessibilité Cible -->
-        {% if metadata.unfolding_penalties %}
+        {% if metadata.has_true_target and metadata.unfolding_penalties %}
         <h2>Accessibilité Structurale des Cibles (ΔG_unfolding)</h2>
         <p style="font-size: 13px; color: var(--color-muted);">
             Énergie requise pour ouvrir la structure secondaire de la cible au niveau du site de liaison. Une valeur > 0 indique une pénalité s'opposant à l'hybridation.
@@ -388,8 +546,41 @@
         <h2>Fiches d'Artefacts Détaillées</h2>
         
         {% if amplifiable_dimers %}
+        <h3>Classement des Dimères Amplifiables</h3>
+        <div class="barchart-container">
+            {% set sorted_amps = amplifiable_dimers | sort(attribute='delta_g_3p') %}
+            {% set worst_dg = sorted_amps[0].delta_g_3p if sorted_amps else 0 %}
+            {% set max_scale = worst_dg if worst_dg < -5 else -5 %}
+            {% set max_scale = max_scale - 1 %}
+            
+            <div style="position:relative; margin-bottom: 25px; height: 20px; font-size:10px; color:var(--color-muted); border-bottom:1px solid #dee2e6;">
+                <div style="position:absolute; right:0;">0 kcal/mol</div>
+                <div style="position:absolute; left:0;">{{ max_scale }} kcal/mol</div>
+                <!-- Threshold marker -->
+                {% set thresh_pct = (metadata.dimer_dg_threshold / max_scale) * 100 %}
+                {% if thresh_pct > 0 and thresh_pct < 100 %}
+                <div style="position:absolute; right:{{ thresh_pct }}%; top:0; bottom:0; width:1px; background:red; z-index:10;">
+                    <span style="position:absolute; top:-15px; left:-20px; color:red; white-space:nowrap;">Seuil {{ metadata.dimer_dg_threshold }}</span>
+                </div>
+                {% endif %}
+            </div>
+
+            {% for risk in sorted_amps %}
+                {% set width_pct = (risk.delta_g_3p / max_scale) * 100 %}
+                {% if width_pct > 100 %}{% set width_pct = 100 %}{% endif %}
+                <div class="barchart-row">
+                    <div class="barchart-label" title="{{ risk.complex_name }}">{{ risk.complex_name }}</div>
+                    <div class="barchart-bar-wrapper">
+                        <div class="barchart-bar" style="width: {{ width_pct }}%; float: right; opacity: {{ (risk.delta_g_3p / max_scale * 0.5) + 0.5 }};"></div>
+                    </div>
+                    <div class="barchart-value">{{ "%.2f"|format(risk.delta_g_3p) }}</div>
+                </div>
+            {% endfor %}
+        </div>
+        
         <h3>Dimères Amplifiables (3' Extensible) - CRITIQUE</h3>
-        {% for risk in amplifiable_dimers %}
+        {% set sorted_amp_dimers = amplifiable_dimers | sort(attribute='delta_g_3p') %}
+        {% for risk in sorted_amp_dimers %}
         <div class="artefact-card artefact-amp">
             <div class="artefact-header">
                 <h4>{{ risk.complex_name }}</h4>
@@ -401,7 +592,84 @@
                 <div><strong>ΔG global:</strong> {{ "%.2f"|format(risk.delta_g) }} kcal/mol</div>
                 <div><strong>ΔG (3'-end):</strong> {{ "%.2f"|format(risk.delta_g_3p) }} kcal/mol</div>
             </div>
-            {% if risk.alignment_ascii %}
+            
+            {% if risk.alignment_columns %}
+            <div class="diagram-container" title="{{ risk.alignment_ascii }}">
+                <div class="alignment-row">
+                    <div class="alignment-row-label">5'</div>
+                    {% for col in risk.alignment_columns %}
+                    <div class="{% if col.role == 'three_prime' %}col-three-prime{% elif col.role == 'template' %}col-template{% endif %}" style="display:inline-block; margin: 0 1px; border-radius: 2px;">
+                        {% if col.is_truncation %}
+                        <div class="base-tile" style="background:transparent; color:#6c757d; font-size:14px; width:auto; padding:0 2px;">...</div>
+                        {% else %}
+                        <div class="base-tile {% if col.top == '-' %}base-gap{% else %}base-{{ col.top }}{% endif %}">{{ col.top }}</div>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                    <div class="alignment-row-end">3'</div>
+                </div>
+                
+                <div class="alignment-row pairing-line">
+                    <div class="alignment-row-label"></div>
+                    {% for col in risk.alignment_columns %}
+                        {% if col.is_truncation %}
+                        <div class="base-tile" style="background:transparent; width:auto; padding:0 2px;"></div>
+                        {% else %}
+                        <div style="width:19px; display:flex; justify-content:center;">
+                            {% if col.paired %}<div class="pair-bar"></div>{% endif %}
+                        </div>
+                        {% endif %}
+                    {% endfor %}
+                    <div class="alignment-row-end"></div>
+                </div>
+                
+                <div class="alignment-row">
+                    <div class="alignment-row-label">3'</div>
+                    {% for col in risk.alignment_columns %}
+                    <div class="{% if col.role == 'three_prime' %}col-three-prime{% elif col.role == 'template' %}col-template{% endif %}" style="display:inline-block; margin: 0 1px; border-radius: 2px;">
+                        {% if col.is_truncation %}
+                        <div class="base-tile" style="background:transparent; color:#6c757d; font-size:14px; width:auto; padding:0 2px;">...</div>
+                        {% else %}
+                        <div class="base-tile {% if col.bottom == '-' %}base-gap{% else %}base-{{ col.bottom }}{% endif %}">{{ col.bottom }}</div>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                    <div class="alignment-row-end">5'</div>
+                </div>
+                
+                <!-- Arrow (Only for amplifiable) -->
+                {% set three_prime_idx = -1 %}
+                {% set template_count = 0 %}
+                {% set before_arrow_count = 0 %}
+                {% for col in risk.alignment_columns %}
+                    {% if col.role == 'three_prime' %}
+                        {% set three_prime_idx = loop.index0 %}
+                    {% endif %}
+                    {% if col.role == 'template' %}
+                        {% set template_count = template_count + 1 %}
+                    {% endif %}
+                    {% if three_prime_idx == -1 and not col.is_truncation %}
+                        {% set before_arrow_count = before_arrow_count + 1 %}
+                    {% endif %}
+                {% endfor %}
+                
+                {% if three_prime_idx != -1 and template_count > 0 %}
+                <div class="amplification-arrow-container" style="margin-left: {{ 35 + before_arrow_count * 19 }}px;">
+                    <div class="amplification-arrow" style="width: {{ template_count * 19 }}px;">amplification</div>
+                </div>
+                {% endif %}
+                
+                <div class="diagram-legend">
+                    <div class="diagram-legend-item"><div class="base-tile base-A" style="width:12px;height:12px;font-size:8px;">A</div> A</div>
+                    <div class="diagram-legend-item"><div class="base-tile base-T" style="width:12px;height:12px;font-size:8px;">T</div> T</div>
+                    <div class="diagram-legend-item"><div class="base-tile base-G" style="width:12px;height:12px;font-size:8px;">G</div> G</div>
+                    <div class="diagram-legend-item"><div class="base-tile base-C" style="width:12px;height:12px;font-size:8px;">C</div> C</div>
+                    <div class="diagram-legend-item"><div class="base-tile base-gap" style="width:12px;height:12px;font-size:8px;">–</div> Gap</div>
+                    <div class="diagram-legend-item"><div style="width:12px;height:12px;background:#fff3cd;border:1px solid #ffc107;"></div> 3' Extensible</div>
+                    <div class="diagram-legend-item"><div style="width:12px;height:12px;background:#e3f2fd;"></div> Matrice (Template)</div>
+                </div>
+            </div>
+            {% elif risk.alignment_ascii %}
             <div class="alignment-block">{{ risk.alignment_ascii }}</div>
             {% endif %}
         </div>
@@ -423,7 +691,51 @@
                 <div><strong>Concentration:</strong> {{ "%.2e"|format(risk.concentration) }} M</div>
                 <div><strong>ΔG global:</strong> {{ "%.2f"|format(risk.delta_g) }} kcal/mol</div>
             </div>
-            {% if risk.alignment_ascii %}
+            {% if risk.alignment_columns %}
+            <div class="diagram-container" title="{{ risk.alignment_ascii }}">
+                <div class="alignment-row">
+                    <div class="alignment-row-label">5'</div>
+                    {% for col in risk.alignment_columns %}
+                    <div style="display:inline-block; margin: 0 1px; border-radius: 2px;">
+                        {% if col.is_truncation %}
+                        <div class="base-tile" style="background:transparent; color:#6c757d; font-size:14px; width:auto; padding:0 2px;">...</div>
+                        {% else %}
+                        <div class="base-tile {% if col.top == '-' %}base-gap{% else %}base-{{ col.top }}{% endif %}">{{ col.top }}</div>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                    <div class="alignment-row-end">3'</div>
+                </div>
+                
+                <div class="alignment-row pairing-line">
+                    <div class="alignment-row-label"></div>
+                    {% for col in risk.alignment_columns %}
+                        {% if col.is_truncation %}
+                        <div class="base-tile" style="background:transparent; width:auto; padding:0 2px;"></div>
+                        {% else %}
+                        <div style="width:19px; display:flex; justify-content:center;">
+                            {% if col.paired %}<div class="pair-bar"></div>{% endif %}
+                        </div>
+                        {% endif %}
+                    {% endfor %}
+                    <div class="alignment-row-end"></div>
+                </div>
+                
+                <div class="alignment-row">
+                    <div class="alignment-row-label">3'</div>
+                    {% for col in risk.alignment_columns %}
+                    <div style="display:inline-block; margin: 0 1px; border-radius: 2px;">
+                        {% if col.is_truncation %}
+                        <div class="base-tile" style="background:transparent; color:#6c757d; font-size:14px; width:auto; padding:0 2px;">...</div>
+                        {% else %}
+                        <div class="base-tile {% if col.bottom == '-' %}base-gap{% else %}base-{{ col.bottom }}{% endif %}">{{ col.bottom }}</div>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                    <div class="alignment-row-end">5'</div>
+                </div>
+            </div>
+            {% elif risk.alignment_ascii %}
             <div class="alignment-block">{{ risk.alignment_ascii }}</div>
             {% endif %}
         </div>

@@ -38,7 +38,7 @@ def is_amplifiable_dimer(
         temp_celsius: Température
         
     Returns:
-        (is_amplifiable, min_dg_3p)
+        (is_amplifiable, min_dg_3p, extensible_strand)
     """
     l_a = len(primer_a)
     l_b = len(primer_b)
@@ -163,13 +163,19 @@ def is_amplifiable_dimer(
     # qui ont une template extensible, même si ce n'est pas "amplifiable" (< seuil).
     valid_dgs = []
     if dg_a != 0.0:
-        valid_dgs.append(dg_a)
+        valid_dgs.append((dg_a, 'a'))
     if dg_b != 0.0:
-        valid_dgs.append(dg_b)
+        valid_dgs.append((dg_b, 'b'))
         
-    min_dg = min(valid_dgs) if valid_dgs else 0.0
+    if valid_dgs:
+        best_tuple = min(valid_dgs, key=lambda x: x[0])
+        min_dg = best_tuple[0]
+        ext_strand = best_tuple[1]
+    else:
+        min_dg = 0.0
+        ext_strand = None
     
-    return is_amplifiable, min_dg
+    return is_amplifiable, min_dg, ext_strand
 
 def evaluate_pair_amplifiable(
     seq_a: str, 
@@ -197,22 +203,23 @@ def evaluate_pair_amplifiable(
         # Homodimère: un seul ordre suffit car la concaténation est symétrique
         res = backend.calc_homodimer(seq_a, temp_celsius=temp_celsius, **backend_kwargs)
         struct, mfe = res.structure.replace('&', ''), res.dg_kcal
-        is_amp, dg_3p = is_amplifiable_dimer(seq_a, seq_a, struct, mfe, enzyme, temp_celsius)
+        is_amp, dg_3p, ext_strand = is_amplifiable_dimer(seq_a, seq_a, struct, mfe, enzyme, temp_celsius)
         details = {
             "seq_a": seq_a, "seq_b": seq_a, "structure": res.structure, 
             "delta_g": mfe, "delta_g_3p": dg_3p,
-            "order": "a&a"
+            "order": "a&a",
+            "extensible_strand": ext_strand
         }
         return is_amp, dg_3p, details
         
     # Hétérodimère: on évalue a&b ET b&a
     res_ab = backend.calc_heterodimer(seq_a, seq_b, temp_celsius=temp_celsius, **backend_kwargs)
     struct_ab, mfe_ab = res_ab.structure.replace('&', ''), res_ab.dg_kcal
-    is_amp_ab, dg_3p_ab = is_amplifiable_dimer(seq_a, seq_b, struct_ab, mfe_ab, enzyme, temp_celsius)
+    is_amp_ab, dg_3p_ab, ext_strand_ab = is_amplifiable_dimer(seq_a, seq_b, struct_ab, mfe_ab, enzyme, temp_celsius)
     
     res_ba = backend.calc_heterodimer(seq_b, seq_a, temp_celsius=temp_celsius, **backend_kwargs)
     struct_ba, mfe_ba = res_ba.structure.replace('&', ''), res_ba.dg_kcal
-    is_amp_ba, dg_3p_ba = is_amplifiable_dimer(seq_b, seq_a, struct_ba, mfe_ba, enzyme, temp_celsius)
+    is_amp_ba, dg_3p_ba, ext_strand_ba = is_amplifiable_dimer(seq_b, seq_a, struct_ba, mfe_ba, enzyme, temp_celsius)
     
     is_amplifiable = is_amp_ab or is_amp_ba
     
@@ -224,27 +231,31 @@ def evaluate_pair_amplifiable(
         chosen_res = res_ab
         chosen_order = "a&b"
         seq_1, seq_2 = seq_a, seq_b
+        worst_ext_strand = ext_strand_ab
     elif is_amp_ba and not is_amp_ab:
         worst_dg = dg_3p_ba
         chosen_res = res_ba
         chosen_order = "b&a"
         seq_1, seq_2 = seq_b, seq_a
+        worst_ext_strand = ext_strand_ba
     elif is_amp_ab and is_amp_ba:
         if dg_3p_ab <= dg_3p_ba: # Plus négatif = pire
             worst_dg = dg_3p_ab
             chosen_res = res_ab
             chosen_order = "a&b"
             seq_1, seq_2 = seq_a, seq_b
+            worst_ext_strand = ext_strand_ab
         else:
             worst_dg = dg_3p_ba
             chosen_res = res_ba
             chosen_order = "b&a"
             seq_1, seq_2 = seq_b, seq_a
+            worst_ext_strand = ext_strand_ba
     else:
         # Aucun amplifiable, on prend le pire dG qui a quand même une template, s'il y en a.
         valid_dgs = []
-        if dg_3p_ab != 0.0: valid_dgs.append((dg_3p_ab, res_ab, "a&b", seq_a, seq_b))
-        if dg_3p_ba != 0.0: valid_dgs.append((dg_3p_ba, res_ba, "b&a", seq_b, seq_a))
+        if dg_3p_ab != 0.0: valid_dgs.append((dg_3p_ab, res_ab, "a&b", seq_a, seq_b, ext_strand_ab))
+        if dg_3p_ba != 0.0: valid_dgs.append((dg_3p_ba, res_ba, "b&a", seq_b, seq_a, ext_strand_ba))
         
         if valid_dgs:
             best_tuple = min(valid_dgs, key=lambda x: x[0])
@@ -252,16 +263,19 @@ def evaluate_pair_amplifiable(
             chosen_res = best_tuple[1]
             chosen_order = best_tuple[2]
             seq_1, seq_2 = best_tuple[3], best_tuple[4]
+            worst_ext_strand = best_tuple[5]
         else:
             worst_dg = 0.0
             chosen_res = res_ab
             chosen_order = "a&b"
             seq_1, seq_2 = seq_a, seq_b
+            worst_ext_strand = None
             
     details = {
         "seq_a": seq_1, "seq_b": seq_2, "structure": chosen_res.structure, 
         "delta_g": chosen_res.dg_kcal, "delta_g_3p": worst_dg,
-        "order": chosen_order
+        "order": chosen_order,
+        "extensible_strand": worst_ext_strand
     }
     return is_amplifiable, worst_dg, details
 

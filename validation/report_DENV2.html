@@ -229,7 +229,6 @@
             justify-content: flex-end;
         }
         
-        /* Traçabilité */
         .footer {
             margin-top: 40px;
             padding-top: 20px;
@@ -238,6 +237,161 @@
             color: var(--color-muted);
             display: flex;
             justify-content: space-between;
+        }
+
+        /* Schéma d'alignement */
+        .diagram-container {
+            font-family: monospace;
+            background: #fff;
+            border: 1px solid var(--color-border);
+            border-radius: 4px;
+            padding: 10px;
+            overflow-x: auto;
+            margin-bottom: 10px;
+        }
+        .alignment-row {
+            display: flex;
+            align-items: center;
+            margin: 2px 0;
+        }
+        .alignment-row-label {
+            width: 30px;
+            font-size: 12px;
+            color: var(--color-muted);
+            text-align: right;
+            margin-right: 5px;
+        }
+        .alignment-row-end {
+            width: 30px;
+            font-size: 12px;
+            color: var(--color-muted);
+            text-align: left;
+            margin-left: 5px;
+        }
+        .base-tile {
+            width: 17px;
+            height: 17px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 3px;
+            font-size: 11px;
+            font-weight: bold;
+            color: #fff;
+            margin: 0 1px;
+            position: relative;
+        }
+        .base-A { background-color: #2E7D32; }
+        .base-T { background-color: #C62828; }
+        .base-G { background-color: #E8890C; }
+        .base-C { background-color: #1565C0; }
+        .base-gap {
+            background-color: #f1f3f5;
+            color: #adb5bd;
+        }
+        .col-three-prime .base-tile {
+            box-shadow: 0 0 0 2px #ffc107;
+            z-index: 1;
+        }
+        .col-template .base-tile {
+            background-color: #e3f2fd;
+            color: #1565C0;
+        }
+        .col-three-prime {
+            background-color: #fff3cd;
+            border-radius: 2px;
+        }
+        .col-template {
+            background-color: #e3f2fd;
+        }
+        .pairing-line {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 10px;
+        }
+        .pair-bar {
+            width: 1px;
+            height: 8px;
+            background-color: var(--color-border);
+        }
+        .amplification-arrow-container {
+            display: flex;
+            margin-top: 5px;
+            margin-left: 35px; /* Offset for label */
+        }
+        .amplification-arrow {
+            height: 2px;
+            background-color: var(--color-failure);
+            position: relative;
+            display: flex;
+            align-items: center;
+            font-size: 10px;
+            color: var(--color-failure);
+        }
+        .amplification-arrow::after {
+            content: '▶';
+            position: absolute;
+            right: -5px;
+            top: -4px;
+        }
+        .diagram-legend {
+            display: flex;
+            gap: 15px;
+            font-size: 11px;
+            margin-top: 10px;
+            flex-wrap: wrap;
+        }
+        .diagram-legend-item {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .barchart-container {
+            margin-bottom: 20px;
+            padding: 15px;
+            border: 1px solid var(--color-border);
+            border-radius: 6px;
+            background: #fff;
+        }
+        .barchart-row {
+            display: flex;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        .barchart-label {
+            width: 150px;
+            font-size: 12px;
+            font-weight: bold;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .barchart-bar-wrapper {
+            flex-grow: 1;
+            height: 16px;
+            background: #f8f9fa;
+            position: relative;
+            border-radius: 2px;
+            margin: 0 10px;
+        }
+        .barchart-bar {
+            height: 100%;
+            background: var(--color-failure);
+            border-radius: 2px;
+        }
+        .barchart-value {
+            width: 50px;
+            font-size: 12px;
+            text-align: right;
+        }
+        .barchart-threshold {
+            position: absolute;
+            top: -4px;
+            bottom: -4px;
+            width: 2px;
+            background: red;
+            z-index: 10;
         }
     </style>
 </head>
@@ -262,206 +416,6 @@
         </div>
 
         <!-- Amorces en difficulté par cible -->
-        <h2>Diagnostic par Cible</h2>
-        
-            
-            <div class="target-box">
-                <h3>Cible : Compétition Sans Cible</h3>
-                
-                <div class="issue-item">
-                    <strong>Amorce : 0B3_D2131620</strong> 
-                    
-                        (Fraction libre : 2.5%)
-                    <br>
-                    Mécanisme dominant : Séquestration de 0B3_D2131620 à 96.9% dans 0B3_D2131620_0BIP_D212141819.
-                </div>
-                
-                <div class="issue-item">
-                    <strong>Amorce : 0FIP_D2131620</strong> 
-                    
-                        (Fraction libre : 8.9%)
-                    <br>
-                    Mécanisme dominant : Séquestration de 0FIP_D2131620 à 45.2% dans 0FIP_D2131620_1BIP_D211199.
-                </div>
-                
-                <div class="issue-item">
-                    <strong>Amorce : 0BIP_D2131620</strong> 
-                    
-                        (Fraction libre : 3.0%)
-                    <br>
-                    Mécanisme dominant : Séquestration de 0BIP_D2131620 à 40.2% dans 0BIP_D2131620_0FLOOP_D212141819.
-                </div>
-                
-                <div class="issue-item">
-                    <strong>Amorce : 0F3_D212141819</strong> 
-                    
-                        (Fraction libre : 19.2%)
-                    <br>
-                    Mécanisme dominant : Séquestration de 0F3_D212141819 à 76.6% dans 0FLOOP_D2131620_0F3_D212141819.
-                </div>
-                
-                <div class="issue-item">
-                    <strong>Amorce : 0FIP_D212141819</strong> 
-                    
-                        (Fraction libre : 16.0%)
-                    <br>
-                    Mécanisme dominant : Séquestration de 0FIP_D212141819 à 40.4% dans 0FIP_D212141819_0FIP_D2151620.
-                </div>
-                
-                <div class="issue-item">
-                    <strong>Amorce : 0BIP_D212141819</strong> 
-                    
-                        (Fraction libre : 13.7%)
-                    <br>
-                    Mécanisme dominant : Séquestration de 0BIP_D212141819 à 50.1% dans 0BIP_D212141819_0BIP_D2151620.
-                </div>
-                
-                <div class="issue-item">
-                    <strong>Amorce : 0FLOOP_D212141819</strong> 
-                    
-                        (Fraction libre : 17.8%)
-                    <br>
-                    Mécanisme dominant : Séquestration de 0FLOOP_D212141819 à 80.5% dans 0BIP_D2131620_0FLOOP_D212141819.
-                </div>
-                
-                <div class="issue-item">
-                    <strong>Amorce : 0FIP_D24</strong> 
-                    
-                        (Fraction libre : 19.1%)
-                    <br>
-                    Mécanisme dominant : Séquestration de 0FIP_D24 à 35.2% dans 0FIP_D24_25FIP_D210.
-                </div>
-                
-                <div class="issue-item">
-                    <strong>Amorce : 0FIP_D2151620</strong> 
-                    
-                        (Fraction libre : 7.0%)
-                    <br>
-                    Mécanisme dominant : Séquestration de 0FIP_D2151620 à 40.4% dans 0FIP_D212141819_0FIP_D2151620.
-                </div>
-                
-                <div class="issue-item">
-                    <strong>Amorce : 0BIP_D2151620</strong> 
-                    
-                        (Fraction libre : 4.4%)
-                    <br>
-                    Mécanisme dominant : Séquestration de 0BIP_D2151620 à 50.1% dans 0BIP_D212141819_0BIP_D2151620.
-                </div>
-                
-                <div class="issue-item">
-                    <strong>Amorce : 1FIP_D211199</strong> 
-                    
-                        (Fraction libre : 3.1%)
-                    <br>
-                    Mécanisme dominant : Séquestration de 1FIP_D211199 à 34.4% dans 1FIP_D211199_1BIP_D211199.
-                </div>
-                
-                <div class="issue-item">
-                    <strong>Amorce : 1BIP_D211199</strong> 
-                    
-                        (Fraction libre : 5.2%)
-                    <br>
-                    Mécanisme dominant : Séquestration de 1BIP_D211199 à 45.2% dans 0FIP_D2131620_1BIP_D211199.
-                </div>
-                
-                <div class="issue-item">
-                    <strong>Amorce : 0BIP_D2176</strong> 
-                    
-                        (Fraction libre : 3.0%)
-                    <br>
-                    Mécanisme dominant : Séquestration de 0BIP_D2176 à 53.9% dans 0BIP_D2176_25FIP_D210.
-                </div>
-                
-                <div class="issue-item">
-                    <strong>Amorce : 0F3_D23</strong> 
-                    
-                        (Fraction libre : 13.3%)
-                    <br>
-                    Mécanisme dominant : Séquestration de 0F3_D23 à 80.2% dans 0F3_D23_0BIP_D23.
-                </div>
-                
-                <div class="issue-item">
-                    <strong>Amorce : 0FIP_D23</strong> 
-                    
-                        (Fraction libre : 11.2%)
-                    <br>
-                    Mécanisme dominant : Séquestration de 0FIP_D23 à 49.5% dans 0FIP_D23_25FLOOP_D210.
-                </div>
-                
-                <div class="issue-item">
-                    <strong>Amorce : 0BIP_D23</strong> 
-                    
-                        (Fraction libre : 17.9%)
-                    <br>
-                    Mécanisme dominant : Séquestration de 0BIP_D23 à 34.7% dans 0BIP_D23_8BIP_D25.
-                </div>
-                
-                <div class="issue-item">
-                    <strong>Amorce : 0BLOOP_D23</strong> 
-                    
-                        (Fraction libre : 13.0%)
-                    <br>
-                    Mécanisme dominant : Séquestration de 0BLOOP_D23 à 84.7% dans 0BLOOP_D23_25BIP_D210.
-                </div>
-                
-                <div class="issue-item">
-                    <strong>Amorce : 25FIP_D210</strong> 
-                    
-                        (Fraction libre : 2.6%)
-                    <br>
-                    Mécanisme dominant : Séquestration de 25FIP_D210 à 53.9% dans 0BIP_D2176_25FIP_D210.
-                </div>
-                
-                <div class="issue-item">
-                    <strong>Amorce : 25BIP_D210</strong> 
-                    
-                        (Fraction libre : 8.2%)
-                    <br>
-                    Mécanisme dominant : Séquestration de 25BIP_D210 à 42.4% dans 0BLOOP_D23_25BIP_D210.
-                </div>
-                
-                <div class="issue-item">
-                    <strong>Amorce : 25FLOOP_D210</strong> 
-                    
-                        (Fraction libre : 0.8%)
-                    <br>
-                    Mécanisme dominant : Séquestration de 25FLOOP_D210 à 99.1% dans 0FIP_D23_25FLOOP_D210.
-                </div>
-                
-                <div class="issue-item">
-                    <strong>Amorce : 0BIP_D229</strong> 
-                    
-                        (Fraction libre : 2.5%)
-                    <br>
-                    Mécanisme dominant : Séquestration de 0BIP_D229 à 93.9% dans 0BIP_D229_homo.
-                </div>
-                
-                <div class="issue-item">
-                    <strong>Amorce : 0FIP_D214197</strong> 
-                    
-                        (Fraction libre : 1.3%)
-                    <br>
-                    Mécanisme dominant : Séquestration de 0FIP_D214197 à 45.6% dans 0FIP_D214197_homo.
-                </div>
-                
-                <div class="issue-item">
-                    <strong>Amorce : 0BIP_D214197</strong> 
-                    
-                        (Fraction libre : 3.8%)
-                    <br>
-                    Mécanisme dominant : Séquestration de 0BIP_D214197 à 49.0% dans 0BIP_D214197_0BIP_D2198.
-                </div>
-                
-                <div class="issue-item">
-                    <strong>Amorce : 0BIP_D2198</strong> 
-                    
-                        (Fraction libre : 11.2%)
-                    <br>
-                    Mécanisme dominant : Séquestration de 0BIP_D2198 à 49.0% dans 0BIP_D214197_0BIP_D2198.
-                </div>
-                
-            </div>
-            
         
 
         <!-- Décomposition d'occupation -->
@@ -470,7 +424,7 @@
             La fraction "Cible" (verte, légèrement surélevée) représente la part productive de l'amorce. C'est l'indicateur principal de performance.
         </p>
         <div class="legend">
-            <div class="legend-item"><div class="legend-color bar-bound"></div> Cible</div>
+            
             <div class="legend-item"><div class="legend-color bar-free"></div> Libre</div>
             <div class="legend-item"><div class="legend-color bar-homo"></div> Homodimère</div>
             <div class="legend-item"><div class="legend-color bar-intra"></div> Hétérodimère (Intra-panel)</div>
@@ -63877,7 +63831,7 @@
         <div class="footer">
             <div>
                 <strong>LabCraft</strong> v0.0.1<br>
-                Généré le : 2026-08-08 12:14:56 UTC
+                Généré le : 2026-08-08 13:37:13 UTC
             </div>
             <div style="text-align: right;">
                 Température : 65.0 °C<br>

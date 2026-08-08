@@ -61,6 +61,8 @@ def analyze(
         
     if not targets:
         targets = {"Compétition Sans Cible": ""}
+        
+    has_true_target = any(k != "Compétition Sans Cible" for k in targets.keys())
 
     # 2. & 3. Build Internal Engine Components
     primers, primer_to_panel, backend, backend_kwargs, mon_molar, enzyme, temp_celsius, profiles = build_engine_from_config(config_obj, targets)
@@ -128,18 +130,22 @@ def analyze(
                         k = list(p_counts.keys())[0]
                         p_a_seq = primers[k].sequence
                         is_amp, dg_3p, details = evaluate_pair_amplifiable(p_a_seq, p_a_seq, backend, enzyme, temp_celsius, **backend_kwargs)
-                        from labcraft.report.alignment import dotbracket_to_alignment
+                        from labcraft.report.alignment import dotbracket_to_alignment, get_alignment_columns
                         if 'alignment' not in details:
                             details['alignment'] = dotbracket_to_alignment(details['seq_a'], details['seq_b'], details['structure'])
+                        if 'alignment_columns' not in details:
+                            details['alignment_columns'] = get_alignment_columns(details['seq_a'], details['seq_b'], details['structure'], details.get('extensible_strand'))
                     elif len(p_counts) == 2:
                         # Hétérodimère
                         k1, k2 = list(p_counts.keys())
                         p_a_seq = primers[k1].sequence
                         p_b_seq = primers[k2].sequence
                         is_amp, dg_3p, details = evaluate_pair_amplifiable(p_a_seq, p_b_seq, backend, enzyme, temp_celsius, **backend_kwargs)
-                        from labcraft.report.alignment import dotbracket_to_alignment
+                        from labcraft.report.alignment import dotbracket_to_alignment, get_alignment_columns
                         if 'alignment' not in details:
                             details['alignment'] = dotbracket_to_alignment(details['seq_a'], details['seq_b'], details['structure'])
+                        if 'alignment_columns' not in details:
+                            details['alignment_columns'] = get_alignment_columns(details['seq_a'], details['seq_b'], details['structure'], details.get('extensible_strand'))
             amplifiable_flags.append(is_amp)
             dimer_details.append(details)
             
@@ -195,7 +201,8 @@ def analyze(
         "concentrations_target": "Per target (check config)",
         "interaction_matrix": interaction_matrix,
         "primer_names": [p.name for p in primers],
-        "unfolding_penalties": all_unfolding_penalties
+        "unfolding_penalties": all_unfolding_penalties,
+        "has_true_target": has_true_target
     }
     
     html = render_report(verdict, all_fractions, all_risks, metadata)

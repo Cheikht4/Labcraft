@@ -229,7 +229,6 @@
             justify-content: flex-end;
         }
         
-        /* Traçabilité */
         .footer {
             margin-top: 40px;
             padding-top: 20px;
@@ -238,6 +237,161 @@
             color: var(--color-muted);
             display: flex;
             justify-content: space-between;
+        }
+
+        /* Schéma d'alignement */
+        .diagram-container {
+            font-family: monospace;
+            background: #fff;
+            border: 1px solid var(--color-border);
+            border-radius: 4px;
+            padding: 10px;
+            overflow-x: auto;
+            margin-bottom: 10px;
+        }
+        .alignment-row {
+            display: flex;
+            align-items: center;
+            margin: 2px 0;
+        }
+        .alignment-row-label {
+            width: 30px;
+            font-size: 12px;
+            color: var(--color-muted);
+            text-align: right;
+            margin-right: 5px;
+        }
+        .alignment-row-end {
+            width: 30px;
+            font-size: 12px;
+            color: var(--color-muted);
+            text-align: left;
+            margin-left: 5px;
+        }
+        .base-tile {
+            width: 17px;
+            height: 17px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 3px;
+            font-size: 11px;
+            font-weight: bold;
+            color: #fff;
+            margin: 0 1px;
+            position: relative;
+        }
+        .base-A { background-color: #2E7D32; }
+        .base-T { background-color: #C62828; }
+        .base-G { background-color: #E8890C; }
+        .base-C { background-color: #1565C0; }
+        .base-gap {
+            background-color: #f1f3f5;
+            color: #adb5bd;
+        }
+        .col-three-prime .base-tile {
+            box-shadow: 0 0 0 2px #ffc107;
+            z-index: 1;
+        }
+        .col-template .base-tile {
+            background-color: #e3f2fd;
+            color: #1565C0;
+        }
+        .col-three-prime {
+            background-color: #fff3cd;
+            border-radius: 2px;
+        }
+        .col-template {
+            background-color: #e3f2fd;
+        }
+        .pairing-line {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 10px;
+        }
+        .pair-bar {
+            width: 1px;
+            height: 8px;
+            background-color: var(--color-border);
+        }
+        .amplification-arrow-container {
+            display: flex;
+            margin-top: 5px;
+            margin-left: 35px; /* Offset for label */
+        }
+        .amplification-arrow {
+            height: 2px;
+            background-color: var(--color-failure);
+            position: relative;
+            display: flex;
+            align-items: center;
+            font-size: 10px;
+            color: var(--color-failure);
+        }
+        .amplification-arrow::after {
+            content: '▶';
+            position: absolute;
+            right: -5px;
+            top: -4px;
+        }
+        .diagram-legend {
+            display: flex;
+            gap: 15px;
+            font-size: 11px;
+            margin-top: 10px;
+            flex-wrap: wrap;
+        }
+        .diagram-legend-item {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .barchart-container {
+            margin-bottom: 20px;
+            padding: 15px;
+            border: 1px solid var(--color-border);
+            border-radius: 6px;
+            background: #fff;
+        }
+        .barchart-row {
+            display: flex;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        .barchart-label {
+            width: 150px;
+            font-size: 12px;
+            font-weight: bold;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .barchart-bar-wrapper {
+            flex-grow: 1;
+            height: 16px;
+            background: #f8f9fa;
+            position: relative;
+            border-radius: 2px;
+            margin: 0 10px;
+        }
+        .barchart-bar {
+            height: 100%;
+            background: var(--color-failure);
+            border-radius: 2px;
+        }
+        .barchart-value {
+            width: 50px;
+            font-size: 12px;
+            text-align: right;
+        }
+        .barchart-threshold {
+            position: absolute;
+            top: -4px;
+            bottom: -4px;
+            width: 2px;
+            background: red;
+            z-index: 10;
         }
     </style>
 </head>
@@ -262,9 +416,6 @@
         </div>
 
         <!-- Amorces en difficulté par cible -->
-        <h2>Diagnostic par Cible</h2>
-        
-            <p>Mode sans cible. Consultez les fiches d'artefacts ci-dessous.</p>
         
 
         <!-- Décomposition d'occupation -->
@@ -273,7 +424,7 @@
             La fraction "Cible" (verte, légèrement surélevée) représente la part productive de l'amorce. C'est l'indicateur principal de performance.
         </p>
         <div class="legend">
-            <div class="legend-item"><div class="legend-color bar-bound"></div> Cible</div>
+            
             <div class="legend-item"><div class="legend-color bar-free"></div> Libre</div>
             <div class="legend-item"><div class="legend-color bar-homo"></div> Homodimère</div>
             <div class="legend-item"><div class="legend-color bar-intra"></div> Hétérodimère (Intra-panel)</div>
@@ -292,7 +443,60 @@
         <h2>Fiches d'Artefacts Détaillées</h2>
         
         
+        <h3>Classement des Dimères Amplifiables</h3>
+        <div class="barchart-container">
+            
+            
+            
+            
+            
+            <div style="position:relative; margin-bottom: 25px; height: 20px; font-size:10px; color:var(--color-muted); border-bottom:1px solid #dee2e6;">
+                <div style="position:absolute; right:0;">0 kcal/mol</div>
+                <div style="position:absolute; left:0;">-7.270634999999999 kcal/mol</div>
+                <!-- Threshold marker -->
+                
+                
+                <div style="position:absolute; right:27.50791368291766%; top:0; bottom:0; width:1px; background:red; z-index:10;">
+                    <span style="position:absolute; top:-15px; left:-20px; color:red; white-space:nowrap;">Seuil -2.0</span>
+                </div>
+                
+            </div>
+
+            
+                
+                
+                <div class="barchart-row">
+                    <div class="barchart-label" title="BIP_DEN-3_FLP_DEN-3">BIP_DEN-3_FLP_DEN-3</div>
+                    <div class="barchart-bar-wrapper">
+                        <div class="barchart-bar" style="width: 86.24604315854117%; float: right; opacity: 0.9312302157927059;"></div>
+                    </div>
+                    <div class="barchart-value">-6.27</div>
+                </div>
+            
+                
+                
+                <div class="barchart-row">
+                    <div class="barchart-label" title="FIP_DEN-3_FLP_DEN-3">FIP_DEN-3_FLP_DEN-3</div>
+                    <div class="barchart-bar-wrapper">
+                        <div class="barchart-bar" style="width: 68.21990101277272%; float: right; opacity: 0.8410995050638637;"></div>
+                    </div>
+                    <div class="barchart-value">-4.96</div>
+                </div>
+            
+                
+                
+                <div class="barchart-row">
+                    <div class="barchart-label" title="F3_DEN-3_FLP_DEN-3">F3_DEN-3_FLP_DEN-3</div>
+                    <div class="barchart-bar-wrapper">
+                        <div class="barchart-bar" style="width: 50.193758867004135%; float: right; opacity: 0.7509687943350207;"></div>
+                    </div>
+                    <div class="barchart-value">-3.65</div>
+                </div>
+            
+        </div>
+        
         <h3>Dimères Amplifiables (3' Extensible) - CRITIQUE</h3>
+        
         
         <div class="artefact-card artefact-amp">
             <div class="artefact-header">
@@ -305,6 +509,7 @@
                 <div><strong>ΔG global:</strong> -6.86 kcal/mol</div>
                 <div><strong>ΔG (3'-end):</strong> -6.27 kcal/mol</div>
             </div>
+            
             
             <div class="alignment-block">CCTTGGACGGGGCT
 ((((.(((((((((....)))))))))..))))........................
@@ -324,6 +529,7 @@ CTGTAGCTCCGTCGTGGGGATTTTCTAGTCTGCTACACCGTGC</div>
                 <div><strong>ΔG (3'-end):</strong> -4.96 kcal/mol</div>
             </div>
             
+            
             <div class="alignment-block">CCTTGGACGGGGCT
 .........(((((..........(((.(.(((((((...)))))))).).))))))).
 TGGCTTTTGGGCCTGACTTCTTTTTTGAAGAAGCTGTGCAGCCTG</div>
@@ -342,6 +548,7 @@ TGGCTTTTGGGCCTGACTTCTTTTTTGAAGAAGCTGTGCAGCCTG</div>
                 <div><strong>ΔG (3'-end):</strong> -3.65 kcal/mol</div>
             </div>
             
+            
             <div class="alignment-block">CCTTGGACGGGGCT
 ......(((.((((.........)))).).)).
 GCCACCTTAAGCCACAGTA</div>
@@ -356,7 +563,7 @@ GCCACCTTAAGCCACAGTA</div>
         <div class="footer">
             <div>
                 <strong>LabCraft</strong> v0.0.1<br>
-                Généré le : 2026-08-08 12:14:09 UTC
+                Généré le : 2026-08-08 13:36:00 UTC
             </div>
             <div style="text-align: right;">
                 Température : 63.0 °C<br>
