@@ -10,6 +10,7 @@ from labcraft.lamp.complex_enumeration import enumerate_complexes
 from labcraft.solver.dual import solve_dual
 from labcraft.metrics.fractions import compute_fractions
 from labcraft.diagnostics.amplifiable_dimer import is_amplifiable_dimer, evaluate_pair_amplifiable
+from labcraft.diagnostics.probe_tm import check_probes_tm
 from labcraft.metrics.risk import evaluate_risks
 from labcraft.metrics.verdict import generate_verdict
 from labcraft.report.renderer import render_report
@@ -128,8 +129,8 @@ def analyze(
                     if len(p_counts) == 1:
                         # Homodimère
                         k = list(p_counts.keys())[0]
-                        p_a_seq = primers[k].sequence
-                        is_amp, dg_3p, details = evaluate_pair_amplifiable(p_a_seq, p_a_seq, backend, enzyme, temp_celsius, **backend_kwargs)
+                        p_a = primers[k]
+                        is_amp, dg_3p, details = evaluate_pair_amplifiable(p_a, p_a, backend, enzyme, temp_celsius, **backend_kwargs)
                         from labcraft.report.alignment import dotbracket_to_alignment, get_alignment_columns
                         if 'alignment' not in details:
                             details['alignment'] = dotbracket_to_alignment(details['seq_a'], details['seq_b'], details['structure'])
@@ -149,9 +150,9 @@ def analyze(
                     elif len(p_counts) == 2:
                         # Hétérodimère
                         k1, k2 = list(p_counts.keys())
-                        p_a_seq = primers[k1].sequence
-                        p_b_seq = primers[k2].sequence
-                        is_amp, dg_3p, details = evaluate_pair_amplifiable(p_a_seq, p_b_seq, backend, enzyme, temp_celsius, **backend_kwargs)
+                        p_a = primers[k1]
+                        p_b = primers[k2]
+                        is_amp, dg_3p, details = evaluate_pair_amplifiable(p_a, p_b, backend, enzyme, temp_celsius, **backend_kwargs)
                         from labcraft.report.alignment import dotbracket_to_alignment, get_alignment_columns
                         if 'alignment' not in details:
                             details['alignment'] = dotbracket_to_alignment(details['seq_a'], details['seq_b'], details['structure'])

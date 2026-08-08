@@ -17,6 +17,7 @@ class RiskItem:
     alignment_ascii: str = ""
     alignment_columns: list = field(default_factory=list)
     arrow_metrics: dict = field(default_factory=dict)
+    is_blocked_veto: bool = False
 
 def evaluate_risks(
     complex_names: List[str],  
@@ -68,10 +69,10 @@ def evaluate_risks(
                 delta_g_3p=details.get("delta_g_3p", 0.0),
                 alignment_ascii=details.get("alignment", ""),
                 alignment_columns=details.get("alignment_columns", []),
-                arrow_metrics=details.get("arrow_metrics", {})
+                arrow_metrics=details.get("arrow_metrics", {}),
+                is_blocked_veto=details.get("is_blocked_veto", False)
             ))
             
     # Trier par risque global (sévérité * concentration)
     risks.sort(key=lambda r: r.severity * r.concentration, reverse=True)
     return risks
-

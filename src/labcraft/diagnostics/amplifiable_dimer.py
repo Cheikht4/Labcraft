@@ -23,8 +23,10 @@ def is_amplifiable_dimer(
     structure: str, 
     mfe: float, 
     enzyme: PolymeraseProfile,
-    temp_celsius: float = 65.0
-) -> Tuple[bool, float]:
+    temp_celsius: float = 65.0,
+    blocked_a: bool = False,
+    blocked_b: bool = False
+) -> Tuple[bool, float, str, bool]:
     """
     Détermine si un dimère (A + B) est amplifiable.
     Retourne (amplifiable, dg_3p).
@@ -38,7 +40,7 @@ def is_amplifiable_dimer(
         temp_celsius: Température
         
     Returns:
-        (is_amplifiable, min_dg_3p, extensible_strand)
+        (is_amplifiable, min_dg_3p, extensible_strand, is_blocked_veto)
     """
     l_a = len(primer_a)
     l_b = len(primer_b)
@@ -48,14 +50,14 @@ def is_amplifiable_dimer(
         
     pairs = get_pairs(structure)
     
-    def check_3p_end(is_primer_a: bool) -> Tuple[bool, float]:
+    def check_3p_end(is_primer_a: bool) -> Tuple[bool, float, bool]:
         """Vérifie si l'extrémité 3' d'une amorce est extensible."""
         # Index du 3' dans la structure concaténée
         idx_3p = (l_a - 1) if is_primer_a else (l_a + l_b - 1)
         
         # 1. Le 3' est-il apparié ?
         if idx_3p not in pairs:
-            return False, 0.0
+            return False, 0.0, False
             
         partner_idx = pairs[idx_3p]
         
@@ -82,7 +84,7 @@ def is_amplifiable_dimer(
                 has_template = (partner_idx > l_a)
                 
         if not has_template:
-            return False, 0.0
+            return False, 0.0, False
             
         # 3. Calcul de l'énergie locale du 3'
         # Parcourt jusqu'à 6 paires contiguës depuis le 3' end
@@ -152,10 +154,21 @@ def is_amplifiable_dimer(
                 break
                 
         is_amp = (local_dg <= enzyme.dimer_dg_threshold) and passed_veto
-        return is_amp, local_dg
+        is_blocked = False
         
-    amp_a, dg_a = check_3p_end(True)
-    amp_b, dg_b = check_3p_end(False)
+        if is_amp:
+            # Application du veto de blocage 3'
+            if is_primer_a and blocked_a:
+                is_amp = False
+                is_blocked = True
+            elif not is_primer_a and blocked_b:
+                is_amp = False
+                is_blocked = True
+                
+        return is_amp, local_dg, is_blocked
+        
+    amp_a, dg_a, blocked_veto_a = check_3p_end(True)
+    amp_b, dg_b, blocked_veto_b = check_3p_end(False)
     
     is_amplifiable = amp_a or amp_b
     
@@ -175,11 +188,13 @@ def is_amplifiable_dimer(
         min_dg = 0.0
         ext_strand = None
     
-    return is_amplifiable, min_dg, ext_strand
+    return is_amplifiable, min_dg, ext_strand, (blocked_veto_a or blocked_veto_b)
+
+from labcraft.lamp.domains import PhysicalPrimer
 
 def evaluate_pair_amplifiable(
-    seq_a: str, 
-    seq_b: str, 
+    p_a: PhysicalPrimer, 
+    p_b: PhysicalPrimer, 
     backend: DuplexEnergyBackend, 
     enzyme: PolymeraseProfile, 
     temp_celsius: float,
@@ -199,27 +214,33 @@ def evaluate_pair_amplifiable(
         (is_amplifiable, worst_dg_3p, details)
         où details indique l'ordre et l'extrémité 3' responsables.
     """
+    seq_a = p_a.sequence
+    seq_b = p_b.sequence
+    blocked_a = p_a.blocked_3prime
+    blocked_b = p_b.blocked_3prime
+    
     if seq_a == seq_b:
         # Homodimère: un seul ordre suffit car la concaténation est symétrique
         res = backend.calc_homodimer(seq_a, temp_celsius=temp_celsius, **backend_kwargs)
         struct, mfe = res.structure.replace('&', ''), res.dg_kcal
-        is_amp, dg_3p, ext_strand = is_amplifiable_dimer(seq_a, seq_a, struct, mfe, enzyme, temp_celsius)
+        is_amp, dg_3p, ext_strand, blocked_veto = is_amplifiable_dimer(seq_a, seq_a, struct, mfe, enzyme, temp_celsius, blocked_a, blocked_b)
         details = {
             "seq_a": seq_a, "seq_b": seq_a, "structure": res.structure, 
             "delta_g": mfe, "delta_g_3p": dg_3p,
             "order": "a&a",
-            "extensible_strand": ext_strand
+            "extensible_strand": ext_strand,
+            "is_blocked_veto": blocked_veto
         }
         return is_amp, dg_3p, details
         
     # Hétérodimère: on évalue a&b ET b&a
     res_ab = backend.calc_heterodimer(seq_a, seq_b, temp_celsius=temp_celsius, **backend_kwargs)
     struct_ab, mfe_ab = res_ab.structure.replace('&', ''), res_ab.dg_kcal
-    is_amp_ab, dg_3p_ab, ext_strand_ab = is_amplifiable_dimer(seq_a, seq_b, struct_ab, mfe_ab, enzyme, temp_celsius)
+    is_amp_ab, dg_3p_ab, ext_strand_ab, blocked_veto_ab = is_amplifiable_dimer(seq_a, seq_b, struct_ab, mfe_ab, enzyme, temp_celsius, blocked_a, blocked_b)
     
     res_ba = backend.calc_heterodimer(seq_b, seq_a, temp_celsius=temp_celsius, **backend_kwargs)
     struct_ba, mfe_ba = res_ba.structure.replace('&', ''), res_ba.dg_kcal
-    is_amp_ba, dg_3p_ba, ext_strand_ba = is_amplifiable_dimer(seq_b, seq_a, struct_ba, mfe_ba, enzyme, temp_celsius)
+    is_amp_ba, dg_3p_ba, ext_strand_ba, blocked_veto_ba = is_amplifiable_dimer(seq_b, seq_a, struct_ba, mfe_ba, enzyme, temp_celsius, blocked_b, blocked_a)
     
     is_amplifiable = is_amp_ab or is_amp_ba
     
@@ -232,12 +253,14 @@ def evaluate_pair_amplifiable(
         chosen_order = "a&b"
         seq_1, seq_2 = seq_a, seq_b
         worst_ext_strand = ext_strand_ab
+        worst_blocked = blocked_veto_ab
     elif is_amp_ba and not is_amp_ab:
         worst_dg = dg_3p_ba
         chosen_res = res_ba
         chosen_order = "b&a"
         seq_1, seq_2 = seq_b, seq_a
         worst_ext_strand = ext_strand_ba
+        worst_blocked = blocked_veto_ba
     elif is_amp_ab and is_amp_ba:
         if dg_3p_ab <= dg_3p_ba: # Plus négatif = pire
             worst_dg = dg_3p_ab
@@ -245,37 +268,70 @@ def evaluate_pair_amplifiable(
             chosen_order = "a&b"
             seq_1, seq_2 = seq_a, seq_b
             worst_ext_strand = ext_strand_ab
+            worst_blocked = blocked_veto_ab
         else:
             worst_dg = dg_3p_ba
             chosen_res = res_ba
             chosen_order = "b&a"
             seq_1, seq_2 = seq_b, seq_a
             worst_ext_strand = ext_strand_ba
+            worst_blocked = blocked_veto_ba
     else:
-        # Aucun amplifiable, on prend le pire dG qui a quand même une template, s'il y en a.
-        valid_dgs = []
-        if dg_3p_ab != 0.0: valid_dgs.append((dg_3p_ab, res_ab, "a&b", seq_a, seq_b, ext_strand_ab))
-        if dg_3p_ba != 0.0: valid_dgs.append((dg_3p_ba, res_ba, "b&a", seq_b, seq_a, ext_strand_ba))
-        
-        if valid_dgs:
-            best_tuple = min(valid_dgs, key=lambda x: x[0])
-            worst_dg = best_tuple[0]
-            chosen_res = best_tuple[1]
-            chosen_order = best_tuple[2]
-            seq_1, seq_2 = best_tuple[3], best_tuple[4]
-            worst_ext_strand = best_tuple[5]
-        else:
-            worst_dg = 0.0
+        # Aucun amplifiable : on prend la structure qui a le 3' le plus favorable (même si > seuil),
+        # ou à défaut la structure la plus stable globalement.
+        # Attention : si un dimère n'est pas amplifiable UNIQUEMENT à cause du veto,
+        # on veut le remonter pour l'afficher !
+        if blocked_veto_ab and not blocked_veto_ba:
+            worst_dg = dg_3p_ab
             chosen_res = res_ab
             chosen_order = "a&b"
             seq_1, seq_2 = seq_a, seq_b
-            worst_ext_strand = None
+            worst_ext_strand = ext_strand_ab
+            worst_blocked = True
+        elif blocked_veto_ba and not blocked_veto_ab:
+            worst_dg = dg_3p_ba
+            chosen_res = res_ba
+            chosen_order = "b&a"
+            seq_1, seq_2 = seq_b, seq_a
+            worst_ext_strand = ext_strand_ba
+            worst_blocked = True
+        elif dg_3p_ab <= dg_3p_ba and dg_3p_ab < 0.0:
+            worst_dg = dg_3p_ab
+            chosen_res = res_ab
+            chosen_order = "a&b"
+            seq_1, seq_2 = seq_a, seq_b
+            worst_ext_strand = ext_strand_ab
+            worst_blocked = blocked_veto_ab
+        elif dg_3p_ba < 0.0:
+            worst_dg = dg_3p_ba
+            chosen_res = res_ba
+            chosen_order = "b&a"
+            seq_1, seq_2 = seq_b, seq_a
+            worst_ext_strand = ext_strand_ba
+            worst_blocked = blocked_veto_ba
+        elif mfe_ab <= mfe_ba:
+            worst_dg = dg_3p_ab
+            chosen_res = res_ab
+            chosen_order = "a&b"
+            seq_1, seq_2 = seq_a, seq_b
+            worst_ext_strand = ext_strand_ab
+            worst_blocked = blocked_veto_ab
+        else:
+            worst_dg = dg_3p_ba
+            chosen_res = res_ba
+            chosen_order = "b&a"
+            seq_1, seq_2 = seq_b, seq_a
+            worst_ext_strand = ext_strand_ba
+            worst_blocked = blocked_veto_ba
             
     details = {
-        "seq_a": seq_1, "seq_b": seq_2, "structure": chosen_res.structure, 
-        "delta_g": chosen_res.dg_kcal, "delta_g_3p": worst_dg,
+        "seq_a": seq_1,
+        "seq_b": seq_2,
+        "structure": chosen_res.structure,
+        "delta_g": chosen_res.dg_kcal,
+        "delta_g_3p": worst_dg,
         "order": chosen_order,
-        "extensible_strand": worst_ext_strand
+        "extensible_strand": worst_ext_strand,
+        "is_blocked_veto": worst_blocked
     }
     return is_amplifiable, worst_dg, details
-

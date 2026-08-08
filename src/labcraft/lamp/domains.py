@@ -82,32 +82,43 @@ class PhysicalPrimer:
     linker: str | None = None
     nominal_concentration: float | None = None
     parent_name: str | None = None
+    blocked_3prime: bool = False
+    label_5prime: str | None = None
     
     @classmethod
-    def from_simple(cls, name: str, sequence: str, role: PrimerRole, nominal_concentration: float | None = None, parent_name: str | None = None) -> PhysicalPrimer:
-        """Crée une amorce simple (ex: F3, B3, LF, LB)."""
+    def from_simple(
+        cls, name: str, sequence: str, role: PrimerRole, 
+        nominal_concentration: float | None = None, parent_name: str | None = None,
+        blocked_3prime: bool = False, label_5prime: str | None = None
+    ) -> PhysicalPrimer:
+        """Crée une amorce simple (ex: F3, B3, LF, LB, PROBE)."""
         return cls(
             name=name, sequence=sequence, role=role,
             binding_domain=sequence, tail_domain=None, linker=None,
-            nominal_concentration=nominal_concentration, parent_name=parent_name
+            nominal_concentration=nominal_concentration, parent_name=parent_name,
+            blocked_3prime=blocked_3prime, label_5prime=label_5prime
         )
 
     @classmethod
     def from_domains(
-        cls, name: str, role: PrimerRole, tail: str, f2_b2: str, linker: str = "", nominal_concentration: float | None = None, parent_name: str | None = None
+        cls, name: str, role: PrimerRole, tail: str, f2_b2: str, linker: str = "", 
+        nominal_concentration: float | None = None, parent_name: str | None = None,
+        blocked_3prime: bool = False, label_5prime: str | None = None
     ) -> PhysicalPrimer:
         """Déclaration manuelle explicite des domaines."""
         seq = tail + linker + f2_b2
         return cls(
             name=name, sequence=seq, role=role,
             binding_domain=f2_b2, tail_domain=tail, linker=linker if linker else None,
-            nominal_concentration=nominal_concentration, parent_name=parent_name
+            nominal_concentration=nominal_concentration, parent_name=parent_name,
+            blocked_3prime=blocked_3prime, label_5prime=label_5prime
         )
 
     @classmethod
     def from_alignment(
         cls, name: str, sequence: str, role: PrimerRole, target_seq: str,
-        allow_mismatches: bool = False, nominal_concentration: float | None = None, parent_name: str | None = None
+        allow_mismatches: bool = False, nominal_concentration: float | None = None, parent_name: str | None = None,
+        blocked_3prime: bool = False, label_5prime: str | None = None
     ) -> PhysicalPrimer:
         """Autodétection des domaines par alignement sur la cible.
         
@@ -149,7 +160,11 @@ class PhysicalPrimer:
         if best_binding_len == 0:
             if target_seq: # Only warn if we genuinely couldn't find it when target is provided
                 warnings.warn(f"Le domaine de liaison de {name} n'est pas trouvé sur la cible.", UserWarning)
-            return cls.from_simple(name, sequence, role, nominal_concentration, parent_name)
+            return cls.from_simple(
+                name, sequence, role, 
+                nominal_concentration=nominal_concentration, parent_name=parent_name,
+                blocked_3prime=blocked_3prime, label_5prime=label_5prime
+            )
             
         # Chercher le préfixe (tail domain)
         binding_idx = len(sequence) - best_binding_len
@@ -167,7 +182,12 @@ class PhysicalPrimer:
             # On fallback sur une séparation brutale (tout ce qui n'est pas binding est tail)
             tail = sequence[:binding_idx]
             binding = sequence[binding_idx:]
-            return cls(name=name, sequence=sequence, role=role, binding_domain=binding, tail_domain=tail, linker=None, nominal_concentration=nominal_concentration, parent_name=parent_name)
+            return cls(
+                name=name, sequence=sequence, role=role, 
+                binding_domain=binding, tail_domain=tail, linker=None, 
+                nominal_concentration=nominal_concentration, parent_name=parent_name,
+                blocked_3prime=blocked_3prime, label_5prime=label_5prime
+            )
             
         tail = sequence[:best_tail_len]
         binding = sequence[binding_idx:]
@@ -179,5 +199,6 @@ class PhysicalPrimer:
         return cls(
             name=name, sequence=sequence, role=role,
             binding_domain=binding, tail_domain=tail, linker=linker if linker else None,
-            nominal_concentration=nominal_concentration, parent_name=parent_name
+            nominal_concentration=nominal_concentration, parent_name=parent_name,
+            blocked_3prime=blocked_3prime, label_5prime=label_5prime
         )

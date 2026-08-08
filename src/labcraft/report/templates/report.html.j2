@@ -442,6 +442,51 @@
         {% endif %}
         {% endif %}
 
+        <!-- Contrôle des sondes TaqMan -->
+        {% if probe_tm_results %}
+        <h2>Contrôle des Sondes TaqMan (Règle du Tm)</h2>
+        <p style="font-size: 13px; color: var(--color-muted);">
+            Une sonde TaqMan doit idéalement avoir un Tm supérieur d'au moins 5 à 10 °C à celui des amorces pour garantir son hybridation avant l'élongation.
+            <br><i>Note : Le Tm est calculé à la concentration <b>réelle</b> de chaque oligo. Les amorces étant souvent plus concentrées que la sonde, cet écart à concentrations réelles peut être plus faible que l'écart théorique à concentration égale. L'avertissement à moins de 5 °C est indicatif. L'occupation à l'équilibre reste l'arbitre rigoureux de l'hybridation.</i>
+        </p>
+        <div class="target-box">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Sonde</th>
+                        <th>Concentration</th>
+                        <th>Tm Sonde (°C)</th>
+                        <th>Tm Max Amorces (°C)</th>
+                        <th>ΔTm (°C)</th>
+                        <th>Statut</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for res in probe_tm_results %}
+                    <tr>
+                        <td>
+                            <strong>{{ res.probe_name }}</strong>
+                        </td>
+                        <td>{{ "%.2e"|format(res.probe_conc) }} M</td>
+                        <td>{{ "%.1f"|format(res.probe_tm) }}</td>
+                        <td>{{ "%.1f"|format(res.max_primer_tm) }}</td>
+                        <td style="font-weight: bold; color: {% if res.is_ok %}var(--color-ok){% else %}var(--color-warning-text){% endif %};">
+                            {% if res.delta_tm > 0 %}+{% endif %}{{ "%.1f"|format(res.delta_tm) }}
+                        </td>
+                        <td>
+                            {% if res.is_ok %}
+                                <span style="background: var(--color-ok); color: white; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: bold;">OK</span>
+                            {% else %}
+                                <span style="background: var(--color-warning); color: var(--color-warning-text); padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: bold;">⚠️ TROP FAIBLE</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+
         <!-- Décomposition d'occupation -->
         <h2>Décomposition d'Occupation (Fractions)</h2>
         <p style="font-size: 13px; color: var(--color-muted); margin-bottom: 10px;">
@@ -459,7 +504,23 @@
         
         {% for primer, f in fractions.items() %}
         <div class="fraction-row">
-            <div class="primer-name">{{ primer }}</div>
+            <div class="primer-name">{{ primer }}
+                {% set p_obj = None %}
+                {% for p in primers_parent if p.name == primer %}
+                    {% set p_obj = p %}
+                {% endfor %}
+                {% if p_obj %}
+                    {% if p_obj.role.value == 'PROBE' %}
+                    <br><span style="background: #e9ecef; color: #495057; font-size: 9px; padding: 1px 4px; border-radius: 3px;">SONDE</span>
+                    {% endif %}
+                    {% if p_obj.blocked_3prime %}
+                    <br><span style="background: #ffc107; color: #856404; font-size: 9px; padding: 1px 4px; border-radius: 3px;">3' BLOQUÉ</span>
+                    {% endif %}
+                    {% if p_obj.label_5prime %}
+                    <br><span style="background: #17a2b8; color: #fff; font-size: 9px; padding: 1px 4px; border-radius: 3px;">5'-{{ p_obj.label_5prime }}</span>
+                    {% endif %}
+                {% endif %}
+            </div>
             <div class="bar-container">
                 {% if f.target_bound > 0.01 %}<div class="bar-segment bar-bound" style="width: {{ f.target_bound * 100 }}%">{{ f.target_bound|pct }}</div>{% endif %}
                 {% if f.free > 0.01 %}<div class="bar-segment bar-free" style="width: {{ f.free * 100 }}%">{{ f.free|pct }}</div>{% endif %}
@@ -604,7 +665,12 @@
                 <h4>{{ risk.complex_name }}</h4>
                 <strong style="color: var(--color-failure);">[CRITIQUE]</strong>
             </div>
-            <p style="margin-top: 0; margin-bottom: 10px;">{{ risk.description }}</p>
+            <p style="margin-top: 0; margin-bottom: 10px;">
+                {{ risk.description }}
+                {% if risk.is_blocked_veto %}
+                <br><strong style="color: var(--color-warning-text); font-size: 12px;">⚠️ Un des brins n'est pas amplifiable car son extrémité 3' est bloquée.</strong>
+                {% endif %}
+            </p>
             <div class="artefact-stats">
                 <div><strong>Concentration:</strong> {{ "%.2e"|format(risk.concentration) }} M</div>
                 <div><strong>ΔG global:</strong> {{ "%.2f"|format(risk.delta_g) }} kcal/mol</div>
@@ -690,7 +756,12 @@
             <div class="artefact-header">
                 <h4>{{ risk.complex_name }}</h4>
             </div>
-            <p style="margin-top: 0; margin-bottom: 10px;">{{ risk.description }}</p>
+            <p style="margin-top: 0; margin-bottom: 10px;">
+                {{ risk.description }}
+                {% if risk.is_blocked_veto %}
+                <br><strong style="color: var(--color-warning-text); font-size: 12px;">⚠️ Ce dimère aurait été amplifiable, mais n'est pas amplifiable : 3' bloqué.</strong>
+                {% endif %}
+            </p>
             <div class="artefact-stats">
                 <div><strong>Concentration:</strong> {{ "%.2e"|format(risk.concentration) }} M</div>
                 <div><strong>ΔG global:</strong> {{ "%.2f"|format(risk.delta_g) }} kcal/mol</div>

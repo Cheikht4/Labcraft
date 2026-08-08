@@ -39,8 +39,12 @@ def run_analysis(serotype, primers, skip_flp=False):
             
             backend = ViennaRNABackend()
             
+            from labcraft.lamp.domains import PhysicalPrimer, PrimerRole
+            p_a = PhysicalPrimer.from_simple("A", seq1, PrimerRole.FIP)
+            p_b = PhysicalPrimer.from_simple("B", seq2, PrimerRole.BIP)
+            
             is_amp, min_dg_3p, details = evaluate_pair_amplifiable(
-                seq1, seq2, backend, BST, temp_celsius=63.0
+                p_a, p_b, backend, BST, temp_celsius=63.0
             )
             
             if is_amp:
