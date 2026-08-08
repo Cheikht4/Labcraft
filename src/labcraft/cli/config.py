@@ -185,4 +185,17 @@ def build_engine_from_config(
         )
         profiles[t_id] = profile
 
+    # Vérification présence LNA pour forcer le backend SaltShift (même sans tampon)
+    has_lna = any(len(p.lna_positions) > 0 for p in primers)
+    if has_lna and not buffer_conf:
+        backend = ViennaSaltShiftBackend(UnifiedSaltModel())
+        backend_kwargs = {
+            'na_mm': 1000.0, # Neutral salt pour annuler ddG_sel
+            'k_mm': 0.0,
+            'tris_mm': 0.0,
+            'mg_mm': 0.0,
+            'dntp_mm': 0.0
+        }
+        # mon_molar reste None pour ne pas perturber calc_unfolding_penalty (qui utilise 1M par défaut)
+        
     return primers, primer_to_panel, backend, backend_kwargs, mon_molar, enzyme, temp_celsius, profiles

@@ -25,7 +25,8 @@ def is_amplifiable_dimer(
     enzyme: PolymeraseProfile,
     temp_celsius: float = 65.0,
     blocked_a: bool = False,
-    blocked_b: bool = False
+    blocked_b: bool = False,
+    lna_positions: tuple[int, ...] = ()
 ) -> Tuple[bool, float, str, bool]:
     """
     Détermine si un dimère (A + B) est amplifiable.
@@ -121,6 +122,9 @@ def is_amplifiable_dimer(
         
         from labcraft.thermo.backends.native import _NN_PARAMS, _SEQ_TO_NN_KEY
         
+        from labcraft.thermo.lna import load_lna_params, _LNA_PARAMS_MXL, _LNA_PARAMS_XLN
+        load_lna_params()
+        
         for i in range(len(segment_seq) - 1):
             dinuc = segment_seq[i:i+2]
             key = _SEQ_TO_NN_KEY.get(dinuc)
@@ -128,6 +132,22 @@ def is_amplifiable_dimer(
                 dh, ds = _NN_PARAMS[key]
                 dh_total += dh
                 ds_total += ds
+                
+            # LNA correction for this step
+            actual_idx = paired_indices[i]
+            next_actual_idx = paired_indices[i+1]
+            # Since paired_indices are contiguous 5' to 3' along the strand, 
+            # actual_idx and next_actual_idx are adjacent indices in the concatenated string.
+            if actual_idx in lna_positions:
+                key_xln = (segment_seq[i], segment_seq[i+1])
+                if key_xln in _LNA_PARAMS_XLN:
+                    dh_total += _LNA_PARAMS_XLN[key_xln][0]
+                    ds_total += _LNA_PARAMS_XLN[key_xln][1]
+            if next_actual_idx in lna_positions:
+                key_mxl = (segment_seq[i], segment_seq[i+1])
+                if key_mxl in _LNA_PARAMS_MXL:
+                    dh_total += _LNA_PARAMS_MXL[key_mxl][0]
+                    ds_total += _LNA_PARAMS_MXL[key_mxl][1]
                 
         # dG = dH - T*dS
         temp_k = temp_celsius + 273.15
@@ -219,11 +239,16 @@ def evaluate_pair_amplifiable(
     blocked_a = p_a.blocked_3prime
     blocked_b = p_b.blocked_3prime
     
+    lna_a = p_a.lna_positions
+    lna_b = p_b.lna_positions
+    
     if seq_a == seq_b:
         # Homodimère: un seul ordre suffit car la concaténation est symétrique
+        mapped_lna = tuple(list(lna_a) + [pos + len(seq_a) for pos in lna_a])
+        backend_kwargs['lna_positions'] = lna_a
         res = backend.calc_homodimer(seq_a, temp_celsius=temp_celsius, **backend_kwargs)
         struct, mfe = res.structure.replace('&', ''), res.dg_kcal
-        is_amp, dg_3p, ext_strand, blocked_veto = is_amplifiable_dimer(seq_a, seq_a, struct, mfe, enzyme, temp_celsius, blocked_a, blocked_b)
+        is_amp, dg_3p, ext_strand, blocked_veto = is_amplifiable_dimer(seq_a, seq_a, struct, mfe, enzyme, temp_celsius, blocked_a, blocked_b, lna_positions=mapped_lna)
         details = {
             "seq_a": seq_a, "seq_b": seq_a, "structure": res.structure, 
             "delta_g": mfe, "delta_g_3p": dg_3p,
@@ -234,13 +259,21 @@ def evaluate_pair_amplifiable(
         return is_amp, dg_3p, details
         
     # Hétérodimère: on évalue a&b ET b&a
+    backend_kwargs['lna_positions_a'] = lna_a
+    backend_kwargs['lna_positions_b'] = lna_b
+    
     res_ab = backend.calc_heterodimer(seq_a, seq_b, temp_celsius=temp_celsius, **backend_kwargs)
     struct_ab, mfe_ab = res_ab.structure.replace('&', ''), res_ab.dg_kcal
-    is_amp_ab, dg_3p_ab, ext_strand_ab, blocked_veto_ab = is_amplifiable_dimer(seq_a, seq_b, struct_ab, mfe_ab, enzyme, temp_celsius, blocked_a, blocked_b)
+    mapped_lna_ab = tuple(list(lna_a) + [pos + len(seq_a) for pos in lna_b])
+    is_amp_ab, dg_3p_ab, ext_strand_ab, blocked_veto_ab = is_amplifiable_dimer(seq_a, seq_b, struct_ab, mfe_ab, enzyme, temp_celsius, blocked_a, blocked_b, lna_positions=mapped_lna_ab)
     
+    # Pour b&a, on intervertit les rôles a et b
+    backend_kwargs['lna_positions_a'] = lna_b
+    backend_kwargs['lna_positions_b'] = lna_a
     res_ba = backend.calc_heterodimer(seq_b, seq_a, temp_celsius=temp_celsius, **backend_kwargs)
     struct_ba, mfe_ba = res_ba.structure.replace('&', ''), res_ba.dg_kcal
-    is_amp_ba, dg_3p_ba, ext_strand_ba, blocked_veto_ba = is_amplifiable_dimer(seq_b, seq_a, struct_ba, mfe_ba, enzyme, temp_celsius, blocked_b, blocked_a)
+    mapped_lna_ba = tuple(list(lna_b) + [pos + len(seq_b) for pos in lna_a])
+    is_amp_ba, dg_3p_ba, ext_strand_ba, blocked_veto_ba = is_amplifiable_dimer(seq_b, seq_a, struct_ba, mfe_ba, enzyme, temp_celsius, blocked_b, blocked_a, lna_positions=mapped_lna_ba)
     
     is_amplifiable = is_amp_ab or is_amp_ba
     

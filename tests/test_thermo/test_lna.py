@@ -79,3 +79,57 @@ def test_global_effect():
     
     assert res_lna.tm_celsius > res_dna.tm_celsius
     assert res_lna.dg_kcal < res_dna.dg_kcal
+
+def test_phase2_vienna_salt_shift_lna():
+    """LNA in ViennaSaltShiftBackend should result in a more negative dG than without LNA."""
+    from labcraft.thermo.backends.vienna_salt import ViennaSaltShiftBackend
+    from labcraft.thermo.salt import UnifiedSaltModel
+    backend = ViennaSaltShiftBackend(UnifiedSaltModel())
+    
+    seq_dna = "CCTTGGACGGG"
+    seq_lna = "CCTTGG+ACGGG"
+    
+    def _revcomp(seq: str) -> str:
+        complement = {'A': 'T', 'T': 'A', 'C': 'G', 'G': 'C'}
+        return "".join(complement[c] for c in reversed(seq))
+        
+    bare, pos = parse_lna_sequence(seq_lna)
+    
+    # 1. Test hybridisation (duplex)
+    res_dna = backend.calc_duplex(seq_dna, _revcomp(seq_dna), temp_celsius=65.0)
+    res_lna = backend.calc_duplex(bare, _revcomp(bare), temp_celsius=65.0, lna_positions_a=tuple(pos))
+    assert res_lna.dg_kcal < res_dna.dg_kcal
+    
+    # 2. Test dimer with loop (LNA in a loop should not affect dG)
+    # If the LNA is not paired, it won't be counted in estimate_helix_thermo
+    # Let's create a hairpin with a loop.
+    res_hp_dna = backend.calc_hairpin("GGCCAATTGGCC", temp_celsius=65.0)
+    bare_hp, pos_hp = parse_lna_sequence("GGCCAA+TTGGCC") # +T in the loop
+    res_hp_lna = backend.calc_hairpin(bare_hp, temp_celsius=65.0, lna_positions=tuple(pos_hp))
+    assert abs(res_hp_lna.dg_kcal - res_hp_dna.dg_kcal) < 0.01
+
+def test_phase2_remapping_ba():
+    from labcraft.thermo.backends.vienna_salt import ViennaSaltShiftBackend
+    from labcraft.thermo.salt import UnifiedSaltModel
+    backend = ViennaSaltShiftBackend(UnifiedSaltModel())
+    
+    seq_a = "ATGC"
+    seq_b_lna = "G+CAT"
+    
+    bare_a, pos_a = parse_lna_sequence(seq_a)
+    bare_b, pos_b = parse_lna_sequence(seq_b_lna)
+    
+    # calc_heterodimer A & B
+    res_ab_dna = backend.calc_heterodimer(bare_a, bare_b, temp_celsius=65.0)
+    res_ab_lna = backend.calc_heterodimer(bare_a, bare_b, temp_celsius=65.0, lna_positions_a=tuple(pos_a), lna_positions_b=tuple(pos_b))
+    
+    # calc_heterodimer B & A
+    res_ba_dna = backend.calc_heterodimer(bare_b, bare_a, temp_celsius=65.0)
+    res_ba_lna = backend.calc_heterodimer(bare_b, bare_a, temp_celsius=65.0, lna_positions_a=tuple(pos_b), lna_positions_b=tuple(pos_a))
+    
+    assert res_ab_lna.dg_kcal < res_ab_dna.dg_kcal
+    assert res_ba_lna.dg_kcal < res_ba_dna.dg_kcal
+    
+    # Since they are reverse concatenation, their energetics should be roughly symmetric or at least both stabilized.
+    assert abs(res_ab_lna.dg_kcal - res_ab_dna.dg_kcal) > 0.1
+    assert abs(res_ba_lna.dg_kcal - res_ba_dna.dg_kcal) > 0.1

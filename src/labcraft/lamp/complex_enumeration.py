@@ -139,9 +139,20 @@ def enumerate_complexes(
             
             try:
                 if i != j:
-                    res = backend.calc_heterodimer(p1.sequence, p2.sequence, temp_celsius=temp_celsius, **backend_kwargs)
+                    res = backend.calc_heterodimer(
+                        p1.sequence, p2.sequence, 
+                        temp_celsius=temp_celsius, 
+                        lna_positions_a=p1.lna_positions,
+                        lna_positions_b=p2.lna_positions,
+                        **backend_kwargs
+                    )
                 else:
-                    res = backend.calc_homodimer(p1.sequence, temp_celsius=temp_celsius, **backend_kwargs)
+                    res = backend.calc_homodimer(
+                        p1.sequence, 
+                        temp_celsius=temp_celsius, 
+                        lna_positions=p1.lna_positions,
+                        **backend_kwargs
+                    )
                 dg = res.dg_kcal
             except ValueError:
                 dg = 1.0 # Ignorer ce complexe
@@ -166,7 +177,25 @@ def enumerate_complexes(
             
             # Le backend calcule l'hybridation sur le domaine de liaison SEUL
             # On passe p.binding_domain et son reverse complement exact
-            res_hyb = backend.calc_duplex(p.binding_domain, _revcomp(p.binding_domain), temp_celsius=temp_celsius, **backend_kwargs)
+            
+            # Extract lna_positions for the binding domain only
+            # binding_domain is a substring of sequence. But how to map lna_positions to binding_domain?
+            # Actually, `PhysicalPrimer` doesn't currently easily expose `lna_positions` mapped to `binding_domain` because
+            # domains are complex. However, target hybridization usually happens on the F2/B2 or F3/B3 domains.
+            # `PhysicalPrimer` parsing handles it globally. To be accurate, we should map them if we can,
+            # or just calculate on the whole sequence.
+            # But the existing code uses p.binding_domain.
+            # Since LNA is an intrinsic part of the primer, we can find the offset of binding_domain in sequence.
+            offset = p.sequence.find(p.binding_domain)
+            bd_lna = tuple(pos - offset for pos in p.lna_positions if offset <= pos < offset + len(p.binding_domain)) if offset != -1 else ()
+            
+            res_hyb = backend.calc_duplex(
+                p.binding_domain, _revcomp(p.binding_domain), 
+                temp_celsius=temp_celsius, 
+                lna_positions_a=bd_lna,
+                lna_positions_b=(), # target has no LNA
+                **backend_kwargs
+            )
             dg_hyb = res_hyb.dg_kcal
             
             # Le calcul de l'accessibilité
