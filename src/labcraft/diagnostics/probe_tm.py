@@ -4,7 +4,7 @@ from labcraft.thermo.backends.base import DuplexEnergyBackend
 
 def check_probes_tm(
     primers: List[PhysicalPrimer],
-    backend: DuplexEnergyBackend,
+    backend: DuplexEnergyBackend, # Keep signature but we will override it for Tm
     temp_celsius: float,
     **backend_kwargs
 ) -> List[Dict[str, Any]]:
@@ -45,6 +45,10 @@ def check_probes_tm(
     if not probes:
         return []
         
+    # FORCE usage of NativeBackend to ensure LNA rules apply for melting temperature.
+    from labcraft.thermo.backends.native import NativeBackend
+    native_backend = NativeBackend()
+        
     # 2. Calculer le Tm des amorces
     primer_tms = []
     for p in other_primers:
@@ -55,7 +59,9 @@ def check_probes_tm(
         kw['ct_molar'] = conc
         # Duplexe parfait (oligo contre complément inverse)
         comp = _revcomp(p.sequence)
-        res = backend.calc_duplex(p.sequence, comp, temp_celsius=temp_celsius, **kw)
+        # LNA positions are taken directly from the PhysicalPrimer
+        kw['lna_positions'] = p.lna_positions
+        res = native_backend.calc_duplex(p.sequence, comp, temp_celsius=temp_celsius, **kw)
         if res.tm_celsius is not None:
             primer_tms.append(res.tm_celsius)
             
@@ -68,7 +74,8 @@ def check_probes_tm(
         kw = dict(backend_kwargs)
         kw['ct_molar'] = conc
         comp = _revcomp(p.sequence)
-        res = backend.calc_duplex(p.sequence, comp, temp_celsius=temp_celsius, **kw)
+        kw['lna_positions'] = p.lna_positions
+        res = native_backend.calc_duplex(p.sequence, comp, temp_celsius=temp_celsius, **kw)
         probe_tm = res.tm_celsius or 0.0
         
         delta = probe_tm - max_primer_tm

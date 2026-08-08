@@ -70,9 +70,13 @@ class NativeBackend(DuplexEnergyBackend):
         self.default_ct_molar = default_ct_molar
 
     def _calc_perfect_duplex(
-        self, seq: str, temp_celsius: float, ct_molar: float, saltcorr: float = 0.0
+        self, seq: str, temp_celsius: float, ct_molar: float, saltcorr: float = 0.0,
+        lna_positions: tuple[int, ...] = ()
     ) -> DuplexResult:
-        """Calcul interne pour un duplexe parfait de séquence `seq`."""
+        """Helper for perfect duplexes (homodimer or matching heterodimer)"""
+        from labcraft.thermo.lna import load_lna_params, _LNA_PARAMS_MXL, _LNA_PARAMS_XLN
+        load_lna_params()
+        
         seq = seq.upper()
         if not seq or len(seq) < 2:
             raise ValueError("Sequence too short for NN computation.")
@@ -111,6 +115,25 @@ class NativeBackend(DuplexEnergyBackend):
             except KeyError:
                 raise ValueError(f"Invalid dinucleotide '{dinuc}' in sequence.")
                 
+        # McTigue 2004 LNA Corrections
+        for idx in lna_positions:
+            if idx > 0:
+                base5 = seq[idx-1]
+                base_lna = seq[idx]
+                key_mxl = (base5, base_lna)
+                if key_mxl in _LNA_PARAMS_MXL:
+                    dh_mxl, ds_mxl = _LNA_PARAMS_MXL[key_mxl]
+                    dh_total += dh_mxl
+                    ds_total += ds_mxl
+            if idx < len(seq) - 1:
+                base_lna = seq[idx]
+                base3 = seq[idx+1]
+                key_xln = (base_lna, base3)
+                if key_xln in _LNA_PARAMS_XLN:
+                    dh_xln, ds_xln = _LNA_PARAMS_XLN[key_xln]
+                    dh_total += dh_xln
+                    ds_total += ds_xln
+                    
         # Salt correction (if provided by an external wrapper, else 0.0)
         ds_total += saltcorr
         
@@ -144,35 +167,34 @@ class NativeBackend(DuplexEnergyBackend):
         na_mm: float = 50.0, mg_mm: float = 0.0,
         k_mm: float = 0.0, tris_mm: float = 0.0, dntp_mm: float = 0.0,
         ct_molar: float | None = None,
+        **kwargs
     ) -> DuplexResult:
         """Compute heterodimer thermodynamics (must be perfect match)."""
+        lna_positions = kwargs.get('lna_positions', ())
         complement = {'A': 'T', 'T': 'A', 'C': 'G', 'G': 'C'}
         try:
-            rev_comp1 = "".join(complement[b] for b in reversed(seq1.upper()))
+            comp_seq = "".join(complement[c] for c in reversed(seq1.upper()))
         except KeyError:
-            raise ValueError("Invalid bases in sequence.")
+            raise ValueError("Invalid character in sequence for complementation.")
             
-        if rev_comp1 != seq2.upper():
-            raise ValueError("NativeBackend only supports perfectly matched duplexes (Watson-Crick).")
-            
-        if na_mm != 1000.0 and na_mm != 0.0:
-            # For now, we don't have Owczarzy implemented.
-            pass
+        if comp_seq != seq2.upper():
+            raise NotImplementedError("NativeBackend only supports perfectly matched heterodimers.")
             
         ct = ct_molar if ct_molar is not None else self.default_ct_molar
-        return self._calc_perfect_duplex(seq1, temp_celsius, ct, saltcorr=0.0)
+        return self._calc_perfect_duplex(seq1, temp_celsius, ct, saltcorr=0.0, lna_positions=lna_positions)
         
     def calc_homodimer(
         self, seq: str, *, temp_celsius: float = 65.0,
         na_mm: float = 50.0, mg_mm: float = 0.0,
         k_mm: float = 0.0, tris_mm: float = 0.0, dntp_mm: float = 0.0,
         ct_molar: float | None = None,
+        lna_positions: tuple[int, ...] = ()
     ) -> DuplexResult:
         """Compute homodimer thermodynamics (must be self-complementary)."""
         if not _is_self_complementary(seq):
             raise ValueError("Sequence is not self-complementary, cannot form perfect homodimer.")
         ct = ct_molar if ct_molar is not None else self.default_ct_molar
-        return self._calc_perfect_duplex(seq, temp_celsius, ct, saltcorr=0.0)
+        return self._calc_perfect_duplex(seq, temp_celsius, ct, saltcorr=0.0, lna_positions=lna_positions)
 
     def calc_hairpin(
         self, seq: str, *, temp_celsius: float = 65.0,
@@ -187,10 +209,11 @@ class NativeBackend(DuplexEnergyBackend):
         na_mm: float = 50.0, mg_mm: float = 0.0,
         k_mm: float = 0.0, tris_mm: float = 0.0, dntp_mm: float = 0.0,
         ct_molar: float | None = None,
+        **kwargs
     ) -> DuplexResult:
         return self.calc_heterodimer(
             seq1, seq2, temp_celsius=temp_celsius, 
             na_mm=na_mm, mg_mm=mg_mm, 
             k_mm=k_mm, tris_mm=tris_mm, dntp_mm=dntp_mm, 
-            ct_molar=ct_molar
+            ct_molar=ct_molar, **kwargs
         )

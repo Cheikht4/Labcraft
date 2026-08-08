@@ -84,6 +84,7 @@ class PhysicalPrimer:
     parent_name: str | None = None
     blocked_3prime: bool = False
     label_5prime: str | None = None
+    lna_positions: tuple[int, ...] = ()
     
     @classmethod
     def from_simple(
@@ -92,11 +93,14 @@ class PhysicalPrimer:
         blocked_3prime: bool = False, label_5prime: str | None = None
     ) -> PhysicalPrimer:
         """Crée une amorce simple (ex: F3, B3, LF, LB, PROBE)."""
+        from labcraft.thermo.lna import parse_lna_sequence
+        bare_seq, lna_pos = parse_lna_sequence(sequence)
         return cls(
-            name=name, sequence=sequence, role=role,
-            binding_domain=sequence, tail_domain=None, linker=None,
+            name=name, sequence=bare_seq, role=role,
+            binding_domain=bare_seq, tail_domain=None, linker=None,
             nominal_concentration=nominal_concentration, parent_name=parent_name,
-            blocked_3prime=blocked_3prime, label_5prime=label_5prime
+            blocked_3prime=blocked_3prime, label_5prime=label_5prime,
+            lna_positions=tuple(lna_pos)
         )
 
     @classmethod
@@ -106,12 +110,23 @@ class PhysicalPrimer:
         blocked_3prime: bool = False, label_5prime: str | None = None
     ) -> PhysicalPrimer:
         """Déclaration manuelle explicite des domaines."""
+        from labcraft.thermo.lna import parse_lna_sequence
+        
+        # Le parsing global permet de conserver l'information LNA
         seq = tail + linker + f2_b2
+        bare_seq, lna_pos = parse_lna_sequence(seq)
+        
+        # On parse aussi les domaines individuellement pour les stocker nus
+        bare_tail, _ = parse_lna_sequence(tail)
+        bare_linker, _ = parse_lna_sequence(linker)
+        bare_f2_b2, _ = parse_lna_sequence(f2_b2)
+        
         return cls(
-            name=name, sequence=seq, role=role,
-            binding_domain=f2_b2, tail_domain=tail, linker=linker if linker else None,
+            name=name, sequence=bare_seq, role=role,
+            binding_domain=bare_f2_b2, tail_domain=bare_tail, linker=bare_linker if bare_linker else None,
             nominal_concentration=nominal_concentration, parent_name=parent_name,
-            blocked_3prime=blocked_3prime, label_5prime=label_5prime
+            blocked_3prime=blocked_3prime, label_5prime=label_5prime,
+            lna_positions=tuple(lna_pos)
         )
 
     @classmethod
@@ -135,7 +150,10 @@ class PhysicalPrimer:
         if allow_mismatches:
             warnings.warn("L'alignement avec mismatches n'est pas supporté par défaut.", UserWarning)
             
-        sequence = sequence.upper()
+        from labcraft.thermo.lna import parse_lna_sequence
+        bare_seq, lna_pos = parse_lna_sequence(sequence.upper())
+        sequence = bare_seq
+        
         target_seq = target_seq.upper()
         target_rc = _revcomp(target_seq)
         
@@ -160,10 +178,14 @@ class PhysicalPrimer:
         if best_binding_len == 0:
             if target_seq: # Only warn if we genuinely couldn't find it when target is provided
                 warnings.warn(f"Le domaine de liaison de {name} n'est pas trouvé sur la cible.", UserWarning)
-            return cls.from_simple(
-                name, sequence, role, 
+            # Reconstruct original sequence to pass to from_simple
+            # Wait, from_simple will parse again, so we should just construct it directly here
+            return cls(
+                name=name, sequence=sequence, role=role,
+                binding_domain=sequence, tail_domain=None, linker=None,
                 nominal_concentration=nominal_concentration, parent_name=parent_name,
-                blocked_3prime=blocked_3prime, label_5prime=label_5prime
+                blocked_3prime=blocked_3prime, label_5prime=label_5prime,
+                lna_positions=tuple(lna_pos)
             )
             
         # Chercher le préfixe (tail domain)
@@ -186,7 +208,8 @@ class PhysicalPrimer:
                 name=name, sequence=sequence, role=role, 
                 binding_domain=binding, tail_domain=tail, linker=None, 
                 nominal_concentration=nominal_concentration, parent_name=parent_name,
-                blocked_3prime=blocked_3prime, label_5prime=label_5prime
+                blocked_3prime=blocked_3prime, label_5prime=label_5prime,
+                lna_positions=tuple(lna_pos)
             )
             
         tail = sequence[:best_tail_len]
@@ -200,5 +223,6 @@ class PhysicalPrimer:
             name=name, sequence=sequence, role=role,
             binding_domain=binding, tail_domain=tail, linker=linker if linker else None,
             nominal_concentration=nominal_concentration, parent_name=parent_name,
-            blocked_3prime=blocked_3prime, label_5prime=label_5prime
+            blocked_3prime=blocked_3prime, label_5prime=label_5prime,
+            lna_positions=tuple(lna_pos)
         )
