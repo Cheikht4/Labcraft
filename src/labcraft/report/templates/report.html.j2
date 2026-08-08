@@ -655,24 +655,10 @@
                 </div>
                 
                 <!-- Arrow (Only for amplifiable) -->
-                {% set three_prime_idx = -1 %}
-                {% set template_count = 0 %}
-                {% set before_arrow_count = 0 %}
-                {% for col in risk.alignment_columns %}
-                    {% if col.role == 'three_prime' %}
-                        {% set three_prime_idx = loop.index0 %}
-                    {% endif %}
-                    {% if col.role == 'template' %}
-                        {% set template_count = template_count + 1 %}
-                    {% endif %}
-                    {% if three_prime_idx == -1 and not col.is_truncation %}
-                        {% set before_arrow_count = before_arrow_count + 1 %}
-                    {% endif %}
-                {% endfor %}
-                
-                {% if three_prime_idx != -1 and template_count > 0 %}
-                <div class="amplification-arrow-container" style="margin-left: {{ 35 + before_arrow_count * 19 }}px;">
-                    <div class="amplification-arrow" style="width: {{ template_count * 19 }}px;">amplification</div>
+                {% if risk.arrow_metrics and risk.arrow_metrics.show %}
+                <div class="amplification-arrow-container" style="margin-left: {{ 35 + risk.arrow_metrics.margin_cols * 19 }}px; flex-direction: column; align-items: flex-start; margin-top: 2px;">
+                    <span style="font-size: 10px; color: var(--color-failure); margin-bottom: 2px;">amplification</span>
+                    <div class="amplification-arrow" style="width: {{ risk.arrow_metrics.width_cols * 19 }}px;"></div>
                 </div>
                 {% endif %}
                 
