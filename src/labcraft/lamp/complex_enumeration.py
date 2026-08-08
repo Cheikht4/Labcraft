@@ -30,7 +30,8 @@ def enumerate_complexes(
     profile: ConcentrationProfile = LAMP_DEFAULT_PROFILE,
     temp_celsius: float = 65.0,
     mon_molar: float | None = None,
-    buffer: dict | None = None
+    buffer: dict | None = None,
+    unfolding_window: int = 150
 ) -> Tuple[EquilibriumProblem, List[str], List[str], Dict[str, float]]:
     """Énumère toutes les espèces et génère le problème d'équilibre.
     
@@ -199,8 +200,17 @@ def enumerate_complexes(
             dg_hyb = res_hyb.dg_kcal
             
             # Le calcul de l'accessibilité
+            W = unfolding_window
+            s0 = site_info["start"]
+            e0 = site_info["end"]
+            win_start = max(0, s0 - W)
+            win_end = min(len(target_seq), e0 + W)
+            target_window = target_seq[win_start:win_end]
+            local_start = s0 - win_start
+            local_end = e0 - win_start
+
             dg_unfold = calc_unfolding_penalty(
-                target_seq, site_info["start"], site_info["end"], 
+                target_window, local_start, local_end, 
                 temp_celsius=temp_celsius, mon_molar=mon_molar
             )
             unfolding_penalties[site_name] = dg_unfold

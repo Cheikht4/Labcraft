@@ -94,3 +94,43 @@ class TestTargetUnfolding:
         # 2. Contrainte sur la tige 5' (pos 0 à 4, 0-based : GCGCA)
         dg_stem = calc_unfolding_penalty(seq, 0, 4, temp_celsius=37.0)
         assert dg_stem > 2.0, "Ouvrir une tige doit coûter cher."
+
+    def test_unfolding_windowing_equivalence(self):
+        """Vérifie que la fenêtre (windowing) dans enumerate_complexes donne le même résultat qu'un appel direct sur une petite séquence entière."""
+        from labcraft.lamp.complex_enumeration import enumerate_complexes
+        from labcraft.lamp.domains import PhysicalPrimer, PrimerRole
+        from labcraft.thermo.backends.vienna_salt import ViennaSaltShiftBackend
+        from labcraft.thermo.salt import UnifiedSaltModel
+        
+        # Séquence cible courte (moins que W=150 de chaque côté)
+        target_seq = "TGCGCATCGAAAAACGATGCGCGCAAAAGCCACCTTAAGCCACAGTAAAAA"
+        
+        backend = ViennaSaltShiftBackend(UnifiedSaltModel())
+        backend_kwargs = {'na_mm': 50.0, 'mg_mm': 8.0, 'dntp_mm': 1.4}
+        
+        primer = PhysicalPrimer.from_simple(
+            "F3",
+            "GCCACCTTAAGCCACAGTA",
+            PrimerRole.F3
+        )
+        
+        # Enumération avec windowing = 150 (la séquence fait <150 bases)
+        prob, s_names, c_names, unfold_penalties = enumerate_complexes(
+            [primer], target_seq, backend, 
+            temp_celsius=65.0, mon_molar=0.1, 
+            unfolding_window=150
+        )
+        
+        site_name = "F3_site"
+        assert site_name in unfold_penalties
+        dg_windowed = unfold_penalties[site_name]
+        
+        # Appel direct sans windowing
+        start = target_seq.find(primer.binding_domain)
+        end = start + len(primer.binding_domain)
+        dg_direct = calc_unfolding_penalty(
+            target_seq, start, end,
+            temp_celsius=65.0, mon_molar=0.1
+        )
+        
+        assert abs(dg_windowed - dg_direct) < 1e-6, f"Windowed: {dg_windowed}, Direct: {dg_direct}"
