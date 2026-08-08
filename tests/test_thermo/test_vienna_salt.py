@@ -55,7 +55,7 @@ def test_vienna_salt_shift_fgc_nbp():
     seq = "ATGCATGCATGCATGCATGC&GCATGCATGCATGCATGCAT"
     structure = "((((((((((((((((((((&))))))))))))))))))))"
     structure = structure.replace('&', '')
-    dh, ds, n_bp, f_gc = estimate_helix_thermo(seq, structure)
+    dh, ds, n_bp, f_gc, *_ = estimate_helix_thermo(seq, structure)
     assert n_bp == 20
     assert abs(f_gc - 0.5) < 0.01
 
