@@ -25,7 +25,7 @@ def _extract_pairs(structure: str) -> dict[int, int]:
 
 def estimate_helix_thermo(seq: str, structure: str) -> Tuple[float, float, int, float]:
     """Estime dH, dS, n_bp, f_gc from sequence and dot-bracket structure."""
-    seq = seq.replace('&', '+').upper()
+    seq = seq.replace('&', '').upper()
     pairs = _extract_pairs(structure)
     
     dh_total = 0.0
