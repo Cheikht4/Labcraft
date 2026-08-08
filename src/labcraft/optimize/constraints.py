@@ -96,7 +96,7 @@ def filter_no_new_artefacts(
         structure, mfe = RNA.cofold(seq_concat)
         struct_clean = structure.replace('&', '')
         
-        is_amp, min_dg_3p, ext_strand = is_amplifiable_dimer(
+        is_amp, min_dg_3p, ext_strand, blocked_veto = is_amplifiable_dimer(
             variant_seq, seq_partner, struct_clean, mfe, enzyme, temp_celsius=temp_celsius
         )
         

@@ -52,8 +52,7 @@ def check_probes_tm(
         conc = p.nominal_concentration if p.nominal_concentration else 0.8e-6
         # kwargs locaux
         kw = dict(backend_kwargs)
-        kw['strand_conc_a_molar'] = conc
-        kw['strand_conc_b_molar'] = conc
+        kw['ct_molar'] = conc
         # Duplexe parfait (oligo contre complément inverse)
         comp = _revcomp(p.sequence)
         res = backend.calc_duplex(p.sequence, comp, temp_celsius=temp_celsius, **kw)
@@ -67,8 +66,7 @@ def check_probes_tm(
     for p in probes:
         conc = p.nominal_concentration if p.nominal_concentration else 0.2e-6
         kw = dict(backend_kwargs)
-        kw['strand_conc_a_molar'] = conc
-        kw['strand_conc_b_molar'] = conc
+        kw['ct_molar'] = conc
         comp = _revcomp(p.sequence)
         res = backend.calc_duplex(p.sequence, comp, temp_celsius=temp_celsius, **kw)
         probe_tm = res.tm_celsius or 0.0

@@ -29,7 +29,7 @@ def test_amplifiable_dimer_cases():
     p_b = "TTTTCGCGCATGCAT"
     struct, mfe = RNA.cofold(f"{p_a}&{p_b}")
     
-    is_amp, dg_3p, ext = is_amplifiable_dimer(p_a, p_b, struct, mfe, BST_2_0)
+    is_amp, dg_3p, ext, blocked_veto = is_amplifiable_dimer(p_a, p_b, struct, mfe, BST_2_0)
     assert is_amp, "Le dimère a un 3' apparié et une matrice 5' sur le partenaire, il DOIT être amplifiable."
     
     # Cas 2 : Dimère avec 3' apparié mais SANS matrice (Blunt end / non extensible)
@@ -38,7 +38,7 @@ def test_amplifiable_dimer_cases():
     p_a = "ATGCATGCGCG"
     p_b = "CGCGCATGCAT"
     struct, mfe = RNA.cofold(f"{p_a}&{p_b}")
-    is_amp, dg_3p, ext = is_amplifiable_dimer(p_a, p_b, struct, mfe, BST_2_0)
+    is_amp, dg_3p, ext, blocked_veto = is_amplifiable_dimer(p_a, p_b, struct, mfe, BST_2_0)
     assert not is_amp, "Le 3' est apparié au bord 5' exact, pas de matrice au-delà, NE DOIT PAS être amplifiable."
     
     # Cas 3 : Dimère instable au 3' ou non apparié au 3'
@@ -47,6 +47,6 @@ def test_amplifiable_dimer_cases():
     p_a = "ATGCATGCGCGTTTT"
     p_b = "CGCGCATGCATTTT"
     struct, mfe = RNA.cofold(f"{p_a}&{p_b}")
-    is_amp, dg_3p, ext = is_amplifiable_dimer(p_a, p_b, struct, mfe, BST_2_0)
+    is_amp, dg_3p, ext, blocked_veto = is_amplifiable_dimer(p_a, p_b, struct, mfe, BST_2_0)
     assert not is_amp, "Le 3' de A est composé de TTTT non appariés, NE DOIT PAS être amplifiable."
 

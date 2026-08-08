@@ -8,13 +8,17 @@ def test_evaluate_pair_amplifiable_order():
     bip = "CTGTAGCTCCGTCGTGGGGATTTTCTAGTCTGCTACACCGTGC"
     
     backend = ViennaRNABackend()
-    is_amp, dg, details = evaluate_pair_amplifiable(flp, bip, backend, BST, 63.0)
+    from labcraft.lamp.domains import PhysicalPrimer, PrimerRole
+    p_flp = PhysicalPrimer.from_simple("FLP", flp, PrimerRole.FIP)
+    p_bip = PhysicalPrimer.from_simple("BIP", bip, PrimerRole.BIP)
+    
+    is_amp, dg, details = evaluate_pair_amplifiable(p_flp, p_bip, backend, BST, 63.0)
     
     assert is_amp is True
     assert abs(dg - -6.27) < 0.05
     assert details["order"] in ["a&b", "b&a"]
     
     # Reverse order should give the exact same output
-    is_amp2, dg2, details2 = evaluate_pair_amplifiable(bip, flp, backend, BST, 63.0)
+    is_amp2, dg2, details2 = evaluate_pair_amplifiable(p_bip, p_flp, backend, BST, 63.0)
     assert is_amp2 is True
     assert abs(dg2 - -6.27) < 0.05
