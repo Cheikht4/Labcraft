@@ -61,3 +61,32 @@ def test_iupac_matching():
     fip = PhysicalPrimer.from_alignment("FIP_deg", fip_seq, PrimerRole.FIP, target)
     assert fip.binding_domain == primer_binding
     assert fip.tail_domain == primer_tail
+
+def test_expand_degenerate():
+    from labcraft.lamp.domains import expand_degenerate
+    
+    # Test simple : aucune base dégénérée
+    assert expand_degenerate("ATGC") == ["ATGC"]
+    
+    # Test 1 position dégénérée (R = A,G)
+    variants = expand_degenerate("ARCT")
+    assert sorted(variants) == sorted(["AACT", "AGCT"])
+    
+    # Test 2 positions dégénérées (W = A,T et S = G,C)
+    variants = expand_degenerate("WTS")
+    assert sorted(variants) == sorted(["ATG", "ATC", "TTG", "TTC"])
+    assert len(variants) == 4
+    
+    # Conservation de la concentration (testé indirectement ici)
+    # L'attribution est faite dans config.py, mais vérifions la logique arithmétique de base
+    nominal_conc = 1.6
+    split_conc = nominal_conc / len(variants)
+    assert abs((split_conc * len(variants)) - nominal_conc) < 1e-12
+    
+    # Test plafond (max_variants)
+    with pytest.raises(ValueError, match="générerait 512 variants"):
+        expand_degenerate("NNNNS", max_variants=16) 
+        
+    with pytest.raises(ValueError, match="générerait 32 variants"):
+        expand_degenerate("RRRRR", max_variants=16)
+

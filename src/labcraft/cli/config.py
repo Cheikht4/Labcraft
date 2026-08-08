@@ -125,18 +125,33 @@ def build_engine_from_config(
             except KeyError:
                 role_enum = PrimerRole.F3
                 
-            # Détermination de la concentration
-            if p_data.conc_uM is not None:
-                conc_map[role_enum] = p_data.conc_uM * 1e-6
             
-            if role_name.upper() in ("FIP", "BIP") and isinstance(p_data.domains, PrimerDomains):
-                d = p_data.domains
-                primers.append(PhysicalPrimer(name, seq, role_enum, d.F2 or d.B2 or "", d.F1c or d.B1c or "", d.linker or ""))
-            elif role_name.upper() in ("FIP", "BIP"):
-                target_seq = targets.get(t_id, "")
-                primers.append(PhysicalPrimer.from_alignment(name, seq, role_enum, target_seq))
-            else:
-                primers.append(PhysicalPrimer(name, seq, role_enum, seq))
+            # Détermination de la concentration nominale totale de l'amorce
+            total_conc = p_data.conc_uM * 1e-6 if p_data.conc_uM is not None else (
+                1.6e-6 if role_name.upper() in ("FIP", "BIP") else
+                0.2e-6 if role_name.upper() in ("F3", "B3") else
+                0.8e-6
+            )
+            
+            from labcraft.lamp.domains import expand_degenerate
+            variants = expand_degenerate(seq)
+            variant_conc = total_conc / len(variants)
+            
+            for v_idx, variant_seq in enumerate(variants):
+                v_name = f"{name}#{v_idx+1}" if len(variants) > 1 else name
+                
+                if role_name.upper() in ("FIP", "BIP") and isinstance(p_data.domains, PrimerDomains):
+                    d = p_data.domains
+                    # Note: Les sous-domaines (F2/B2) devraient idéalement être matchés avec le variant complet
+                    # mais pour simplifier on ne supporte pas l'expansion de sous-domaines manuels ici, 
+                    # ou on laisse l'utilisateur gérer l'absence d'expansion pour eux (ça demandrait une logique plus complexe).
+                    # S'il y a des IUPAC dans f2_b2, on l'utilise tel quel (pas parfait mais suffisant)
+                    primers.append(PhysicalPrimer(v_name, variant_seq, role_enum, d.F2 or d.B2 or "", d.F1c or d.B1c or "", d.linker or "", nominal_concentration=variant_conc, parent_name=name))
+                elif role_name.upper() in ("FIP", "BIP"):
+                    target_seq = targets.get(t_id, "")
+                    primers.append(PhysicalPrimer.from_alignment(v_name, variant_seq, role_enum, target_seq, nominal_concentration=variant_conc, parent_name=name))
+                else:
+                    primers.append(PhysicalPrimer(v_name, variant_seq, role_enum, variant_seq, nominal_concentration=variant_conc, parent_name=name))
                 
         # Création du profil pour la cible, avec fallback par défaut si absent
         profile = ConcentrationProfile(

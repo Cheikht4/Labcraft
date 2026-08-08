@@ -21,14 +21,26 @@ def load_primers(csv_path: str) -> tuple[list[PhysicalPrimer], dict[str, float]]
             elif role_str == "BLOOP":
                 role_str = "LB"
                 
-            p = PhysicalPrimer(
-                name=row["name"],
-                sequence=row["sequence"],
-                role=PrimerRole(role_str),
-                binding_domain=row["sequence"]
-            )
-            primers.append(p)
-            concentrations_1x[p.name] = float(row["conc_std_uM"]) * 1e-6
+            
+            from labcraft.lamp.domains import expand_degenerate
+            name = row["name"]
+            variants = expand_degenerate(row["sequence"])
+            total_conc = float(row["conc_std_uM"]) * 1e-6
+            v_conc = total_conc / len(variants)
+            
+            for v_idx, v_seq in enumerate(variants):
+                v_name = f"{name}#{v_idx+1}" if len(variants) > 1 else name
+                p = PhysicalPrimer(
+                    name=v_name,
+                    sequence=v_seq,
+                    role=PrimerRole(role_str),
+                    binding_domain=v_seq,
+                    nominal_concentration=v_conc,
+                    parent_name=name
+                )
+                primers.append(p)
+                concentrations_1x[p.name] = v_conc
+            
             
     return primers, concentrations_1x
 

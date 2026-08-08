@@ -30,6 +30,31 @@ IUPAC_DNA = {
     'H': '[ACT]', 'V': '[ACG]', 'N': '[ACGT]'
 }
 
+IUPAC_EXPANSION = {
+    'A': ['A'], 'C': ['C'], 'G': ['G'], 'T': ['T'],
+    'R': ['A', 'G'], 'Y': ['C', 'T'], 'S': ['G', 'C'], 'W': ['A', 'T'],
+    'K': ['G', 'T'], 'M': ['A', 'C'], 'B': ['C', 'G', 'T'], 'D': ['A', 'G', 'T'],
+    'H': ['A', 'C', 'T'], 'V': ['A', 'C', 'G'], 'N': ['A', 'C', 'G', 'T']
+}
+
+def expand_degenerate(seq: str, max_variants: int = 16) -> list[str]:
+    """
+    Développe une séquence avec des codes IUPAC dégénérés en toutes ses séquences concrètes.
+    Lève une ValueError si le nombre de variants dépasse max_variants.
+    """
+    import itertools
+    import math
+    
+    seq = seq.upper()
+    options = [IUPAC_EXPANSION.get(c, [c]) for c in seq]
+    
+    total_variants = math.prod(len(opts) for opts in options)
+    if total_variants > max_variants:
+        raise ValueError(f"La séquence {seq} générerait {total_variants} variants (limite: {max_variants}).")
+        
+    return ["".join(p) for p in itertools.product(*options)]
+
+
 def _iupac_to_regex(seq: str) -> str:
     return "".join(IUPAC_DNA.get(c.upper(), c) for c in seq)
 
@@ -55,30 +80,34 @@ class PhysicalPrimer:
     binding_domain: str
     tail_domain: str | None = None
     linker: str | None = None
+    nominal_concentration: float | None = None
+    parent_name: str | None = None
     
     @classmethod
-    def from_simple(cls, name: str, sequence: str, role: PrimerRole) -> PhysicalPrimer:
+    def from_simple(cls, name: str, sequence: str, role: PrimerRole, nominal_concentration: float | None = None, parent_name: str | None = None) -> PhysicalPrimer:
         """Crée une amorce simple (ex: F3, B3, LF, LB)."""
         return cls(
             name=name, sequence=sequence, role=role,
-            binding_domain=sequence, tail_domain=None, linker=None
+            binding_domain=sequence, tail_domain=None, linker=None,
+            nominal_concentration=nominal_concentration, parent_name=parent_name
         )
 
     @classmethod
     def from_domains(
-        cls, name: str, role: PrimerRole, tail: str, f2_b2: str, linker: str = ""
+        cls, name: str, role: PrimerRole, tail: str, f2_b2: str, linker: str = "", nominal_concentration: float | None = None, parent_name: str | None = None
     ) -> PhysicalPrimer:
         """Déclaration manuelle explicite des domaines."""
         seq = tail + linker + f2_b2
         return cls(
             name=name, sequence=seq, role=role,
-            binding_domain=f2_b2, tail_domain=tail, linker=linker if linker else None
+            binding_domain=f2_b2, tail_domain=tail, linker=linker if linker else None,
+            nominal_concentration=nominal_concentration, parent_name=parent_name
         )
 
     @classmethod
     def from_alignment(
         cls, name: str, sequence: str, role: PrimerRole, target_seq: str,
-        allow_mismatches: bool = False
+        allow_mismatches: bool = False, nominal_concentration: float | None = None, parent_name: str | None = None
     ) -> PhysicalPrimer:
         """Autodétection des domaines par alignement sur la cible.
         
@@ -120,7 +149,7 @@ class PhysicalPrimer:
         if best_binding_len == 0:
             if target_seq: # Only warn if we genuinely couldn't find it when target is provided
                 warnings.warn(f"Le domaine de liaison de {name} n'est pas trouvé sur la cible.", UserWarning)
-            return cls.from_simple(name, sequence, role)
+            return cls.from_simple(name, sequence, role, nominal_concentration, parent_name)
             
         # Chercher le préfixe (tail domain)
         binding_idx = len(sequence) - best_binding_len
@@ -138,7 +167,7 @@ class PhysicalPrimer:
             # On fallback sur une séparation brutale (tout ce qui n'est pas binding est tail)
             tail = sequence[:binding_idx]
             binding = sequence[binding_idx:]
-            return cls(name=name, sequence=sequence, role=role, binding_domain=binding, tail_domain=tail, linker=None)
+            return cls(name=name, sequence=sequence, role=role, binding_domain=binding, tail_domain=tail, linker=None, nominal_concentration=nominal_concentration, parent_name=parent_name)
             
         tail = sequence[:best_tail_len]
         binding = sequence[binding_idx:]
@@ -149,5 +178,6 @@ class PhysicalPrimer:
         
         return cls(
             name=name, sequence=sequence, role=role,
-            binding_domain=binding, tail_domain=tail, linker=linker if linker else None
+            binding_domain=binding, tail_domain=tail, linker=linker if linker else None,
+            nominal_concentration=nominal_concentration, parent_name=parent_name
         )

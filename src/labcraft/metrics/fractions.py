@@ -49,81 +49,101 @@ def compute_fractions(
     
     fractions = {}
     
+    # Dictionnaires pour accumuler les contributions absolues par parent
+    parent_totals = {}
+    parent_contributions = {}
+    parent_dominant = {}
+    
+    # 1. Obtenir le nom parent
+    def get_parent(name: str) -> str:
+        return name.split('#')[0] if '#' in name else name
+
     for j, p_name in enumerate(primer_names):
         if p_name.endswith("_site"):
             continue # On ne calcule pas les fractions de la cible
             
-        f_free = 0.0
-        f_hairpin = 0.0
-        f_homo = 0.0
-        f_hetero_intra = 0.0
-        f_hetero_inter = 0.0
-        f_target = 0.0
-        
-        # Total initial de l'amorce
+        parent = get_parent(p_name)
+        if parent not in parent_totals:
+            parent_totals[parent] = 0.0
+            parent_contributions[parent] = {
+                'free': 0.0, 'hairpin': 0.0, 'homo': 0.0,
+                'hetero_intra': 0.0, 'hetero_inter': 0.0, 'target': 0.0
+            }
+            parent_dominant[parent] = []
+            
         total = 0.0
-        
-        contributions = [] # Pour trouver le complexe dominant (hors free et target_bound)
         
         for i, c_name in enumerate(complex_names):
             coeff = stoichiometry[i, j]
             if coeff > 0:
-                # Concentration du complexe = exp(-dg/RT + stoich . u)
                 conc_complex = np.exp(-delta_g[i] / RT + np.dot(stoichiometry[i], u))
-                
-                # La contribution de ce complexe au total de l'amorce est coeff * conc_complex
                 contribution = coeff * conc_complex
                 total += contribution
                 
+                # Classifier la contribution
                 if c_name == f"{p_name}_free":
-                    f_free += contribution
+                    parent_contributions[parent]['free'] += contribution
                 elif c_name == f"{p_name}_hairpin":
-                    f_hairpin += contribution
-                    contributions.append((c_name, contribution))
+                    parent_contributions[parent]['hairpin'] += contribution
+                    parent_dominant[parent].append((c_name, contribution))
                 elif c_name == f"{p_name}_homo":
-                    f_homo += contribution
-                    contributions.append((c_name, contribution))
+                    parent_contributions[parent]['homo'] += contribution
+                    parent_dominant[parent].append((c_name, contribution))
                 elif "_on_" in c_name:
-                    f_target += contribution
+                    parent_contributions[parent]['target'] += contribution
                 else:
-                    # Hétérodimère
+                    # C'est un complexe avec au moins une autre amorce
+                    # Vérifions si TOUTES les amorces de ce complexe ont le MÊME parent
+                    other_parents = set()
                     is_inter = False
-                    if primer_to_panel:
-                        my_panel = primer_to_panel.get(p_name)
-                        # Trouver l'autre amorce
-                        for other_j, other_p in enumerate(primer_names):
-                            if other_j != j and stoichiometry[i, other_j] > 0:
+                    
+                    my_panel = primer_to_panel.get(p_name) if primer_to_panel else None
+                    
+                    for other_j, other_p in enumerate(primer_names):
+                        if other_j != j and stoichiometry[i, other_j] > 0:
+                            other_parent = get_parent(other_p)
+                            other_parents.add(other_parent)
+                            
+                            if primer_to_panel:
                                 other_panel = primer_to_panel.get(other_p)
                                 if my_panel and other_panel and my_panel != other_panel:
                                     is_inter = True
-                                    break
-                    
-                    if is_inter:
-                        f_hetero_inter += contribution
+                                    
+                    # Règle : Si l'autre amorce a le même parent, c'est un homodimère pour le parent
+                    if len(other_parents) == 1 and parent in other_parents:
+                        parent_contributions[parent]['homo'] += contribution
                     else:
-                        f_hetero_intra += contribution
-                        
-                    contributions.append((c_name, contribution))
+                        if is_inter:
+                            parent_contributions[parent]['hetero_inter'] += contribution
+                        else:
+                            parent_contributions[parent]['hetero_intra'] += contribution
+                            
+                    parent_dominant[parent].append((c_name, contribution))
                     
+        parent_totals[parent] += total
+        
+    for parent, total in parent_totals.items():
         if total > 0:
             dom_c = ""
             dom_f = 0.0
-            if contributions:
-                best_c, best_val = max(contributions, key=lambda x: x[1])
+            if parent_dominant[parent]:
+                # On peut regrouper les dominants de même nom ou garder le pire complexe individuel
+                # Gardons le pire complexe absolu
+                best_c, best_val = max(parent_dominant[parent], key=lambda x: x[1])
                 dom_c = best_c
                 dom_f = best_val / total
                 
-            fractions[p_name] = PrimerFractions(
-                free=f_free / total,
-                hairpin=f_hairpin / total,
-                homodimer=f_homo / total,
-                heterodimer_intra=f_hetero_intra / total,
-                heterodimer_inter=f_hetero_inter / total,
-                target_bound=f_target / total,
+            fractions[parent] = PrimerFractions(
+                free=parent_contributions[parent]['free'] / total,
+                hairpin=parent_contributions[parent]['hairpin'] / total,
+                homodimer=parent_contributions[parent]['homo'] / total,
+                heterodimer_intra=parent_contributions[parent]['hetero_intra'] / total,
+                heterodimer_inter=parent_contributions[parent]['hetero_inter'] / total,
+                target_bound=parent_contributions[parent]['target'] / total,
                 dominant_complex=dom_c,
                 dominant_fraction=dom_f
             )
         else:
-            fractions[p_name] = PrimerFractions(0, 0, 0, 0, 0, 0)
+            fractions[parent] = PrimerFractions(0, 0, 0, 0, 0, 0)
             
     return fractions

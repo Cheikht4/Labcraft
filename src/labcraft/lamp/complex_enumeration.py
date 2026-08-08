@@ -107,7 +107,7 @@ def enumerate_complexes(
     
     concentrations = np.zeros(n_strands)
     for i, p in enumerate(primers):
-        concentrations[i] = profile.get_concentration(p.role)
+        concentrations[i] = p.nominal_concentration if p.nominal_concentration is not None else profile.get_concentration(p.role)
     for i in range(n_sites):
         concentrations[n_primers + i] = profile.target
         

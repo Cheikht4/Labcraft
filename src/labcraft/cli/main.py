@@ -194,16 +194,32 @@ def analyze(
             all_unfolding_penalties[t_id] = unfolding_penalties
             
         # Extract interaction matrix (only need to do it once, as it's target-independent for dimer interactions)
+        # Extract interaction matrix (only need to do it once, as it's target-independent for dimer interactions)
         if not interaction_matrix:
+            def get_parent(name: str) -> str:
+                return name.split('#')[0] if '#' in name else name
+                
+            unique_parents = list(dict.fromkeys(get_parent(p.name) for p in primers))
+            
+            for parent1 in unique_parents:
+                interaction_matrix[parent1] = {}
+                for parent2 in unique_parents:
+                    interaction_matrix[parent1][parent2] = 0.0 # Default safe value
+                    
             for p1 in primers:
-                interaction_matrix[p1.name] = {}
+                parent1 = get_parent(p1.name)
                 for p2 in primers:
+                    parent2 = get_parent(p2.name)
+                    
                     if p1.name == p2.name:
                         res = backend.calc_homodimer(p1.sequence, temp_celsius=temp_celsius, **backend_kwargs)
                     else:
                         res = backend.calc_heterodimer(p1.sequence, p2.sequence, temp_celsius=temp_celsius, **backend_kwargs)
-                    interaction_matrix[p1.name][p2.name] = res.dg_kcal
-
+                        
+                    current_dg = interaction_matrix[parent1][parent2]
+                    # We take the minimum (strongest) delta G among all variants
+                    if current_dg == 0.0 or res.dg_kcal < current_dg:
+                        interaction_matrix[parent1][parent2] = res.dg_kcal
     # 5. Verdict
     verdict = generate_verdict(all_fractions, target_occupations, all_risks)
     
@@ -222,7 +238,7 @@ def analyze(
         "concentrations_fip_bip": "Per target (check config)",
         "concentrations_target": "Per target (check config)",
         "interaction_matrix": interaction_matrix,
-        "primer_names": [p.name for p in primers],
+        "primer_names": list(interaction_matrix.keys()),
         "unfolding_penalties": all_unfolding_penalties,
         "has_true_target": has_true_target
     }
