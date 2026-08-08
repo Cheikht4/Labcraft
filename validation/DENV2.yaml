@@ -9,43 +9,6 @@ experiment:
     tris_mM: 20.0
     mg_mM: 6.0
     dntp_mM: 1.4
-targets:
-- id: Target_D2131620
-  sequence_file: dummy.fasta
-  copies_per_uL: 1000.0
-- id: Target_D212141819
-  sequence_file: dummy.fasta
-  copies_per_uL: 1000.0
-- id: Target_D24
-  sequence_file: dummy.fasta
-  copies_per_uL: 1000.0
-- id: Target_D2151620
-  sequence_file: dummy.fasta
-  copies_per_uL: 1000.0
-- id: Target_D211199
-  sequence_file: dummy.fasta
-  copies_per_uL: 1000.0
-- id: Target_D2176
-  sequence_file: dummy.fasta
-  copies_per_uL: 1000.0
-- id: Target_D23
-  sequence_file: dummy.fasta
-  copies_per_uL: 1000.0
-- id: Target_D210
-  sequence_file: dummy.fasta
-  copies_per_uL: 1000.0
-- id: Target_D25
-  sequence_file: dummy.fasta
-  copies_per_uL: 1000.0
-- id: Target_D229
-  sequence_file: dummy.fasta
-  copies_per_uL: 1000.0
-- id: Target_D214197
-  sequence_file: dummy.fasta
-  copies_per_uL: 1000.0
-- id: Target_D2198
-  sequence_file: dummy.fasta
-  copies_per_uL: 1000.0
 primer_sets:
 - target: Target_D2131620
   primers:

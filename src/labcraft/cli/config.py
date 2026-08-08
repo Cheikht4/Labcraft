@@ -79,9 +79,11 @@ def build_engine_from_config(
     backend_kwargs = {}
     if buffer_conf:
         from labcraft.thermo.salt import UnifiedSaltModel, SaltCorrectedBackend
+        from labcraft.thermo.backends.vienna import ViennaRNABackend
+        from labcraft.thermo.backends.vienna_salt import ViennaSaltShiftBackend
         from labcraft.buffer.monovalent import get_total_monovalent
         
-        backend = SaltCorrectedBackend(ViennaRNABackend(), UnifiedSaltModel())
+        backend = ViennaSaltShiftBackend(UnifiedSaltModel())
         backend_kwargs = {
             'na_mm': buffer_conf.na_mM,
             'k_mm': buffer_conf.k_mM,

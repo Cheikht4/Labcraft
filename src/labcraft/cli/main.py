@@ -58,6 +58,9 @@ def analyze(
     for t in config_obj.targets:
         seq = read_fasta(t.sequence_file)
         targets[t.id] = seq
+        
+    if not targets:
+        targets = {"Compétition Sans Cible": ""}
 
     # 2. & 3. Build Internal Engine Components
     primers, primer_to_panel, backend, backend_kwargs, mon_molar, enzyme, temp_celsius, profiles = build_engine_from_config(config_obj, targets)
@@ -83,8 +86,13 @@ def analyze(
     
     for t_id, t_seq in targets.items():
         typer.echo(f"Solving for target {t_id}...")
+        # Si c'est le faux target, on utilise le premier profil dispo (ou un par défaut)
+        profile = profiles.get(t_id)
+        if profile is None and profiles:
+            profile = next(iter(profiles.values()))
+            
         prob, strands, complexes, unfolding_penalties = enumerate_complexes(
-            primers, t_seq, backend, profile=profiles[t_id], temp_celsius=temp_celsius, mon_molar=mon_molar, buffer=config_obj.experiment.buffer.model_dump() if config_obj.experiment.buffer else None
+            primers, t_seq, backend, profile=profile, temp_celsius=temp_celsius, mon_molar=mon_molar, buffer=config_obj.experiment.buffer.model_dump() if config_obj.experiment.buffer else None
         )
         
         res = solve_dual(prob)
