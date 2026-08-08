@@ -44,6 +44,17 @@ def run_analysis(serotype, primers, skip_flp=False):
             )
             
             if is_amp:
+                from labcraft.report.alignment import get_alignment_columns
+                cols = get_alignment_columns(details['seq_a'], details['seq_b'], details['structure'], details.get('extensible_strand'))
+                three_prime_idx = next((k for k, c in enumerate(cols) if c.get('role') == 'three_prime'), -1)
+                template_count = sum(1 for c in cols if c.get('role') == 'template')
+                before_arrow = sum(1 for c in cols[:three_prime_idx] if not c.get('is_truncation')) if three_prime_idx != -1 else 0
+                arrow_metrics = {
+                    "show": three_prime_idx != -1 and template_count > 0,
+                    "margin_cols": before_arrow,
+                    "width_cols": template_count
+                }
+                
                 amplifiable_dimers.append({
                     'primer1': p1['name'],
                     'primer2': p2['name'],
@@ -52,7 +63,9 @@ def run_analysis(serotype, primers, skip_flp=False):
                     'structure': details['structure'],
                     'mfe': details['delta_g'],
                     'dg_3p': min_dg_3p,
-                    'concentration': max(float(p1['conc_uM']), float(p2['conc_uM'])) * 1e-6
+                    'concentration': max(float(p1['conc_uM']), float(p2['conc_uM'])) * 1e-6,
+                    'alignment_columns': cols,
+                    'arrow_metrics': arrow_metrics
                 })
                     
     # Sort by dg_3p (most negative first)
@@ -106,7 +119,9 @@ def main():
             structure=d['structure'],
             delta_g=d['mfe'],
             delta_g_3p=d['dg_3p'],
-            alignment_ascii=format_alignment(d['seq1'], d['seq2'], d['structure'])
+            alignment_ascii=format_alignment(d['seq1'], d['seq2'], d['structure']),
+            alignment_columns=d.get('alignment_columns', []),
+            arrow_metrics=d.get('arrow_metrics', {})
         ))
         
     if len(results["DEN-3"]) > 0:

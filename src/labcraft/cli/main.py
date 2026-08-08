@@ -134,7 +134,18 @@ def analyze(
                         if 'alignment' not in details:
                             details['alignment'] = dotbracket_to_alignment(details['seq_a'], details['seq_b'], details['structure'])
                         if 'alignment_columns' not in details:
-                            details['alignment_columns'] = get_alignment_columns(details['seq_a'], details['seq_b'], details['structure'], details.get('extensible_strand'))
+                            cols = get_alignment_columns(details['seq_a'], details['seq_b'], details['structure'], details.get('extensible_strand'))
+                            details['alignment_columns'] = cols
+                            
+                            three_prime_idx = next((i for i, c in enumerate(cols) if c.get('role') == 'three_prime'), -1)
+                            template_count = sum(1 for c in cols if c.get('role') == 'template')
+                            before_arrow = sum(1 for c in cols[:three_prime_idx] if not c.get('is_truncation')) if three_prime_idx != -1 else 0
+                            
+                            details['arrow_metrics'] = {
+                                "show": three_prime_idx != -1 and template_count > 0,
+                                "margin_cols": before_arrow,
+                                "width_cols": template_count
+                            }
                     elif len(p_counts) == 2:
                         # Hétérodimère
                         k1, k2 = list(p_counts.keys())
@@ -145,7 +156,18 @@ def analyze(
                         if 'alignment' not in details:
                             details['alignment'] = dotbracket_to_alignment(details['seq_a'], details['seq_b'], details['structure'])
                         if 'alignment_columns' not in details:
-                            details['alignment_columns'] = get_alignment_columns(details['seq_a'], details['seq_b'], details['structure'], details.get('extensible_strand'))
+                            cols = get_alignment_columns(details['seq_a'], details['seq_b'], details['structure'], details.get('extensible_strand'))
+                            details['alignment_columns'] = cols
+                            
+                            three_prime_idx = next((i for i, c in enumerate(cols) if c.get('role') == 'three_prime'), -1)
+                            template_count = sum(1 for c in cols if c.get('role') == 'template')
+                            before_arrow = sum(1 for c in cols[:three_prime_idx] if not c.get('is_truncation')) if three_prime_idx != -1 else 0
+                            
+                            details['arrow_metrics'] = {
+                                "show": three_prime_idx != -1 and template_count > 0,
+                                "margin_cols": before_arrow,
+                                "width_cols": template_count
+                            }
             amplifiable_flags.append(is_amp)
             dimer_details.append(details)
             

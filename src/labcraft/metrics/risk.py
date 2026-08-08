@@ -16,9 +16,10 @@ class RiskItem:
     delta_g_3p: float = 0.0
     alignment_ascii: str = ""
     alignment_columns: list = field(default_factory=list)
+    arrow_metrics: dict = field(default_factory=dict)
 
 def evaluate_risks(
-    complex_names: List[str], 
+    complex_names: List[str],  
     concentrations: List[float], 
     amplifiable_flags: List[bool],
     is_warm_start: bool = True,
@@ -66,7 +67,8 @@ def evaluate_risks(
                 delta_g=details.get("delta_g", 0.0),
                 delta_g_3p=details.get("delta_g_3p", 0.0),
                 alignment_ascii=details.get("alignment", ""),
-                alignment_columns=details.get("alignment_columns", [])
+                alignment_columns=details.get("alignment_columns", []),
+                arrow_metrics=details.get("arrow_metrics", {})
             ))
             
     # Trier par risque global (sévérité * concentration)

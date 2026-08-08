@@ -80,9 +80,17 @@ def test_risk_item_alignment_columns():
         "structure": "((&))",
         "delta_g": -3.0,
         "delta_g_3p": -3.0,
-        "alignment_columns": [{"top": "A", "bottom": "T", "paired": True, "role": "three_prime"}]
+        "alignment_columns": [
+            {"top": "A", "bottom": "T", "paired": True, "role": "three_prime"},
+            {"top": "-", "bottom": "G", "paired": False, "role": "template"},
+            {"top": "-", "bottom": "C", "paired": False, "role": "template"}
+        ],
+        "arrow_metrics": {"show": True, "margin_cols": 0, "width_cols": 2}
     }]
     
     risks = evaluate_risks(complexes, concs, flags, is_warm_start=False, dimer_details=details)
     assert len(risks) == 1
-    assert risks[0].alignment_columns == [{"top": "A", "bottom": "T", "paired": True, "role": "three_prime"}]
+    assert len(risks[0].alignment_columns) == 3
+    assert risks[0].arrow_metrics["show"] is True
+    assert risks[0].arrow_metrics["margin_cols"] == 0
+    assert risks[0].arrow_metrics["width_cols"] == 2
