@@ -155,13 +155,18 @@ def get_alignment_columns(seq_a: str, seq_b: str, struct: str, extensible_strand
         columns.append(col)
         
     # 3. Annotation des rôles
+    # Le brin du haut (A) est rendu 5' -> 3' (gauche à droite), donc idx_a CROÎT de gauche à droite.
+    # Le brin du bas (B) est rendu 3' -> 5' (gauche à droite), donc idx_b DÉCROÎT de gauche à droite.
     if extensible_strand == 'a':
         for col in columns:
             if col["idx_a"] == l_a - 1:
                 col["role"] = "three_prime"
             elif col["idx_b"] is not None:
                 partner_of_3p = pairs.get(l_a - 1)
-                if partner_of_3p is not None and col["idx_b"] > partner_of_3p:
+                # Le brin B est lu de 3' vers 5' (de gauche à droite).
+                # Le template est la partie 5' de B, donc à DROITE du point d'appariement.
+                # Comme idx_b décroît de gauche à droite, à droite signifie idx_b < partner.
+                if partner_of_3p is not None and col["idx_b"] < partner_of_3p:
                     col["role"] = "template"
     elif extensible_strand == 'b':
         for col in columns:
@@ -169,7 +174,10 @@ def get_alignment_columns(seq_a: str, seq_b: str, struct: str, extensible_strand
                 col["role"] = "three_prime"
             elif col["idx_a"] is not None:
                 partner_of_3p = pairs.get(l_a + l_b - 1)
-                if partner_of_3p is not None and col["idx_a"] > partner_of_3p:
+                # Le brin A est lu de 5' vers 3' (de gauche à droite).
+                # Le template est la partie 5' de A, donc à GAUCHE du point d'appariement.
+                # Comme idx_a croît de gauche à droite, à gauche signifie idx_a < partner.
+                if partner_of_3p is not None and col["idx_a"] < partner_of_3p:
                     col["role"] = "template"
                     
     # 4. Compaction
