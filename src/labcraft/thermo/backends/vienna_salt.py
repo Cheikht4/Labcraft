@@ -170,17 +170,21 @@ class ViennaSaltShiftBackend(DuplexEnergyBackend):
             p1, p2 = seq.split('&', 1)
             if p1 == p2:
                 x = 1.0
-        else:
-            x = 1.0
             
-        if res.tm_celsius is not None and not math.isnan(res.tm_celsius):
-            if ct_molar > 0:
-                new_tm_k = (dh_corr * 1000.0) / (ds_corr + r_gas * math.log(ct_molar / x))
+            if res.tm_celsius is not None and not math.isnan(res.tm_celsius):
+                if ct_molar > 0:
+                    new_tm_k = (dh_corr * 1000.0) / (ds_corr + r_gas * math.log(ct_molar / x))
+                    new_tm_celsius = new_tm_k - 273.15
+                else:
+                    new_tm_celsius = res.tm_celsius
+            else:
+                new_tm_celsius = float('nan')
+        else:
+            if res.tm_celsius is not None and not math.isnan(res.tm_celsius) and ds_corr != 0.0:
+                new_tm_k = (dh_corr * 1000.0) / ds_corr
                 new_tm_celsius = new_tm_k - 273.15
             else:
-                new_tm_celsius = res.tm_celsius
-        else:
-            new_tm_celsius = float('nan')
+                new_tm_celsius = float('nan')
             
         return DuplexResult(
             dh_kcal=round(dh_corr, 2),
