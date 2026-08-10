@@ -84,8 +84,12 @@ def analyze(
     # For now, we simulate everything together against each target to get the target occupation.
     # Actually, a full multiplex solve computes everything in one matrix!
     # To keep it simple, we solve the full matrix with Target A, then Target B, and aggregate.
+    all_risks = []
+    has_true_target = False
     
-    results_by_target = {}
+    prob = None
+    strands = None
+    complexes = None
     
     for t_id, t_seq in targets.items():
         typer.echo(f"Solving for target {t_id}...")
@@ -224,11 +228,43 @@ def analyze(
     # 5. Verdict
     verdict = generate_verdict(all_fractions, target_occupations, all_risks)
     
+    # Recommandations
+    from labcraft.optimize.recommendations import generate_recommendations
+    recommendations = generate_recommendations(verdict)
+    
+    # Contrôle des Sondes TaqMan
+    probe_tm_results = []
+    if config_obj.experiment.chemistry == "PCR":
+        probe_tm_results = check_probes_tm(primers, primer_to_panel, backend, temp_celsius, **backend_kwargs)
+        
+    # Optimisation des concentrations
+    optimization_results = []
+    # On n'optimise que si le génome est présent et qu'il y a un vrai problème
+    # Mais le rapport peut toujours afficher les résultats.
+    # We need the last `prob`, `complexes`, `strands`
+    # Let's run it.
+    from labcraft.optimize.concentrations import optimize_concentrations
+    free_fractions = {p: f.free for p, f in all_fractions.items()}
+    if prob and complexes and strands:
+        optimization_results = optimize_concentrations(
+            prob_template=prob,
+            species_names=strands,
+            primers=primers,
+            target_dict=targets,
+            primer_to_panel=primer_to_panel,
+            original_free_fractions=free_fractions,
+            original_target_occupations={},
+            complex_names=complexes,
+            temp_celsius=temp_celsius,
+            backend=backend,
+            enzyme=enzyme
+        )
+    
+    
     # 5.5 Multiplex Balance & Mispriming
     from labcraft.metrics.balance import calculate_multiplex_balance
     from labcraft.diagnostics.mispriming import detect_inter_target_mispriming
     
-    free_fractions = {p: f.free for p, f in all_fractions.items()}
     panel_summaries, balance_cv = calculate_multiplex_balance(primer_to_panel, target_occupations, free_fractions)
     
     mispriming_risks = []
@@ -261,7 +297,11 @@ def analyze(
         "primer_to_panel": primer_to_panel,
         "panel_summaries": panel_summaries,
         "balance_cv": balance_cv,
-        "mispriming_risks": mispriming_risks
+        "mispriming_risks": mispriming_risks,
+        "recommendations": recommendations,
+        "optimization_results": optimization_results,
+        "probe_tm_results": probe_tm_results,
+        "primers_parent": primers
     }
     
     html = render_report(verdict, all_fractions, all_risks, metadata)

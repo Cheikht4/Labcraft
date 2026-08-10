@@ -1,4 +1,4 @@
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional, Union
 import copy
 import dataclasses
 import numpy as np
@@ -77,7 +77,7 @@ def optimize_concentrations(
     max_occ_drop_ratio: float = 0.20,
     min_tradeoff_factor: float = 2.0, # Gain relatif en dimères doit être >= N * Perte relative max en occupation
     min_dimer_reduction_ratio: float = 0.20 # Doit réduire les dimères d'au moins 20%
-) -> List[Dict[str, Any]]:
+) -> Union[Dict[str, Any], List[Any]]:
     
     # Identifier les dimères dangereux
     dangerous_complexes = get_dangerous_dimers(
@@ -205,6 +205,13 @@ def optimize_concentrations(
     
     # Calculer occupations initiales pour le garde-fou 20%
     occ_initial = best_metrics['initiations']
+    initial_metrics = best_metrics
+    
+    # We will track the max relative occupation drop achieved during the winning step,
+    # or just recompute it for the final state compared to the initial state.
+    final_rel_gain_dimers = 0.0
+    final_max_rel_occ_drop = 0.0
+    final_tradeoff_factor = 0.0
     
     for iteration in range(max_iter):
         changed = False
@@ -299,6 +306,9 @@ def optimize_concentrations(
                         best_metrics = metrics
                         best_c = c_test
                         changed = True
+                        final_rel_gain_dimers = rel_gain_dimers
+                        final_max_rel_occ_drop = max_rel_occ_drop
+                        final_tradeoff_factor = rel_gain_dimers / max_rel_occ_drop if max_rel_occ_drop > 0 else float('inf')
                     
             c_current[idx] = best_c
             
@@ -328,4 +338,20 @@ def optimize_concentrations(
                     "reason": "Réduction des dimères dangereux ou amélioration de l'équilibre multiplexe."
                 })
                 
-    return results
+    if results:
+        # Wrap results in a rich dict
+        return {
+            "suggestions": results,
+            "metrics": {
+                "dangerous_before": initial_metrics['dangerous'],
+                "dangerous_after": final_metrics['dangerous'],
+                "dangerous_gain_rel": final_rel_gain_dimers,
+                "initiations_before": initial_metrics['initiations'],
+                "initiations_after": final_metrics['initiations'],
+                "max_occ_drop_rel": final_max_rel_occ_drop,
+                "cv_before": initial_metrics['cv'],
+                "cv_after": final_metrics['cv'],
+                "tradeoff_factor": final_tradeoff_factor
+            }
+        }
+    return []

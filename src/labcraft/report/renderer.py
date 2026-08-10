@@ -16,7 +16,11 @@ def render_report(
     """
     # Chemin vers le template (relatif à ce fichier)
     template_dir = os.path.join(os.path.dirname(__file__), "templates")
-    env = jinja2.Environment(loader=jinja2.FileSystemLoader(template_dir))
+    env = jinja2.Environment(
+        loader=jinja2.FileSystemLoader(template_dir),
+        undefined=jinja2.StrictUndefined,
+        autoescape=True
+    )
     
     # On ajoute un filtre pour formatter les pourcentages
     def format_pct(value):

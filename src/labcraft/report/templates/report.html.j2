@@ -445,9 +445,86 @@
             {% endfor %}
         {% endif %}
         {% endif %}
+        
+        <!-- Recommandations Qualitatives -->
+        {% if metadata.recommendations %}
+        <h2>Recommandations</h2>
+        <div class="target-box">
+            <ul>
+                {% for rec in metadata.recommendations %}
+                <li style="margin-bottom: 10px;">{{ rec }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+        
+        <!-- Optimisation des Concentrations -->
+        <h2>Concentrations Suggérées</h2>
+        <div class="target-box">
+        {% if metadata.optimization_results and metadata.optimization_results.suggestions %}
+            <p>Ces concentrations améliorent l'équilibre INITIAL : moins de dimères dangereux, amorçage préservé. Ce n'est pas une prédiction de rendement. Une suggestion n'est émise que si la réduction relative des dimères dangereux dépasse au moins deux fois la perte relative d'occupation d'initiation la plus forte, et qu'aucune occupation ne chute de plus de 20 %. Les valeurs restent dans les plages LAMP usuelles et respectent la dominance des amorces internes. La validation finale reste expérimentale.</p>
+            
+            <table>
+                <thead>
+                    <tr>
+                        <th>Amorce</th>
+                        <th>Concentration Actuelle</th>
+                        <th>Concentration Suggérée</th>
+                        <th>Raison</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for sugg in metadata.optimization_results.suggestions %}
+                    <tr>
+                        <td><strong>{{ sugg.primer_name }}</strong></td>
+                        <td>{{ "%.2f"|format(sugg.original_conc * 1e6) }} µM</td>
+                        <td><strong style="color: var(--color-ok);">{{ "%.2f"|format(sugg.suggested_conc * 1e6) }} µM</strong></td>
+                        <td>{{ sugg.reason }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            
+            <div style="display: flex; gap: 20px; background: #f8f9fa; padding: 15px; border-radius: 6px; border: 1px solid var(--color-border); margin-top: 15px;">
+                {% set metrics = metadata.optimization_results.metrics %}
+                <div style="flex: 1;">
+                    <h4 style="margin-bottom: 5px; color: var(--color-ok);">Gain sur les Dimères DANGEREUX</h4>
+                    <p style="font-size: 24px; font-weight: bold; margin: 0; color: var(--color-ok);">
+                        {{ (metrics.dangerous_gain_rel * 100)|round(1) }} %
+                    </p>
+                    <p style="font-size: 12px; color: var(--color-muted); margin: 5px 0 0 0;">
+                        (Dimères amplifiables ou appariés en 3')<br>
+                        {{ "%.2f"|format(metrics.dangerous_before * 1e9) }} nM → {{ "%.2f"|format(metrics.dangerous_after * 1e9) }} nM
+                    </p>
+                </div>
+                <div style="flex: 1; border-left: 1px solid var(--color-border); padding-left: 20px;">
+                    <h4 style="margin-bottom: 5px; color: var(--color-failure);">Coût Maximal (Occupation)</h4>
+                    <p style="font-size: 24px; font-weight: bold; margin: 0; color: var(--color-failure);">
+                        -{{ (metrics.max_occ_drop_rel * 100)|round(1) }} %
+                    </p>
+                    <p style="font-size: 12px; color: var(--color-muted); margin: 5px 0 0 0;">
+                        Perte relative maximale d'amorçage
+                    </p>
+                </div>
+                <div style="flex: 1; border-left: 1px solid var(--color-border); padding-left: 20px;">
+                    <h4 style="margin-bottom: 5px;">Facteur de Compromis</h4>
+                    <p style="font-size: 24px; font-weight: bold; margin: 0;">
+                        x{{ "%.1f"|format(metrics.tradeoff_factor) }}
+                    </p>
+                    <p style="font-size: 12px; color: var(--color-muted); margin: 5px 0 0 0;">
+                        Le gain excède le coût d'un facteur {{ "%.1f"|format(metrics.tradeoff_factor) }}
+                    </p>
+                </div>
+            </div>
+            
+        {% else %}
+            <p>Aucun ajustement de concentration n'apporterait un gain supérieur à son coût.</p>
+        {% endif %}
+        </div>
+
 
         <!-- Contrôle des sondes TaqMan -->
-        {% if probe_tm_results %}
+        {% if metadata.probe_tm_results %}
         <h2>Contrôle des Sondes TaqMan (Règle du Tm)</h2>
         <p style="font-size: 13px; color: var(--color-muted);">
             Une sonde TaqMan doit idéalement avoir un Tm supérieur d'au moins 5 à 10 °C à celui des amorces pour garantir son hybridation avant l'élongation.
@@ -466,7 +543,7 @@
                     </tr>
                 </thead>
                 <tbody>
-                    {% for res in probe_tm_results %}
+                    {% for res in metadata.probe_tm_results %}
                     <tr>
                         <td>
                             <strong>{{ res.probe_name }}</strong>
@@ -506,19 +583,19 @@
         {% for primer, f in fractions.items() %}
         <div class="fraction-row">
             <div class="primer-name">{{ primer }}
-                {% set p_obj = None %}
-                {% for p in primers_parent if p.name == primer %}
-                    {% set p_obj = p %}
+                {% set ns = namespace(p_obj=None) %}
+                {% for p in metadata.primers_parent if p.name == primer %}
+                    {% set ns.p_obj = p %}
                 {% endfor %}
-                {% if p_obj %}
-                    {% if p_obj.role.value == 'PROBE' %}
+                {% if ns.p_obj %}
+                    {% if ns.p_obj.role.value == 'PROBE' %}
                     <br><span style="background: #e9ecef; color: #495057; font-size: 9px; padding: 1px 4px; border-radius: 3px;">SONDE</span>
                     {% endif %}
-                    {% if p_obj.blocked_3prime %}
+                    {% if ns.p_obj.blocked_3prime %}
                     <br><span style="background: #ffc107; color: #856404; font-size: 9px; padding: 1px 4px; border-radius: 3px;">3' BLOQUÉ</span>
                     {% endif %}
-                    {% if p_obj.label_5prime %}
-                    <br><span style="background: #17a2b8; color: #fff; font-size: 9px; padding: 1px 4px; border-radius: 3px;">5'-{{ p_obj.label_5prime }}</span>
+                    {% if ns.p_obj.label_5prime %}
+                    <br><span style="background: #17a2b8; color: #fff; font-size: 9px; padding: 1px 4px; border-radius: 3px;">5'-{{ ns.p_obj.label_5prime }}</span>
                     {% endif %}
                 {% endif %}
             </div>
@@ -910,7 +987,7 @@
                 Généré le : {{ metadata.timestamp }}
             </div>
             <div style="text-align: right;">
-                Température : {{ metadata.temperature_C }} °C<br>
+                Température : {{ metadata.temperature }} °C<br>
                 Max Residual (Solveur) : {{ "%.2e"|format(metadata.max_residual) }}<br>
                 Empreinte d'entrée (SHA256) : <code>{{ metadata.file_hash[:8] }}...</code>
             </div>
