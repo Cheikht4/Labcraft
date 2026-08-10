@@ -134,3 +134,53 @@ class TestTargetUnfolding:
         )
         
         assert abs(dg_windowed - dg_direct) < 1e-6, f"Windowed: {dg_windowed}, Direct: {dg_direct}"
+
+    def test_unfolding_windowing_triggers(self):
+        """Vérifie que le fenêtrage s'applique correctement sur une très grande cible."""
+        from labcraft.lamp.complex_enumeration import enumerate_complexes
+        from labcraft.lamp.domains import PhysicalPrimer, PrimerRole
+        from labcraft.thermo.backends.vienna_salt import ViennaSaltShiftBackend
+        from labcraft.thermo.salt import UnifiedSaltModel
+        
+        # Séquence cible très longue (plus de W*2 + len)
+        padding_5 = "A" * 200
+        padding_3 = "C" * 200
+        core_seq = "TGCGCATCGAAAAACGATGCGCGCAAAAGCCACCTTAAGCCACAGTAAAAA"
+        target_seq = padding_5 + core_seq + padding_3
+        
+        backend = ViennaSaltShiftBackend(UnifiedSaltModel())
+        
+        primer = PhysicalPrimer.from_simple(
+            "F3",
+            "GCCACCTTAAGCCACAGTA",
+            PrimerRole.F3
+        )
+        
+        # Enumération avec windowing de 30 bases
+        # La fenêtre sera [start - 30, end + 30]
+        prob, s_names, c_names, unfold_penalties = enumerate_complexes(
+            [primer], target_seq, backend, 
+            temp_celsius=65.0, mon_molar=0.1, 
+            unfolding_window=30
+        )
+        
+        site_name = "F3_site"
+        assert site_name in unfold_penalties
+        dg_windowed = unfold_penalties[site_name]
+        
+        # Résultat attendu : le repliement de la fenêtre isolée
+        start = target_seq.find(primer.binding_domain)
+        end = start + len(primer.binding_domain)
+        window_start = max(0, start - 30)
+        window_end = min(len(target_seq), end + 30)
+        
+        window_seq = target_seq[window_start:window_end]
+        local_start = start - window_start
+        local_end = end - window_start
+        
+        dg_expected = calc_unfolding_penalty(
+            window_seq, local_start, local_end,
+            temp_celsius=65.0, mon_molar=0.1
+        )
+        
+        assert abs(dg_windowed - dg_expected) < 1e-6, "Le repliement fenêtré doit correspondre à celui de la fenêtre isolée"

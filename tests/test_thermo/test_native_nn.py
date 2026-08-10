@@ -181,3 +181,4 @@ def test_owczarzy2004_validation():
     
     # On s'attend à une erreur moyenne de 1-2 °C
     assert mean_err < 2.5
+    assert max_err < 6.5

@@ -178,6 +178,9 @@ def test_owczarzy2008_mixed_regime():
         print(f"Mixte (0.22 <= R < 6.0)  : {np.mean(errors_by_r['mixed']):.2f} C (n={len(errors_by_r['mixed'])})")
     if errors_by_r["mg_dom"]:
         print(f"R >= 6.0 (Mg2+ dominant) : {np.mean(errors_by_r['mg_dom']):.2f} C (n={len(errors_by_r['mg_dom'])})")
+        
+    assert mean_all < 1.0, f"Moyenne globale {mean_all:.2f} °C > 1.0 °C (attendu < 1.0 °C)"
+    assert max_all < 3.5, f"Erreur maximale {max_all:.2f} °C > 3.5 °C (attendu < 3.5 °C)"
 
 
 def test_solver_path_consistency():
