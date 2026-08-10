@@ -2,24 +2,41 @@
 
 Recommandations qualitatives (non-séquentielles) pour l'optimisation.
 """
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from labcraft.metrics.verdict import PanelVerdict
+from labcraft.metrics.risk import RiskItem
 
-def generate_recommendations(verdict: PanelVerdict) -> List[str]:
+def generate_recommendations(verdict: PanelVerdict, risks: Optional[List[RiskItem]] = None) -> List[str]:
     """
-    Génère des recommandations qualitatives basées sur le verdict.
+    Génère des recommandations qualitatives basées sur le verdict ET les risques réels.
+    
+    La détection des dimères amplifiables se fonde sur les RiskItem (severity >= 10.0),
+    pas sur une recherche de sous-chaîne dans les causes du verdict.
+    Un panel portant des dimères amplifiables ne doit jamais être qualifié de sain.
     
     Args:
         verdict: Le verdict global du panel.
+        risks: La liste des risques évalués (RiskItem).
         
     Returns:
         Une liste de recommandations en clair.
     """
     recs = []
     
-    # Analyse des problèmes
-    has_amplifiable = any("amplifiable" in issue.cause.lower() for issue in verdict.issues)
-    has_blocking = any("bloquant" in issue.cause.lower() for issue in verdict.issues)
+    # Détection basée sur les risques réels (source de vérité)
+    # Detection based on actual risks (source of truth)
+    has_amplifiable = False
+    has_blocking = False
+    
+    if risks:
+        has_amplifiable = any(r.severity >= 10.0 and r.concentration > 1e-9 for r in risks)
+        has_blocking = any(r.severity < 10.0 and r.concentration > 1e-9 for r in risks)
+    
+    # Fallback sur le verdict si les risques ne sont pas passés (rétrocompatibilité)
+    # Fallback on verdict if risks are not passed (backward compatibility)
+    if risks is None:
+        has_amplifiable = any("amplifiable" in issue.cause.lower() for issue in verdict.issues)
+        has_blocking = any("bloquant" in issue.cause.lower() for issue in verdict.issues)
     
     if has_amplifiable:
         recs.append(

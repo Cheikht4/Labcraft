@@ -33,13 +33,24 @@ def calculate_multiplex_balance(
         
         for p_name, p_panel in primer_to_panel.items():
             if p_panel == panel:
-                panel_free_fracs.append(free_fractions.get(p_name, 0.0))
+                # Résoudre le parent pour le lookup des fractions libres
+                # Resolve parent for free fractions lookup
+                free_val = free_fractions.get(p_name, 0.0)
+                if free_val == 0.0 and '#' in p_name:
+                    free_val = free_fractions.get(p_name.split('#')[0], 0.0)
+                panel_free_fracs.append(free_val)
                 # Vérifier si c'est une amorce d'initiation
                 # (Les boucles ont souvent LF ou LB dans le nom)
                 if "LF" not in p_name and "LB" not in p_name:
-                    site_name = f"{p_name}_site"
+                    # Résoudre le parent pour le lookup du site cible
+                    # Resolve parent for target site lookup
+                    parent_name = p_name.split('#')[0] if '#' in p_name else p_name
+                    site_name = f"{parent_name}_site"
                     occ = target_occupations.get(panel, {}).get(site_name, 0.0)
-                    initiation_occs[p_name] = occ
+                    # Éviter les doublons : on ne garde qu'une entrée par parent
+                    # Avoid duplicates: keep only one entry per parent
+                    if parent_name not in initiation_occs:
+                        initiation_occs[parent_name] = occ
                     
         if initiation_occs:
             mean_occ = np.mean(list(initiation_occs.values()))

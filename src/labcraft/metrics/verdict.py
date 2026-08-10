@@ -32,7 +32,10 @@ def generate_verdict(
         # Mode avec cible(s)
         for target_id, occupations in target_occupations.items():
             for primer_name, f in fractions.items():
-                site_name = f"{primer_name}_site"
+                # Résoudre le parent pour le lookup du site cible
+                # Resolve parent for target site lookup
+                parent_name = primer_name.split('#')[0] if '#' in primer_name else primer_name
+                site_name = f"{parent_name}_site"
                 occ = occupations.get(site_name, 0.0)
                 
                 # Si le primer est censé cibler cette cible (ex: se termine par _A pour SynthA)
@@ -41,7 +44,7 @@ def generate_verdict(
                     # Filtrons pour ne signaler que les amorces qui SONT du panel de la cible
                     # (On suppose ici que F3_A cible SynthA, etc.)
                     target_suffix = target_id.replace("Synth", "")
-                    if not primer_name.endswith(f"_{target_suffix}"):
+                    if not parent_name.endswith(f"_{target_suffix}"):
                         continue
                     
                     is_crit = occ < 0.01

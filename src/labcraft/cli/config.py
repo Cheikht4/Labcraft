@@ -152,25 +152,65 @@ def build_engine_from_config(
             variants = expand_degenerate(seq)
             variant_conc = total_conc / len(variants)
             
+            # Enregistrer le nom parent dans primer_to_panel (pour les cas sans dégénérescence)
+            # Register parent name in primer_to_panel (for non-degenerate cases)
+            primer_to_panel[name] = t_id
+            
+            # Parse la séquence parente pour localiser les sous-domaines par position
+            # Parse the parent sequence to locate sub-domains by position
+            parent_bare, _ = parse_lna_sequence(seq)
+            
             for v_idx, variant_seq in enumerate(variants):
                 bare_seq, lna_pos = parse_lna_sequence(variant_seq)
                 v_name = f"{name}#{v_idx+1}" if len(variants) > 1 else name
                 
+                # Enregistrer chaque variant dans primer_to_panel
+                # Register each variant in primer_to_panel
+                if len(variants) > 1:
+                    primer_to_panel[v_name] = t_id
+                
                 if role_name.upper() in ("FIP", "BIP") and isinstance(p_data.domains, PrimerDomains):
                     d = p_data.domains
-                    # Note: Les sous-domaines (F2/B2) devraient idéalement être matchés avec le variant complet
-                    # mais pour simplifier on ne supporte pas l'expansion de sous-domaines manuels ici, 
-                    # ou on laisse l'utilisateur gérer l'absence d'expansion pour eux (ça demandrait une logique plus complexe).
-                    # S'il y a des IUPAC dans f2_b2, on l'utilise tel quel (pas parfait mais suffisant)
-                    d_f2 = parse_lna_sequence(d.F2 or d.B2 or "")[0]
-                    d_f1c = parse_lna_sequence(d.F1c or d.B1c or "")[0]
-                    d_linker = parse_lna_sequence(d.linker or "")[0]
-                    primers.append(PhysicalPrimer(
-                        v_name, bare_seq, role_enum, d_f2, d_f1c, d_linker, 
-                        nominal_concentration=variant_conc, parent_name=name,
-                        blocked_3prime=is_blocked, label_5prime=label,
-                        lna_positions=tuple(lna_pos)
-                    ))
+                    # Développer les sous-domaines par position dans le variant complet
+                    # Expand sub-domains by position in the full variant sequence
+                    d_f2_raw = d.F2 or d.B2 or ""
+                    d_f1c_raw = d.F1c or d.B1c or ""
+                    d_linker_raw = d.linker or ""
+                    
+                    d_f2_bare, _ = parse_lna_sequence(d_f2_raw)
+                    d_f1c_bare, _ = parse_lna_sequence(d_f1c_raw)
+                    d_linker_bare, _ = parse_lna_sequence(d_linker_raw)
+                    
+                    if len(variants) > 1 and d_f2_bare and d_f1c_bare:
+                        # Localiser les sous-domaines dans la séquence parente nue
+                        # Locate sub-domains in the bare parent sequence
+                        # Structure FIP: 5'-F1c-linker-F2-3'
+                        # Structure BIP: 5'-B1c-linker-B2-3'
+                        f1c_start = 0
+                        f1c_end = len(d_f1c_bare)
+                        linker_end = f1c_end + len(d_linker_bare)
+                        f2_start = linker_end
+                        f2_end = f2_start + len(d_f2_bare)
+                        
+                        # Extraire les sous-domaines depuis le variant par position
+                        # Extract sub-domains from variant by position
+                        variant_f1c = bare_seq[f1c_start:f1c_end]
+                        variant_linker = bare_seq[f1c_end:linker_end]
+                        variant_f2 = bare_seq[f2_start:f2_end]
+                        
+                        primers.append(PhysicalPrimer(
+                            v_name, bare_seq, role_enum, variant_f2, variant_f1c, variant_linker,
+                            nominal_concentration=variant_conc, parent_name=name,
+                            blocked_3prime=is_blocked, label_5prime=label,
+                            lna_positions=tuple(lna_pos)
+                        ))
+                    else:
+                        primers.append(PhysicalPrimer(
+                            v_name, bare_seq, role_enum, d_f2_bare, d_f1c_bare, d_linker_bare,
+                            nominal_concentration=variant_conc, parent_name=name,
+                            blocked_3prime=is_blocked, label_5prime=label,
+                            lna_positions=tuple(lna_pos)
+                        ))
                 elif role_name.upper() in ("FIP", "BIP"):
                     target_seq = targets.get(t_id, "")
                     primers.append(PhysicalPrimer.from_alignment(

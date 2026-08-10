@@ -45,7 +45,11 @@ def detect_inter_target_mispriming(
     K_LEN = 3
     
     for p in primers:
+        # Résoudre le nom parent pour le lookup (les variants portent nom#N)
+        # Resolve parent name for lookup (variants carry name#N)
         p_target = primer_to_panel.get(p.name)
+        if not p_target and '#' in p.name:
+            p_target = primer_to_panel.get(p.name.split('#')[0])
             
         if len(p.sequence) < K_LEN:
             continue

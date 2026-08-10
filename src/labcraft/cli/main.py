@@ -228,14 +228,17 @@ def analyze(
     # 5. Verdict
     verdict = generate_verdict(all_fractions, target_occupations, all_risks)
     
-    # Recommandations
+    # Recommandations (basées sur les risques réels, pas seulement le verdict)
+    # Recommendations (based on actual risks, not just verdict)
     from labcraft.optimize.recommendations import generate_recommendations
-    recommendations = generate_recommendations(verdict)
+    recommendations = generate_recommendations(verdict, risks=all_risks)
     
-    # Contrôle des Sondes TaqMan
+    # Contrôle des Sondes TaqMan : déclenché par la présence de sondes, pas par la chimie
+    # TaqMan probe check: triggered by presence of probes, not by chemistry field
     probe_tm_results = []
-    if config_obj.experiment.chemistry == "PCR":
-        probe_tm_results = check_probes_tm(primers, primer_to_panel, backend, temp_celsius, **backend_kwargs)
+    has_probes = any(p.role == PrimerRole.PROBE for p in primers)
+    if has_probes:
+        probe_tm_results = check_probes_tm(primers, backend, temp_celsius, **backend_kwargs)
         
     # Optimisation des concentrations
     optimization_results = []
