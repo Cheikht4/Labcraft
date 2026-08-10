@@ -89,3 +89,22 @@ def test_mispriming_no_homology(backend, enzyme):
     )
     
     assert len(risks) == 0
+
+def test_mispriming_case_insensitivity(backend, enzyme):
+    p = PhysicalPrimer.from_simple("F3_X", "ATCGATCGATCGATCG", PrimerRole.F3)
+    target_rc = _revcomp("ATCGATCGATCGATCG")
+    
+    # Génome majuscules
+    target_upper = "NNNN" + target_rc + "NNNN"
+    risks_upper = detect_inter_target_mispriming(
+        [p], {"F3_X": "X"}, {"YFV": target_upper}, backend, enzyme, temp_celsius=65.0
+    )
+    
+    # Génome minuscules
+    target_lower = target_upper.lower()
+    risks_lower = detect_inter_target_mispriming(
+        [p], {"F3_X": "X"}, {"YFV": target_lower}, backend, enzyme, temp_celsius=65.0
+    )
+    
+    assert len(risks_upper) > 0
+    assert len(risks_upper) == len(risks_lower)

@@ -23,7 +23,7 @@ def read_fasta(filepath: str) -> str:
     with open(filepath, 'r') as f:
         lines = f.read().splitlines()
     seq = "".join(line.strip() for line in lines if not line.startswith(">"))
-    return seq
+    return seq.upper()
 
 def hash_file(filepath: str) -> str:
     hasher = hashlib.sha256()

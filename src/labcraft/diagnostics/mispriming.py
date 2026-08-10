@@ -6,8 +6,17 @@ from labcraft.diagnostics.enzyme import PolymeraseProfile
 from labcraft.diagnostics.amplifiable_dimer import is_amplifiable_dimer
 
 def _revcomp(seq: str) -> str:
-    complement = {'A': 'T', 'T': 'A', 'C': 'G', 'G': 'C'}
-    return "".join(complement.get(c, 'N') for c in reversed(seq))
+    complement = {
+        'A': 'T', 'T': 'A', 'C': 'G', 'G': 'C',
+        'U': 'A',
+        'M': 'K', 'R': 'Y', 'W': 'W', 'S': 'S', 'Y': 'R', 'K': 'M',
+        'V': 'B', 'H': 'D', 'D': 'H', 'B': 'V',
+        'N': 'N'
+    }
+    try:
+        return "".join(complement[c] for c in reversed(seq.upper()))
+    except KeyError as e:
+        raise ValueError(f"Caractère non reconnu dans la séquence : {e.args[0]}")
 
 class MisprimingRisk(BaseModel):
     primer_name: str
@@ -37,8 +46,6 @@ def detect_inter_target_mispriming(
     
     for p in primers:
         p_target = primer_to_panel.get(p.name)
-        if not p_target:
-            continue
             
         if len(p.sequence) < K_LEN:
             continue
@@ -47,7 +54,8 @@ def detect_inter_target_mispriming(
         k_mer = _revcomp(p_3p)
         
         for t_id, t_seq in targets.items():
-            if t_id == p_target:
+            t_seq = t_seq.upper()
+            if p_target and t_id == p_target:
                 continue # Seulement inter-cible
                 
             # Chercher k_mer dans les deux brins
