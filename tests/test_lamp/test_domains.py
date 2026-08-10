@@ -51,8 +51,8 @@ def test_iupac_matching():
     # M = A ou C (matche A)
     # W = A ou T (matche T)
     # S = G ou C (matche G)
-    # N = n'importe quoi (matche C)
-    primer_binding = "MWSNATGCATGC" # => ATGCATGCATGC
+    # B = C, G ou T (matche C) — code d'ambiguïté vraie, PAS N
+    primer_binding = "MWSBATGCATGC" # => ATGCATGCATGC
     # On met une queue qui s'aligne d'au moins 12 bp
     primer_tail = "ATGCATGCATGC"
     

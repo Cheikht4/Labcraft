@@ -28,17 +28,29 @@ def test_complex_enumeration_counts():
     backend = MockBackend()
     
     # On crée 12 oligos distincts (2 panels de 6)
+    # 12 binding domains uniques de 15 nt, suffisamment distincts pour ne pas se matcher
+    # 12 unique 15-nt binding domains, distinct enough to avoid cross-matching
+    unique_bindings = [
+        "ACGTACGTACGTACG",  # F3_1
+        "TGCATGCATGCATGC",  # B3_1
+        "GACTGACTGACTGAC",  # FIP_1
+        "CTGACTGACTGACTG",  # BIP_1
+        "AGCTAGCTAGCTAGC",  # LF_1
+        "TCGATCGATCGATCG",  # LB_1
+        "AGTCAGTCAGTCAGT",  # F3_2
+        "TCAGTCAGTCAGTCA",  # B3_2
+        "GATCGATCGATCGAT",  # FIP_2
+        "CTAGCTAGCTAGCTA",  # BIP_2
+        "ATCGATCGATCGATC",  # LF_2
+        "GCTAGCTAGCTAGCT",  # LB_2
+    ]
     primers = []
     for p_id in range(1, 3): # Panel 1 et 2
-        for role_name in ["F3", "B3", "FIP", "BIP", "LF", "LB"]:
+        for role_idx, role_name in enumerate(["F3", "B3", "FIP", "BIP", "LF", "LB"]):
             role = PrimerRole[role_name]
-            # Des séquences purement bidons, assez distinctes
-            # Utilisons l'index pour générer un domaine de liaison unique
-            idx = (p_id - 1) * 6 + ["F3", "B3", "FIP", "BIP", "LF", "LB"].index(role_name)
-            base_motif = ["A", "C", "G", "T"][idx % 4] * 5 + ["T", "G", "C", "A"][idx % 4] * 5 + f"{idx:05d}"
-            seq = base_motif + f"_tail_{p_id}_{role_name}"
-            # On force le domaine de liaison à un petit bout
-            binding = base_motif
+            binding_idx = (p_id - 1) * 6 + role_idx
+            binding = unique_bindings[binding_idx]
+            seq = binding + "AAACCCGGGTTT"  # tail arbitraire
             primers.append(PhysicalPrimer(
                 name=f"{role_name}_{p_id}",
                 sequence=seq,
@@ -61,13 +73,15 @@ def test_complex_enumeration_counts():
     # 12 amorces physiques + 0 site (car la cible bidon ne matche pas les domaines)
     # Attends, si elle ne matche pas, on n'a que 12 brins.
     # On va tricher et rajouter la cible qui matche le premier F3
+    # On va tricher et rajouter la cible qui matche le premier F3
     target_match = primers[0].binding_domain
-    target = target_match + "ATGC" * 20
-    
+    # Padding qui ne contient aucun des 12 binding domains (séquence aléatoire fixe)
+    target = target_match + "GGTACCAAGGTTCCAAGGTT" * 4
+
     prob, strand_names, complex_names, _ = enumerate_complexes(
         primers, target, backend, profile=profile, temp_celsius=65.0
     )
-    
+
     # 12 amorces + 1 site cible = 13 brins
     assert prob.n_strands == 13
     

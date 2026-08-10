@@ -62,28 +62,54 @@ def _match_iupac_substring(query: str, target: str) -> bool:
     """
     return _find_iupac_substring(query, target) != -1
 
+# Codes d'ambiguïté VRAIE : la base est connue comme étant l'une de N possibilités.
+# N est EXCLU : il signifie « base inconnue » (trou d'assemblage, région masquée)
+# et ne doit jamais produire de correspondance.
+# True ambiguity codes: the base is known to be one of N possibilities.
+# N is EXCLUDED: it means 'unknown base' (assembly gap, masked region)
+# and must never produce a match.
+IUPAC_MATCHABLE = {
+    'A': {'A'}, 'C': {'C'}, 'G': {'G'}, 'T': {'T'},
+    'R': {'A', 'G'}, 'Y': {'C', 'T'}, 'S': {'G', 'C'}, 'W': {'A', 'T'},
+    'K': {'G', 'T'}, 'M': {'A', 'C'}, 'B': {'C', 'G', 'T'}, 'D': {'A', 'G', 'T'},
+    'H': {'A', 'C', 'T'}, 'V': {'A', 'C', 'G'},
+}
+
 def _find_iupac_substring(query: str, target: str) -> int:
     """
-    Retourne l'indice de la première occurrence de query dans target avec tolérance IUPAC bilatérale,
-    ou -1 si non trouvé.
+    Retourne l'indice de la première occurrence de query dans target avec tolérance
+    IUPAC bilatérale, ou -1 si non trouvé.
+
+    Règles d'appariement par position :
+    - Les codes d'ambiguïté vraie (R, Y, S, W, K, M, B, D, H, V) sont développés en
+      leur ensemble de bases possibles ; la correspondance est validée si les deux
+      ensembles s'intersectent.
+    - N (base inconnue) et tout caractère non reconnu sont traités comme NON APPARIABLES :
+      une position N de la cible ou de l'amorce interdit la correspondance à cette position.
     """
     q_len = len(query)
     t_len = len(target)
     if q_len == 0 or q_len > t_len:
         return -1
-        
-    q_sets = [set(IUPAC_EXPANSION.get(c.upper(), [c.upper()])) for c in query]
-    t_sets = [set(IUPAC_EXPANSION.get(c.upper(), [c.upper()])) for c in target]
-    
+
+    # Pré-calcul des ensembles de bases ; None signifie « non appariable »
+    # Pre-compute base sets; None means 'non-matchable'
+    q_sets = [IUPAC_MATCHABLE.get(c.upper()) for c in query]
+    t_sets = [IUPAC_MATCHABLE.get(c.upper()) for c in target]
+
     for i in range(t_len - q_len + 1):
         match = True
         for j in range(q_len):
-            if not q_sets[j].intersection(t_sets[i+j]):
+            q_s = q_sets[j]
+            t_s = t_sets[i + j]
+            # Si l'un des deux côtés est None (N ou inconnu), pas de correspondance
+            # If either side is None (N or unknown), no match
+            if q_s is None or t_s is None or not q_s.intersection(t_s):
                 match = False
                 break
         if match:
             return i
-            
+
     return -1
 def _revcomp(seq: str) -> str:
     complement = {'A': 'T', 'T': 'A', 'C': 'G', 'G': 'C',
