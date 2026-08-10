@@ -50,8 +50,8 @@ def test_owczarzy2008_golden_anchor():
 
 def test_owczarzy2008_mg_pure():
     """Validation de l'équation 16 pure (Mg2+) sur owczarzy2008_mg.csv."""
-    ref_mg_path = pathlib.Path("validation/reference_data/owczarzy2008_mg.csv")
-    ref_na_path = pathlib.Path("validation/reference_data/owczarzy2004_salt.csv")
+    ref_mg_path = pathlib.Path(__file__).parents[2] / "validation/reference_data/owczarzy2008_mg.csv"
+    ref_na_path = pathlib.Path(__file__).parents[2] / "validation/reference_data/owczarzy2004_salt.csv"
     
     df_mg = pd.read_csv(ref_mg_path)
     df_na = pd.read_csv(ref_na_path)
@@ -108,8 +108,8 @@ def test_owczarzy2008_mg_pure():
 
 def test_owczarzy2008_mixed_regime():
     """Validation du régime mixte et du sélecteur."""
-    ref_mixed_path = pathlib.Path("validation/reference_data/owczarzy2008_mixed.csv")
-    ref_na_path = pathlib.Path("validation/reference_data/owczarzy2004_salt.csv")
+    ref_mixed_path = pathlib.Path(__file__).parents[2] / "validation/reference_data/owczarzy2008_mixed.csv"
+    ref_na_path = pathlib.Path(__file__).parents[2] / "validation/reference_data/owczarzy2004_salt.csv"
     
     df_mixed = pd.read_csv(ref_mixed_path)
     df_na = pd.read_csv(ref_na_path)

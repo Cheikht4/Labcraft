@@ -10,7 +10,7 @@ from labcraft.thermo.salt import Owczarzy2004SaltModel, SaltCorrectedBackend
 
 def test_owczarzy2004_validations():
     """Valide la correction saline d'Owczarzy 2004 sous 3 angles."""
-    ref_path = pathlib.Path("validation/reference_data/owczarzy2004_salt.csv")
+    ref_path = pathlib.Path(__file__).parents[2] / "validation/reference_data/owczarzy2004_salt.csv"
     df = pd.read_csv(ref_path)
     
     salt_model = Owczarzy2004SaltModel()

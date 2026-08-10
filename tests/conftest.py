@@ -12,3 +12,8 @@ requires_nupack = pytest.mark.skipif(
     not HAS_NUPACK,
     reason="NUPACK not installed (optional validation dependency)"
 )
+
+import sys
+import pathlib
+project_root = pathlib.Path(__file__).parents[1]
+sys.path.insert(0, str(project_root))

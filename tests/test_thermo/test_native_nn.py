@@ -21,7 +21,7 @@ def _generate_random_sequence(length: int, gc_content: float) -> str:
 
 def test_hardcoded_parameters_match_reference():
     """Garantit qu'il n'y a pas eu d'erreur de transcription des paramètres SantaLucia 1998."""
-    ref_path = pathlib.Path("validation/reference_data/santalucia1998_params.csv")
+    ref_path = pathlib.Path(__file__).parents[2] / "validation/reference_data/santalucia1998_params.csv"
     df = pd.read_csv(ref_path)
     
     for _, row in df.iterrows():
@@ -130,7 +130,7 @@ def test_cross_validation_biopython():
 
 def test_golden_anchor():
     """Reproduit l'exemple manuel de SantaLucia & Hicks 2004."""
-    ref_path = pathlib.Path("validation/reference_data/santalucia1998_golden.csv")
+    ref_path = pathlib.Path(__file__).parents[2] / "validation/reference_data/santalucia1998_golden.csv"
     df = pd.read_csv(ref_path)
     backend = NativeBackend()
     
@@ -154,7 +154,7 @@ def test_golden_anchor():
 
 def test_owczarzy2004_validation():
     """Valide l'erreur moyenne et maximale contre Owczarzy 2004 à 1 M Na+."""
-    ref_path = pathlib.Path("validation/reference_data/owczarzy2004_salt.csv")
+    ref_path = pathlib.Path(__file__).parents[2] / "validation/reference_data/owczarzy2004_salt.csv"
     df = pd.read_csv(ref_path)
     backend = NativeBackend()
     

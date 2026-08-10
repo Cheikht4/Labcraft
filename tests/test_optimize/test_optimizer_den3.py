@@ -1,9 +1,10 @@
+import pathlib
 import pytest
 from labcraft.optimize.optimizer import optimize_primer
 from validation.validate_parida import load_parida_csv, run_analysis
 
 def test_optimizer_den3_flp():
-    path = "validation/reference_data/parida2005_lamp_primers.csv"
+    path = pathlib.Path(__file__).parents[2] / "validation/reference_data/parida2005_lamp_primers.csv"
     serotypes = load_parida_csv(path)
     den3_primers = serotypes["DEN-3"]
     
