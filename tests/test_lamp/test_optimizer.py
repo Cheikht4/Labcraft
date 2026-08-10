@@ -7,7 +7,7 @@ from labcraft.solver.dual import solve_dual
 from labcraft.lamp.domains import PhysicalPrimer, PrimerRole
 from labcraft.thermo.salt import UnifiedSaltModel
 from labcraft.thermo.backends.vienna_salt import ViennaSaltShiftBackend
-from labcraft.optimize.concentrations import optimize_concentrations
+from labcraft.optimize.concentrations import optimize_concentrations, get_dangerous_dimers
 from labcraft.diagnostics.enzyme import BST_2_0
 
 def test_guardrail_lower_concentration_lowers_initiation():
@@ -100,6 +100,29 @@ def test_optimizer_dimer_and_floor():
         # Just to check it produces something
         assert "primer_name" in r
         assert r["suggested_conc"] >= 0.8e-6 # Bound for FIP/BIP
+
+def test_get_dangerous_dimers_names_match_complexes():
+    """
+    Test que `get_dangerous_dimers` renvoie des noms de complexes
+    qui existent bien dans `complexes`.
+    """
+    backend = ViennaSaltShiftBackend(UnifiedSaltModel())
+    fip = PhysicalPrimer("FIP_1", sequence="ATCGTACGATCGATCGGGGGG", role=PrimerRole.FIP, binding_domain="ATCGTACGATCGATC", nominal_concentration=1.6e-6)
+    bip = PhysicalPrimer("BIP_1", sequence="TTTTAAAAAACCCCCC", role=PrimerRole.BIP, binding_domain="AAAAAA", nominal_concentration=1.6e-6)
+    
+    prob, species, complexes, _ = enumerate_complexes(
+        primers=[fip, bip],
+        target_seq="ATGCGTACGTGCAACTGATCGATCGTACGATCG",
+        backend=backend,
+        temp_celsius=65.0
+    )
+    
+    dangerous = get_dangerous_dimers(prob, complexes, species, [fip, bip], 65.0, backend, BST_2_0)
+    assert len(dangerous) > 0, "Doit détecter un dimère dangereux"
+    
+    # Vérifier que CHAQUE nom retourné est bien dans complexes
+    for d_name in dangerous:
+        assert d_name in complexes, f"Le nom de dimère {d_name} n'est pas dans les complexes générés: {complexes}"
 
 def test_optimizer_multiplex_balance():
     backend = ViennaSaltShiftBackend(UnifiedSaltModel())

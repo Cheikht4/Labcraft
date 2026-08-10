@@ -9,12 +9,49 @@ from labcraft.lamp.domains import PhysicalPrimer, PrimerRole
 from labcraft.metrics.balance import calculate_multiplex_balance
 from labcraft.diagnostics.amplifiable_dimer import evaluate_pair_amplifiable
 
-def get_dangerous_dimers(primers: List[PhysicalPrimer], temp_celsius: float, backend: Any, enzyme: Any) -> set[str]:
+def get_dangerous_dimers(
+    prob_template: EquilibriumProblem,
+    complex_names: List[str],
+    species_names: List[str],
+    primers: List[PhysicalPrimer],
+    temp_celsius: float, 
+    backend: Any, 
+    enzyme: Any
+) -> set[str]:
     dangerous = set()
-    for p1 in primers:
-        for p2 in primers:
-            if evaluate_pair_amplifiable(p1, p2, backend, enzyme, temp_celsius)[0]:
-                dangerous.add(f"{p1.name}_on_{p2.name}")
+    primer_map = {p.name: p for p in primers}
+    
+    pair_cache = {}
+    
+    for c_idx, c_name in enumerate(complex_names):
+        row = prob_template.stoichiometry[c_idx]
+        is_dimer = True
+        total_primers = 0
+        consumed_primers = []
+        
+        for s_idx, stoich in enumerate(row):
+            if stoich > 0:
+                s_name = species_names[s_idx]
+                if s_name.endswith("_site"):
+                    is_dimer = False
+                    break
+                if s_name in primer_map:
+                    total_primers += int(stoich)
+                    consumed_primers.extend([primer_map[s_name]] * int(stoich))
+                else:
+                    is_dimer = False
+                    break
+                    
+        if is_dimer and total_primers == 2 and len(consumed_primers) == 2:
+            p1, p2 = consumed_primers
+            key = tuple(sorted([p1.name, p2.name]))
+            if key not in pair_cache:
+                is_amp = evaluate_pair_amplifiable(p1, p2, backend, enzyme, temp_celsius)[0]
+                pair_cache[key] = is_amp
+                
+            if pair_cache[key]:
+                dangerous.add(c_name)
+                
     return dangerous
 
 def optimize_concentrations(
@@ -37,7 +74,9 @@ def optimize_concentrations(
 ) -> List[Dict[str, Any]]:
     
     # Identifier les dimères dangereux
-    dangerous_complexes = get_dangerous_dimers(primers, temp_celsius, backend, enzyme)
+    dangerous_complexes = get_dangerous_dimers(
+        prob_template, complex_names, species_names, primers, temp_celsius, backend, enzyme
+    )
     
     # Indexer
     primer_idx = {p.name: species_names.index(p.name) for p in primers if p.name in species_names}
