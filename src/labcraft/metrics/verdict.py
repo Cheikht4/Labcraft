@@ -20,12 +20,16 @@ class PanelVerdict:
 def generate_verdict(
     fractions: Dict[str, PrimerFractions], 
     target_occupations: Dict[str, Dict[str, float]],
-    risks: List[RiskItem]
+    risks: List[RiskItem],
+    loop_primer_parents: set[str] = None
 ) -> PanelVerdict:
     """
     Évalue le panel et identifie toutes les amorces en difficulté
     en nommant le mécanisme dominant réel pour chacune.
     """
+    if loop_primer_parents is None:
+        loop_primer_parents = set()
+        
     issues = []
     
     if target_occupations:
@@ -40,7 +44,7 @@ def generate_verdict(
                 
                 # Si le primer est censé cibler cette cible (ex: se termine par _A pour SynthA)
                 # ou s'il est physiquement en difficulté
-                if occ < 0.1 and not ("LF" in primer_name or "LB" in primer_name): # Moins de 10% d'occupation = amorce d'initiation en difficulté
+                if occ < 0.1 and parent_name not in loop_primer_parents: # Moins de 10% d'occupation = amorce d'initiation en difficulté
                     # Filtrons pour ne signaler que les amorces qui SONT du panel de la cible
                     # (On suppose ici que F3_A cible SynthA, etc.)
                     target_suffix = target_id.replace("Synth", "")

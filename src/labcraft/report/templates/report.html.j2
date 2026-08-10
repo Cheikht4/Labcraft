@@ -671,9 +671,10 @@
                 <tbody>
                     {% for site_name, penalty in penalties.items() %}
                     {% set target_occ = metadata.target_occupations.get(target, {}).get(site_name, 0.0) %}
+                    {% set site_parent = site_name.replace('_site', '').split('#')[0] %}
                     <tr>
                         <td>{{ site_name }}</td>
-                        {% if "LF" in site_name or "LB" in site_name %}
+                        {% if site_parent in metadata.loop_primer_parents %}
                             <td style="color: var(--color-muted); font-style: italic;">n/a, brin simple (boucle)</td>
                             <td style="color: var(--color-muted); font-style: italic;">n/a, brin simple (boucle)</td>
                         {% else %}

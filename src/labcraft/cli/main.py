@@ -226,7 +226,12 @@ def analyze(
                     if current_dg == 0.0 or res.dg_kcal < current_dg:
                         interaction_matrix[parent1][parent2] = res.dg_kcal
     # 5. Verdict
-    verdict = generate_verdict(all_fractions, target_occupations, all_risks)
+    def get_parent(name: str) -> str:
+        return name.split('#')[0] if '#' in name else name
+
+    loop_primer_parents = {get_parent(p.name) for p in primers if p.role in (PrimerRole.LF, PrimerRole.LB)}
+    
+    verdict = generate_verdict(all_fractions, target_occupations, all_risks, loop_primer_parents=loop_primer_parents)
     
     # Recommandations (basées sur les risques réels, pas seulement le verdict)
     # Recommendations (based on actual risks, not just verdict)
@@ -268,7 +273,9 @@ def analyze(
     from labcraft.metrics.balance import calculate_multiplex_balance
     from labcraft.diagnostics.mispriming import detect_inter_target_mispriming
     
-    panel_summaries, balance_cv = calculate_multiplex_balance(primer_to_panel, target_occupations, free_fractions)
+    panel_summaries, balance_cv = {}, None
+    if target_occupations:
+        panel_summaries, balance_cv = calculate_multiplex_balance(primer_to_panel, target_occupations, free_fractions, loop_primer_parents=loop_primer_parents)
     
     mispriming_risks = []
     if config_obj.targets and len(config_obj.targets) > 1:
@@ -301,9 +308,11 @@ def analyze(
         "panel_summaries": panel_summaries,
         "balance_cv": balance_cv,
         "mispriming_risks": mispriming_risks,
-        "recommendations": recommendations,
+        "chemistry": config_obj.experiment.chemistry,
         "optimization_results": optimization_results,
         "probe_tm_results": probe_tm_results,
+        "recommendations": recommendations,
+        "loop_primer_parents": list(loop_primer_parents),
         "primers_parent": primers
     }
     

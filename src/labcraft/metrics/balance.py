@@ -4,7 +4,8 @@ import numpy as np
 def calculate_multiplex_balance(
     primer_to_panel: Dict[str, str],
     target_occupations: Dict[str, Dict[str, float]],
-    free_fractions: Dict[str, float]
+    free_fractions: Dict[str, float],
+    loop_primer_parents: set[str] = None
 ) -> Tuple[Dict[str, dict], Optional[float]]:
     """
     Calcule la balance des panels en multiplexe.
@@ -20,6 +21,9 @@ def calculate_multiplex_balance(
         cv: Coefficient de variation inter-panels (std/mean), ou None si < 2 panels.
             Proche de 0 = panels équilibrés ; croissant = déséquilibre.
     """
+    if loop_primer_parents is None:
+        loop_primer_parents = set()
+        
     panels = set(primer_to_panel.values())
     
     panel_summaries = {}
@@ -39,9 +43,12 @@ def calculate_multiplex_balance(
                 if free_val == 0.0 and '#' in p_name:
                     free_val = free_fractions.get(p_name.split('#')[0], 0.0)
                 panel_free_fracs.append(free_val)
+                
+                # Résoudre le parent pour le lookup du site cible
+                parent_name = p_name.split('#')[0] if '#' in p_name else p_name
+                
                 # Vérifier si c'est une amorce d'initiation
-                # (Les boucles ont souvent LF ou LB dans le nom)
-                if "LF" not in p_name and "LB" not in p_name:
+                if parent_name not in loop_primer_parents:
                     # Résoudre le parent pour le lookup du site cible
                     # Resolve parent for target site lookup
                     parent_name = p_name.split('#')[0] if '#' in p_name else p_name
