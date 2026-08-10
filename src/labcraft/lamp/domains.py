@@ -55,9 +55,36 @@ def expand_degenerate(seq: str, max_variants: int = 16) -> list[str]:
     return ["".join(p) for p in itertools.product(*options)]
 
 
-def _iupac_to_regex(seq: str) -> str:
-    return "".join(IUPAC_DNA.get(c.upper(), c) for c in seq)
+def _match_iupac_substring(query: str, target: str) -> bool:
+    """
+    Vérifie si la séquence query est présente dans target avec tolérance IUPAC bilatérale.
+    Une position correspond si l'intersection des bases possibles des deux côtés n'est pas vide.
+    """
+    return _find_iupac_substring(query, target) != -1
 
+def _find_iupac_substring(query: str, target: str) -> int:
+    """
+    Retourne l'indice de la première occurrence de query dans target avec tolérance IUPAC bilatérale,
+    ou -1 si non trouvé.
+    """
+    q_len = len(query)
+    t_len = len(target)
+    if q_len == 0 or q_len > t_len:
+        return -1
+        
+    q_sets = [set(IUPAC_EXPANSION.get(c.upper(), [c.upper()])) for c in query]
+    t_sets = [set(IUPAC_EXPANSION.get(c.upper(), [c.upper()])) for c in target]
+    
+    for i in range(t_len - q_len + 1):
+        match = True
+        for j in range(q_len):
+            if not q_sets[j].intersection(t_sets[i+j]):
+                match = False
+                break
+        if match:
+            return i
+            
+    return -1
 def _revcomp(seq: str) -> str:
     complement = {'A': 'T', 'T': 'A', 'C': 'G', 'G': 'C',
                   'R': 'Y', 'Y': 'R', 'S': 'S', 'W': 'W',
@@ -166,11 +193,7 @@ class PhysicalPrimer:
         # Chercher le suffixe (binding domain)
         for i in range(len(sequence) - min_domain_len, 0, -1):
             suffix = sequence[i:]
-            regex = _iupac_to_regex(suffix)
-            # F2 s'hybride sur le brin (+), donc F2 est le RC d'un bout de (+).
-            # Ou B2 s'hybride sur le brin (-), donc B2 est de même sens que (+).
-            # On cherche donc le suffixe tel quel ou son RC dans la cible.
-            if re.search(regex, target_seq) or re.search(regex, target_rc):
+            if _match_iupac_substring(suffix, target_seq) or _match_iupac_substring(suffix, target_rc):
                 # On veut le suffixe maximum
                 if len(suffix) > best_binding_len:
                     best_binding_len = len(suffix)
@@ -194,8 +217,7 @@ class PhysicalPrimer:
         
         for i in range(min_domain_len, binding_idx + 1):
             prefix = sequence[:i]
-            regex = _iupac_to_regex(prefix)
-            if re.search(regex, target_seq) or re.search(regex, target_rc):
+            if _match_iupac_substring(prefix, target_seq) or _match_iupac_substring(prefix, target_rc):
                 best_tail_len = i
                 
         if best_tail_len == 0:

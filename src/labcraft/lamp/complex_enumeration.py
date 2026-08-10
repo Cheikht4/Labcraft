@@ -10,7 +10,7 @@ import numpy as np
 
 from dataclasses import dataclass
 from typing import Sequence, List, Tuple, Dict
-from labcraft.lamp.domains import PhysicalPrimer, PrimerRole, _iupac_to_regex
+from labcraft.lamp.domains import PhysicalPrimer, PrimerRole, _find_iupac_substring
 from labcraft.lamp.stoichiometry import ConcentrationProfile, LAMP_DEFAULT_PROFILE
 from labcraft.target.unfolding import calc_unfolding_penalty
 from labcraft.thermo.backends.base import DuplexEnergyBackend
@@ -62,23 +62,22 @@ def enumerate_complexes(
         target_rc = _revcomp(target_seq_upper)
         
         for p in primers:
-            regex = _iupac_to_regex(p.binding_domain)
-            # Chercher d'abord sur le brin +
-            match = re.search(regex, target_seq_upper)
+            match_start = _find_iupac_substring(p.binding_domain, target_seq_upper)
             strand = "+"
-            if not match:
+            if match_start == -1:
                 # Chercher sur le brin - (donc dans target_rc, mais il faut remaper les indices)
-                match = re.search(regex, target_rc)
+                match_start = _find_iupac_substring(p.binding_domain, target_rc)
                 strand = "-"
                 
-            if match:
+            if match_start != -1:
+                match_len = len(p.binding_domain)
                 if strand == "+":
-                    start, end = match.start(), match.end()
+                    start, end = match_start, match_start + match_len
                 else:
                     # Si match sur le RC, l'indice 0 du RC est len - 1 du +.
                     # rc_start .. rc_end (exclusif) correspond à len - rc_end .. len - rc_start
-                    start = len(target_seq) - match.end()
-                    end = len(target_seq) - match.start()
+                    start = len(target_seq) - (match_start + match_len)
+                    end = len(target_seq) - match_start
                     
                 site_name = f"{p.name}_site"
                 target_sites.append({
