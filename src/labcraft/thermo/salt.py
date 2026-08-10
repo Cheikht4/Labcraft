@@ -66,6 +66,8 @@ class UnifiedSaltModel(SaltModel):
         self, f_gc: float, n_bp: int, mon_total: float, mg_free: float, na_ref_molar: float
     ) -> float:
         """Calcule le terme de correction empirique Δ(1/Tm) en K^-1."""
+        if n_bp <= 1:
+            return 0.0
         if mon_total == 0.0 and mg_free == 0.0:
             return 0.0  # Aucune correction si l'utilisateur donne 0 absolu partout
 

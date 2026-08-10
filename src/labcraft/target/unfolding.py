@@ -67,6 +67,8 @@ def calc_unfolding_penalty(
     elif dg_unfolding < 0.0:
         # Théoriquement impossible en physique exacte, G_constrained >= G_free
         # puisque l'ensemble contraint est un sous-ensemble de l'ensemble libre.
+        import logging
+        logging.warning(f"Negative unfolding penalty calculated: {dg_unfolding:.2f} kcal/mol. This is theoretically impossible.")
         dg_unfolding = 0.0
         
     unfolding_cache.put(cache_key, dg_unfolding)

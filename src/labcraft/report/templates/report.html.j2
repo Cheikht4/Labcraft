@@ -521,7 +521,17 @@
             <p>Aucun ajustement de concentration n'apporterait un gain supérieur à son coût.</p>
         {% endif %}
         </div>
-
+        
+        {% if metadata.warnings %}
+        <h2>Avertissements</h2>
+        <div class="target-box" style="border-left: 4px solid var(--color-warning-text); background-color: var(--color-warning-bg);">
+            <ul>
+                {% for w in metadata.warnings %}
+                <li style="margin-bottom: 5px; color: var(--color-warning-text);">{{ w }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
 
         <!-- Contrôle des sondes TaqMan -->
         {% if metadata.probe_tm_results %}

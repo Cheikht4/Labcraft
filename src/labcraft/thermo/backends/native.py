@@ -113,8 +113,8 @@ class NativeBackend(DuplexEnergyBackend):
                 dh_total += dh
                 ds_total += ds
             except KeyError:
-                raise ValueError(f"Invalid dinucleotide '{dinuc}' in sequence.")
-                
+                import warnings
+                warnings.warn(f"Ignored unknown dinucleotide '{dinuc}' in sequence.")
         # McTigue 2004 LNA Corrections
         for idx in lna_positions:
             if idx > 0:

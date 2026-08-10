@@ -155,7 +155,9 @@ def enumerate_complexes(
                         **backend_kwargs
                     )
                 dg = res.dg_kcal
-            except ValueError:
+            except ValueError as e:
+                import logging
+                logging.warning(f"Error calculating dimer {p1.name} - {p2.name}: {e}")
                 dg = 1.0 # Ignorer ce complexe
             if dg < 0: # Ne retenir que les interactions stabilisantes
                 stoich = [0] * n_strands

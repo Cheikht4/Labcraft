@@ -68,6 +68,10 @@ def analyze(
     # 2. & 3. Build Internal Engine Components
     primers, primer_to_panel, backend, backend_kwargs, mon_molar, enzyme, temp_celsius, profiles = build_engine_from_config(config_obj, targets)
     
+    if not primers:
+        typer.echo("Erreur : Le panel d'amorces est vide. Veuillez définir au moins un jeu d'amorces (primer_sets).")
+        raise typer.Exit(code=1)
+    
     # 4. Simulation
     typer.echo("Building complex network and solving thermodynamic equilibrium...")
     
@@ -91,8 +95,14 @@ def analyze(
     strands = None
     complexes = None
     
-    for t_id, t_seq in targets.items():
-        typer.echo(f"Solving for target {t_id}...")
+    import warnings
+    captured_warnings_texts = []
+    
+    with warnings.catch_warnings(record=True) as captured_warnings:
+        warnings.simplefilter("always")
+        
+        for t_id, t_seq in targets.items():
+            typer.echo(f"Solving for target {t_id}...")
         # Si c'est le faux target, on utilise le premier profil dispo (ou un par défaut)
         profile = profiles.get(t_id)
         if profile is None and profiles:
@@ -313,7 +323,8 @@ def analyze(
         "probe_tm_results": probe_tm_results,
         "recommendations": recommendations,
         "loop_primer_parents": list(loop_primer_parents),
-        "primers_parent": primers
+        "primers_parent": primers,
+        "warnings": [str(w.message) for w in captured_warnings]
     }
     
     html = render_report(verdict, all_fractions, all_risks, metadata)

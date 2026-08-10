@@ -115,8 +115,9 @@ def detect_inter_target_mispriming(
                                 structure=res.structure,
                                 site_sequence=site
                             ))
-                    except Exception:
-                        pass
+                    except ValueError as e:
+                        import logging
+                        logging.warning(f"Ignored mispriming candidate for {p.name} on {t_id} due to Error: {str(e)}")
                         
                     idx += 1
                     
