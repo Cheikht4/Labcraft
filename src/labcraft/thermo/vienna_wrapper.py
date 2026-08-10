@@ -1,1 +1,0 @@
-"""ViennaRNA interface with parameter context managers / Interface ViennaRNA avec gestionnaires de contexte pour les paramètres. ATTENTION: params_load_* modifie l'état global. Utiliser dna_params() / rna_params()."""

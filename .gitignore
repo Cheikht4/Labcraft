@@ -23,3 +23,20 @@ wheels/
 htmlcov/
 .mypy_cache/
 .ruff_cache/
+
+# Mac OS
+.DS_Store
+
+# Scratch and test files
+scratch_*.py
+test_tm.py
+test_flp_bip.py
+run_test.py
+verify_lna.py
+check_mini_conc.py
+
+# Downloaded HTML/CSV
+pmc.html
+owczarzy.html
+pmc_table_2.csv
+pmc_table_3.csv
