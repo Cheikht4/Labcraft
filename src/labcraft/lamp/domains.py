@@ -45,7 +45,7 @@ def expand_degenerate(seq: str, max_variants: int = 16) -> list[str]:
     import itertools
     import math
     
-    seq = seq.upper()
+    seq = seq.upper().replace('U', 'T')
     options = [IUPAC_EXPANSION.get(c, [c]) for c in seq]
     
     total_variants = math.prod(len(opts) for opts in options)
@@ -63,7 +63,7 @@ def _revcomp(seq: str) -> str:
                   'R': 'Y', 'Y': 'R', 'S': 'S', 'W': 'W',
                   'K': 'M', 'M': 'K', 'B': 'V', 'V': 'B',
                   'D': 'H', 'H': 'D', 'N': 'N'}
-    return "".join(complement.get(c.upper(), 'N') for c in reversed(seq))
+    return "".join(complement.get(c.upper(), 'N') for c in reversed(seq.upper().replace('U', 'T')))
 
 
 @dataclass(frozen=True)

@@ -23,7 +23,18 @@ def read_fasta(filepath: str) -> str:
     with open(filepath, 'r') as f:
         lines = f.read().splitlines()
     seq = "".join(line.strip() for line in lines if not line.startswith(">"))
-    return seq.upper()
+    seq = seq.upper()
+    seq = seq.replace("U", "T")
+    
+    # IUPAC to N
+    import re
+    # Les codes IUPAC dégénérés : R, Y, S, W, K, M, B, D, H, V, N
+    # On laisse A, T, G, C intacts
+    seq = re.sub(r'[RYSWKMBDHVN]', 'N', seq)
+    
+    # On laisse les caractères non reconnus tels quels, ou on les passe en N ?
+    # Le pattern ne gère que les codes dégénérés standards.
+    return seq
 
 def hash_file(filepath: str) -> str:
     hasher = hashlib.sha256()
