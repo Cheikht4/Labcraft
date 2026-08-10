@@ -9,6 +9,10 @@ def test_dimer_resolution_stoichiometry():
     """Test que les dimères sont bien résolus par stoechiométrie même avec beaucoup d'underscores."""
     runner = CliRunner()
     
+    with tempfile.NamedTemporaryFile("w", suffix=".fasta", delete=False) as f_fasta:
+        f_fasta.write(">dummy\nATGC\n")
+        dummy_fasta = f_fasta.name
+    
     # Créer un panel temporaire
     panel_data = {
         "experiment": {
@@ -20,7 +24,7 @@ def test_dimer_resolution_stoichiometry():
         "targets": [
             {
                 "id": "Target_With_Many_Underscores",
-                "sequence_file": "dummy.fasta"
+                "sequence_file": dummy_fasta
             }
         ],
         "primer_sets": [
@@ -53,10 +57,16 @@ def test_dimer_resolution_stoichiometry():
     finally:
         if os.path.exists(config_path): os.remove(config_path)
         if os.path.exists(out_path): os.remove(out_path)
+        if os.path.exists(dummy_fasta): os.remove(dummy_fasta)
 
 def test_no_buffer_config():
     """Test qu'une config sans bloc buffer ne plante pas (UnboundLocalError)."""
     runner = CliRunner()
+    
+    with tempfile.NamedTemporaryFile("w", suffix=".fasta", delete=False) as f_fasta:
+        f_fasta.write(">dummy\nATGC\n")
+        dummy_fasta = f_fasta.name
+        
     panel_data = {
         "experiment": {
             "name": "Test No Buffer",
@@ -67,7 +77,7 @@ def test_no_buffer_config():
         "targets": [
             {
                 "id": "Target",
-                "sequence_file": "dummy.fasta"
+                "sequence_file": dummy_fasta
             }
         ],
         "primer_sets": [
@@ -80,7 +90,7 @@ def test_no_buffer_config():
             }
         ]
     }
-    import tempfile, yaml
+    import yaml
     from labcraft.cli.main import app
     with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f2:
         yaml.dump(panel_data, f2)
@@ -94,3 +104,4 @@ def test_no_buffer_config():
     finally:
         if os.path.exists(config_path): os.remove(config_path)
         if os.path.exists(out_path): os.remove(out_path)
+        if os.path.exists(dummy_fasta): os.remove(dummy_fasta)
