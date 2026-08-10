@@ -148,10 +148,12 @@ def build_engine_from_config(
             label = p_data.label_5prime
             
             from labcraft.lamp.domains import expand_degenerate
+            from labcraft.thermo.lna import parse_lna_sequence
             variants = expand_degenerate(seq)
             variant_conc = total_conc / len(variants)
             
             for v_idx, variant_seq in enumerate(variants):
+                bare_seq, lna_pos = parse_lna_sequence(variant_seq)
                 v_name = f"{name}#{v_idx+1}" if len(variants) > 1 else name
                 
                 if role_name.upper() in ("FIP", "BIP") and isinstance(p_data.domains, PrimerDomains):
@@ -160,10 +162,14 @@ def build_engine_from_config(
                     # mais pour simplifier on ne supporte pas l'expansion de sous-domaines manuels ici, 
                     # ou on laisse l'utilisateur gérer l'absence d'expansion pour eux (ça demandrait une logique plus complexe).
                     # S'il y a des IUPAC dans f2_b2, on l'utilise tel quel (pas parfait mais suffisant)
+                    d_f2 = parse_lna_sequence(d.F2 or d.B2 or "")[0]
+                    d_f1c = parse_lna_sequence(d.F1c or d.B1c or "")[0]
+                    d_linker = parse_lna_sequence(d.linker or "")[0]
                     primers.append(PhysicalPrimer(
-                        v_name, variant_seq, role_enum, d.F2 or d.B2 or "", d.F1c or d.B1c or "", d.linker or "", 
+                        v_name, bare_seq, role_enum, d_f2, d_f1c, d_linker, 
                         nominal_concentration=variant_conc, parent_name=name,
-                        blocked_3prime=is_blocked, label_5prime=label
+                        blocked_3prime=is_blocked, label_5prime=label,
+                        lna_positions=tuple(lna_pos)
                     ))
                 elif role_name.upper() in ("FIP", "BIP"):
                     target_seq = targets.get(t_id, "")
@@ -174,9 +180,10 @@ def build_engine_from_config(
                     ))
                 else:
                     primers.append(PhysicalPrimer(
-                        v_name, variant_seq, role_enum, variant_seq, 
+                        v_name, bare_seq, role_enum, bare_seq, 
                         nominal_concentration=variant_conc, parent_name=name,
-                        blocked_3prime=is_blocked, label_5prime=label
+                        blocked_3prime=is_blocked, label_5prime=label,
+                        lna_positions=tuple(lna_pos)
                     ))
                 
         # Création du profil pour la cible, avec fallback par défaut si absent
