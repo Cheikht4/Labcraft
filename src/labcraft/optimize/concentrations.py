@@ -74,7 +74,9 @@ def optimize_concentrations(
     weight_regularization: float = 1.0,
     min_improvement_ratio: float = 0.05,
     min_absolute_improvement: float = 1e-3, # Min fraction of total primer conc
-    max_occ_drop_ratio: float = 0.20
+    max_occ_drop_ratio: float = 0.20,
+    min_tradeoff_factor: float = 2.0, # Gain relatif en dimères doit être >= N * Perte relative max en occupation
+    min_dimer_reduction_ratio: float = 0.20 # Doit réduire les dimères d'au moins 20%
 ) -> List[Dict[str, Any]]:
     
     # Identifier les dimères dangereux
@@ -254,18 +256,40 @@ def optimize_concentrations(
                 c_candidats[idx] = c_test
                 score, metrics = evaluate(c_candidats)
                 
-                # Filtrage : garde-fou 20% sur la chute d'occupation
-                valid_occ = True
+                # 1. Calcul du gain relatif sur les dimères
+                dang_initial = best_metrics['normalized_dangerous']
+                dang_candidat = metrics['normalized_dangerous']
+                rel_gain_dimers = (dang_initial - dang_candidat) / dang_initial if dang_initial > 0 else 0.0
+                
+                # 2. Calcul du coût (perte relative maximale d'occupation)
+                # Ce calcul itère sur toutes les amorces (F3, B3, FIP, BIP, ET LF, LB)
+                # Cela assure une protection explicite et proportionnée des amorces de boucle,
+                # dont la baisse de concentration impacterait fortement leur occupation.
+                max_rel_occ_drop = 0.0
                 for p_name, initial_occ in occ_initial.items():
                     candidat_occ = metrics['initiations'].get(p_name, 0.0)
-                    if initial_occ > 0 and candidat_occ < initial_occ * (1.0 - max_occ_drop_ratio):
-                        valid_occ = False
-                        break
-                
-                if not valid_occ:
+                    if initial_occ > 0 and candidat_occ < initial_occ:
+                        drop = (initial_occ - candidat_occ) / initial_occ
+                        if drop > max_rel_occ_drop:
+                            max_rel_occ_drop = drop
+                            
+                # Garde-fou absolu d'occupation (ex: 20%)
+                if max_rel_occ_drop > max_occ_drop_ratio:
+                    # print(f"REJECTED {p.name} {c_test}: max_rel_occ_drop {max_rel_occ_drop} > {max_occ_drop_ratio}")
                     continue
+                    
+                # Critère de compromis : le gain doit valoir le coût
+                if rel_gain_dimers > 0 and max_rel_occ_drop > 0:
+                    if rel_gain_dimers < min_tradeoff_factor * max_rel_occ_drop:
+                        # print(f"REJECTED {p.name} {c_test}: gain {rel_gain_dimers} < {min_tradeoff_factor} * {max_rel_occ_drop}")
+                        continue # Rejeté : compromis défavorable
+                        
+                # Exiger une baisse significative des dimères (ex: 20%)
+                if dang_initial > 0 and rel_gain_dimers < min_dimer_reduction_ratio:
+                    # print(f"REJECTED {p.name} {c_test}: gain {rel_gain_dimers} < {min_dimer_reduction_ratio}")
+                    continue # Rejeté : baisse trop faible
                 
-                # Seuil d'amélioration absolue et relative
+                # Seuil d'amélioration absolue et relative du score global
                 if score < best_score:
                     rel_improvement = (best_score - score) / best_score if best_score > 0 else 0
                     abs_improvement = best_score - score
