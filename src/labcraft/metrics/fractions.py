@@ -42,7 +42,8 @@ def compute_fractions(
         delta_g: Energies libres des complexes
         temp_celsius: Température
     """
-    R = 0.00198720425864083
+    from labcraft.thermo.constants import R_GAS_KCAL_MOL_K
+    R = R_GAS_KCAL_MOL_K
     RT = R * (273.15 + temp_celsius)
     
     u = np.log(free_concentrations)

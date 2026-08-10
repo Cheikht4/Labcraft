@@ -8,6 +8,7 @@ Primal solver for equilibrium problems using scipy trust-constr.
 Fallback for the dual Newton solver.
 """
 from __future__ import annotations
+from labcraft.thermo.constants import R_GAS_KCAL_MOL_K
 
 import logging
 
@@ -49,7 +50,7 @@ def solve_primal(
         If the solver fails to converge / Si le solveur ne converge pas.
     """
     # Gas constant / Constante des gaz
-    r_kcal_mol_k = 1.987e-3
+    r_kcal_mol_k = R_GAS_KCAL_MOL_K
     rt = r_kcal_mol_k * problem.temperature_kelvin
 
     a_mat = problem.stoichiometry

@@ -3,6 +3,7 @@
 Solutions analytiques pour les systèmes d'équilibre simples.
 """
 from __future__ import annotations
+from labcraft.thermo.constants import R_GAS_KCAL_MOL_K
 
 import numpy as np
 from .types import EquilibriumResult, SolverMethod
@@ -68,7 +69,7 @@ def analytical_two_strand(
     Returns:
         EquilibriumResult containing the concentrations.
     """
-    r = 1.987e-3  # kcal/(mol K)
+    r = R_GAS_KCAL_MOL_K  # kcal/(mol K)
     rt = r * temperature_kelvin
     k_eq = np.exp(-delta_g_kcal / rt)
     

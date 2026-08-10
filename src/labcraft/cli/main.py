@@ -116,18 +116,13 @@ def analyze(
         max_residual_global = max(max_residual_global, res.max_residual)
         
         # Diagnostics
-        R = 0.00198720425864083
-        RT = R * (273.15 + temp_celsius)
-        import numpy as np
-        u = np.log(res.free_concentrations)
-        
         amplifiable_flags = []
         concs = []
         dimer_details = []
         
         for i, c_name in enumerate(complexes):
             stoich = prob.stoichiometry[i]
-            conc = np.exp(-prob.delta_g[i] / RT + np.dot(stoich, u))
+            conc = res.concentrations[i]
             concs.append(conc)
             
             is_amp = False

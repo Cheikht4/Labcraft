@@ -1,4 +1,5 @@
 from __future__ import annotations
+from labcraft.thermo.constants import R_GAS_KCAL_MOL_K
 
 import numpy as np
 from typing import Sequence
@@ -86,7 +87,7 @@ def simulate_titration(
                 if c_name.endswith("_free"):
                     continue
                 # Calcul de la concentration
-                RT = 1.98720425864083e-3 * prob.temperature_kelvin
+                RT = R_GAS_KCAL_MOL_K * prob.temperature_kelvin
                 conc = np.exp(-prob.delta_g[j] / RT)
                 for i in range(prob.n_strands):
                     if prob.stoichiometry[j, i] > 0:

@@ -5,6 +5,7 @@ Implémente le modèle Nearest-Neighbor de SantaLucia 1998 pour les duplexes
 parfaitement appariés, avec correction de symétrie.
 """
 from __future__ import annotations
+from labcraft.thermo.constants import R_GAS_KCAL_MOL_K
 
 import math
 from typing import Dict, Tuple
@@ -142,7 +143,7 @@ class NativeBackend(DuplexEnergyBackend):
         dg_kcal = dh_total - temp_k * (ds_total / 1000.0)
         
         # Melting Temperature
-        r_gas = 1.9872
+        r_gas = R_GAS_KCAL_MOL_K * 1000.0
         # Tm convention SantaLucia : Tm = dH / (dS + R*ln(Ct/x))
         if ct_molar > 0:
             tm_k = (dh_total * 1000.0) / (ds_total + r_gas * math.log(ct_molar / x))

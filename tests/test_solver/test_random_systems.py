@@ -4,6 +4,7 @@ Tests de validation aléatoires et à grande échelle pour le solveur d'équilib
 Ref: Cahier des charges section 2.4.
 """
 from __future__ import annotations
+from labcraft.thermo.constants import R_GAS_KCAL_MOL_K
 
 import numpy as np
 import pytest
@@ -75,7 +76,7 @@ class TestSolverValidation:
                 
             # Garantie 1: Vérification stricte de la loi d'action de masse a posteriori
             # K_c = [c] / ( [A]^A_c * [B]^B_c )
-            rt = 1.987e-3 * T
+            rt = R_GAS_KCAL_MOL_K * T
             
             free_a = result.concentrations[0]
             free_b = result.concentrations[1]
@@ -191,7 +192,7 @@ class TestSolverValidation:
         # [dimer] = K * x^2, where x is free concentration
         # Mass cons: x + (N-1) * K * x^2 = a0
         # (N-1)K x^2 + x - a0 = 0
-        rt = 1.987e-3 * T
+        rt = R_GAS_KCAL_MOL_K * T
         K = np.exp(-dg / rt)
         
         A = (N_STRANDS - 1) * K
@@ -247,7 +248,7 @@ class TestSolverValidation:
         Z = scipy.linalg.null_space(a_mat.T)
         
         def compute_G(c: np.ndarray) -> float:
-            rt = 1.987e-3 * T
+            rt = R_GAS_KCAL_MOL_K * T
             # Ignore zeros in log to avoid warnings, though c should be > 0
             c_safe = np.maximum(c, 1e-300)
             return float(np.sum(c * (dg_array / rt + np.log(c_safe) - 1.0)))

@@ -4,6 +4,7 @@ Modèles orthogonaux de correction saline pour la prédiction thermodynamique.
 Ces modèles sont injectés dans le pipeline via SaltCorrectedBackend.
 """
 from __future__ import annotations
+from labcraft.thermo.constants import R_GAS_KCAL_MOL_K
 
 import math
 import warnings
@@ -228,7 +229,7 @@ class SaltCorrectedBackend(DuplexEnergyBackend):
             is_sym = False
             
         x = 1.0 if is_sym else 4.0
-        r_gas = 1.9872
+        r_gas = R_GAS_KCAL_MOL_K * 1000.0
         
         if ct_molar > 0:
             tm_k = (dh_kcal * 1000.0) / (ds_cal + r_gas * math.log(ct_molar / x))

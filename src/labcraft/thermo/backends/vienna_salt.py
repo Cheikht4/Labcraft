@@ -1,3 +1,4 @@
+from labcraft.thermo.constants import R_GAS_KCAL_MOL_K
 """ViennaRNA backend with salt shift correction.
 
 Applique un décalage salin (ΔΔG) au ΔG natif de ViennaRNA en estimant
@@ -164,7 +165,7 @@ class ViennaSaltShiftBackend(DuplexEnergyBackend):
         dg_final = res.dg_kcal + ddg_salt + ddg_lna
         
         # Recalculate Tm coherently.
-        r_gas = 1.9872
+        r_gas = R_GAS_KCAL_MOL_K * 1000.0
         
         x = 4.0
         if '&' in seq:

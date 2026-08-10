@@ -17,6 +17,7 @@ Thermodynamic analysis of interacting nucleic acid strands,
 SIAM Review 49(1):65-88, Section 4.
 """
 from __future__ import annotations
+from labcraft.thermo.constants import R_GAS_KCAL_MOL_K
 
 import logging
 
@@ -28,7 +29,7 @@ from .types import ConvergenceError, EquilibriumProblem, EquilibriumResult, Solv
 logger = logging.getLogger(__name__)
 
 # Gas constant in kcal/(mol·K) / Constante des gaz en kcal/(mol·K)
-_R_KCAL_MOL_K: float = 1.987e-3
+_R_KCAL_MOL_K: float = R_GAS_KCAL_MOL_K
 
 
 def _compute_complex_concentrations(

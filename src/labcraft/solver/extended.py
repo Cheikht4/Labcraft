@@ -3,6 +3,7 @@
 Solveur à précision étendue pour les problèmes d'équilibre.
 """
 from __future__ import annotations
+from labcraft.thermo.constants import R_GAS_KCAL_MOL_K
 
 import numpy as np
 from .types import EquilibriumProblem, EquilibriumResult, SolverMethod, ConvergenceError
@@ -32,7 +33,7 @@ def solve_extended(
         
     mpmath.mp.dps = precision_digits
     
-    r_kcal_mol_k = mpmath.mpf('1.987e-3')
+    r_kcal_mol_k = mpmath.mpf(str(R_GAS_KCAL_MOL_K))
     rt = r_kcal_mol_k * mpmath.mpf(problem.temperature_kelvin)
     
     a_mat = problem.stoichiometry
