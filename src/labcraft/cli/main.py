@@ -233,7 +233,7 @@ def analyze(
     
     mispriming_risks = []
     if config_obj.targets and len(config_obj.targets) > 1:
-        target_dict = {t.id: t.sequence for t in config_obj.targets}
+        target_dict = targets  # targets est le dictionnaire {t.id: t.sequence} déjà chargé
         mispriming_risks = detect_inter_target_mispriming(
             primers, primer_to_panel, target_dict, backend, enzyme, temp_celsius, **backend_kwargs
         )
