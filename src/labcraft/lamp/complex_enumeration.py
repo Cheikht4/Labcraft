@@ -168,7 +168,7 @@ def enumerate_complexes(
     unfolding_penalties = {}
     
     if target_seq:
-        for p in primers:
+        for idx_p, p in enumerate(primers):
             site_name = primer_to_site.get(p.name)
             if not site_name:
                 continue
@@ -224,7 +224,7 @@ def enumerate_complexes(
             
             if dg_eff < 0:
                 stoich = [0] * n_strands
-                stoich[i] = 1
+                stoich[idx_p] = 1
                 stoich[site_idx] = 1
                 complexes.append(ComplexInfo(f"{p.name}_on_{site_name}", stoich, dg_eff))
 
