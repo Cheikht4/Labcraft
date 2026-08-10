@@ -47,7 +47,8 @@ def check_probes_tm(
         
     # FORCE usage of NativeBackend to ensure LNA rules apply for melting temperature.
     from labcraft.thermo.backends.native import NativeBackend
-    native_backend = NativeBackend()
+    from labcraft.thermo.salt import SaltCorrectedBackend, UnifiedSaltModel
+    native_backend = SaltCorrectedBackend(NativeBackend(), UnifiedSaltModel())
         
     # 2. Calculer le Tm des amorces
     primer_tms = []

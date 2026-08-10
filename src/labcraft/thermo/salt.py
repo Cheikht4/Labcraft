@@ -247,12 +247,13 @@ class SaltCorrectedBackend(DuplexEnergyBackend):
         self, seq1: str, seq2: str, *, temp_celsius: float = 65.0,
         na_mm: float = 50.0, mg_mm: float = 0.0,
         k_mm: float = 0.0, tris_mm: float = 0.0, dntp_mm: float = 0.0,
-        ct_molar: float | None = None
+        ct_molar: float | None = None,
+        **kwargs
     ) -> DuplexResult:
         res_1m = self._backend.calc_heterodimer(
             seq1, seq2, temp_celsius=temp_celsius, 
             na_mm=1000.0, mg_mm=0.0, k_mm=0.0, tris_mm=0.0, dntp_mm=0.0,
-            ct_molar=ct_molar
+            ct_molar=ct_molar, **kwargs
         )
         eff_ct = ct_molar if ct_molar is not None else getattr(self._backend, 'default_ct_molar', 2e-6)
         return self._apply_correction(
@@ -263,12 +264,13 @@ class SaltCorrectedBackend(DuplexEnergyBackend):
         self, seq: str, *, temp_celsius: float = 65.0,
         na_mm: float = 50.0, mg_mm: float = 0.0,
         k_mm: float = 0.0, tris_mm: float = 0.0, dntp_mm: float = 0.0,
-        ct_molar: float | None = None
+        ct_molar: float | None = None,
+        **kwargs
     ) -> DuplexResult:
         res_1m = self._backend.calc_homodimer(
             seq, temp_celsius=temp_celsius,
             na_mm=1000.0, mg_mm=0.0, k_mm=0.0, tris_mm=0.0, dntp_mm=0.0,
-            ct_molar=ct_molar
+            ct_molar=ct_molar, **kwargs
         )
         eff_ct = ct_molar if ct_molar is not None else getattr(self._backend, 'default_ct_molar', 2e-6)
         return self._apply_correction(
@@ -279,12 +281,13 @@ class SaltCorrectedBackend(DuplexEnergyBackend):
         self, seq: str, *, temp_celsius: float = 65.0,
         na_mm: float = 50.0, mg_mm: float = 0.0,
         k_mm: float = 0.0, tris_mm: float = 0.0, dntp_mm: float = 0.0,
-        ct_molar: float | None = None
+        ct_molar: float | None = None,
+        **kwargs
     ) -> DuplexResult:
         res_1m = self._backend.calc_hairpin(
             seq, temp_celsius=temp_celsius,
             na_mm=1000.0, mg_mm=0.0, k_mm=0.0, tris_mm=0.0, dntp_mm=0.0,
-            ct_molar=ct_molar
+            ct_molar=ct_molar, **kwargs
         )
         eff_ct = ct_molar if ct_molar is not None else getattr(self._backend, 'default_ct_molar', 2e-6)
         return self._apply_correction(
@@ -295,12 +298,13 @@ class SaltCorrectedBackend(DuplexEnergyBackend):
         self, seq1: str, seq2: str, *, temp_celsius: float = 65.0,
         na_mm: float = 50.0, mg_mm: float = 0.0,
         k_mm: float = 0.0, tris_mm: float = 0.0, dntp_mm: float = 0.0,
-        ct_molar: float | None = None
+        ct_molar: float | None = None,
+        **kwargs
     ) -> DuplexResult:
         return self.calc_heterodimer(
             seq1, seq2, temp_celsius=temp_celsius,
             na_mm=na_mm, mg_mm=mg_mm, k_mm=k_mm, tris_mm=tris_mm, dntp_mm=dntp_mm,
-            ct_molar=ct_molar
+            ct_molar=ct_molar, **kwargs
         )
 
 def sodium_equivalent_for_folding(
