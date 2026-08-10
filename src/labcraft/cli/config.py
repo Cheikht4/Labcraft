@@ -3,7 +3,7 @@
 Modèles Pydantic pour la configuration YAML/JSON.
 """
 from typing import Dict, List, Optional, Any, Union
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 class BufferConfig(BaseModel):
     na_mM: float = 50.0
@@ -11,6 +11,8 @@ class BufferConfig(BaseModel):
     tris_mM: float = 0.0
     mg_mM: float = 0.0
     dntp_mM: float = 0.0
+    
+    model_config = {"extra": "forbid"}
 
 class ExperimentConfig(BaseModel):
     name: Optional[str] = None
@@ -19,12 +21,14 @@ class ExperimentConfig(BaseModel):
     enzyme: str = "bst2.0"
     buffer: Optional[BufferConfig] = None
     
-    model_config = {"extra": "allow"}
+    model_config = {"extra": "forbid"}
 
 class TargetConfig(BaseModel):
     id: str
     sequence_file: str
     copies_per_uL: float = 1000.0
+    
+    model_config = {"extra": "forbid"}
 
 class PrimerDomains(BaseModel):
     F2: Optional[str] = None
@@ -40,17 +44,42 @@ class PrimerConfig(BaseModel):
     blocked_3prime: bool = False
     mod_3prime: Optional[str] = None
     label_5prime: Optional[str] = None
+    
+    model_config = {"extra": "forbid"}
 
 class PrimerSetConfig(BaseModel):
     target: str
     primers: Dict[str, PrimerConfig]
+    
+    model_config = {"extra": "forbid"}
 
 class PanelConfig(BaseModel):
     experiment: ExperimentConfig = Field(default_factory=ExperimentConfig)
     targets: List[TargetConfig] = Field(default_factory=list)
     primer_sets: List[PrimerSetConfig] = Field(default_factory=list)
     
-    model_config = {"extra": "allow"}
+    model_config = {"extra": "forbid"}
+    
+    @model_validator(mode="after")
+    def validate_targets_referenced(self) -> 'PanelConfig':
+        target_ids = {t.id for t in self.targets}
+        for pset in self.primer_sets:
+            if pset.target not in target_ids:
+                raise ValueError(
+                    f"Target '{pset.target}' referenced by primer set not found in targets list. "
+                    f"Available targets: {list(target_ids)}"
+                )
+        return self
+        
+    @model_validator(mode="after")
+    def check_mg_dntp(self) -> 'PanelConfig':
+        if self.experiment.buffer:
+            mg = self.experiment.buffer.mg_mM
+            dntp = self.experiment.buffer.dntp_mM
+            if mg <= dntp:
+                import warnings
+                warnings.warn("mg_mM is less than or equal to dntp_mM.")
+        return self
 
 from typing import Tuple
 from labcraft.lamp.domains import PhysicalPrimer, PrimerRole

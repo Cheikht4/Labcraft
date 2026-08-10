@@ -17,6 +17,12 @@ def test_dimer_resolution_stoichiometry():
             "temperature_C": 65.0,
             "enzyme": "bst2.0",
         },
+        "targets": [
+            {
+                "id": "Target_With_Many_Underscores",
+                "sequence_file": "dummy.fasta"
+            }
+        ],
         "primer_sets": [
             {
                 "target": "Target_With_Many_Underscores",
@@ -58,6 +64,12 @@ def test_no_buffer_config():
             "temperature_C": 65.0,
             "enzyme": "bst2.0"
         },
+        "targets": [
+            {
+                "id": "Target",
+                "sequence_file": "dummy.fasta"
+            }
+        ],
         "primer_sets": [
             {
                 "target": "Target",
