@@ -68,9 +68,13 @@ def optimize_concentrations(
     enzyme: Any = None,
     max_iter: int = 3,
     min_initiation_occupation: float = 0.01,
-    weight_dangerous: float = 1e9,
-    weight_floor: float = 1e6,
-    weight_cv: float = 100.0
+    weight_dangerous: float = 1e6, # Normalized assuming primers sum to ~1e-6 M
+    weight_floor: float = 1e4,
+    weight_cv: float = 1.0,
+    weight_regularization: float = 1.0,
+    min_improvement_ratio: float = 0.05,
+    min_absolute_improvement: float = 1e-3, # Min fraction of total primer conc
+    max_occ_drop_ratio: float = 0.20
 ) -> List[Dict[str, Any]]:
     
     # Identifier les dimères dangereux
@@ -107,14 +111,20 @@ def optimize_concentrations(
             
         score = 0.0
         
-        # 1. Dimères dangereux
+        # 1. Dimères dangereux (normalisé)
+        # sum of total concentrations is around ~10 uM -> 1e-5 M. We divide by 1e-6 to get a number around 1.0
+        total_primer_conc = np.sum(prob_template.total_concentrations)
         dang_frac = np.sum(res.concentrations[dangerous_indices])
-        score += dang_frac * weight_dangerous
+        normalized_dang = dang_frac / total_primer_conc if total_primer_conc > 0 else 0.0
+        score += normalized_dang * weight_dangerous
         
         # 2. Plancher d'amorçage
         initiations = {}
         target_occs_for_balance = {panel: {} for panel in panels}
         free_fracs_for_balance = {}
+        
+        floor_penalty = 0.0
+        reg_penalty = 0.0
         
         for p in primers:
             p_name = p.name
@@ -141,7 +151,18 @@ def optimize_concentrations(
                     target_occs_for_balance[panel][site_name] = occ
                     
                 if occ < min_initiation_occupation:
-                    score += weight_floor
+                    deficit = (min_initiation_occupation - occ) / min_initiation_occupation
+                    floor_penalty += (deficit ** 2)
+                    
+            if p_name in primer_idx:
+                c_origine = prob_template.total_concentrations[primer_idx[p_name]]
+                c_candidat = c_candidats[primer_idx[p_name]]
+                if c_origine > 0:
+                    delta_rel = abs(c_candidat - c_origine) / c_origine
+                    reg_penalty += delta_rel
+                    
+        score += floor_penalty * weight_floor
+        score += reg_penalty * weight_regularization
                     
         # 3. CV Balance inter-panels
         cv = 0.0
@@ -152,7 +173,18 @@ def optimize_concentrations(
             cv = calc_cv
             score += cv * weight_cv
             
-        return score, {'dangerous': dang_frac, 'initiations': initiations, 'cv': cv}
+        return score, {
+            'dangerous': dang_frac, 
+            'normalized_dangerous': normalized_dang,
+            'initiations': initiations, 
+            'cv': cv,
+            'score_terms': {
+                'dangerous': normalized_dang * weight_dangerous,
+                'floor': floor_penalty * weight_floor,
+                'regularization': reg_penalty * weight_regularization,
+                'cv': cv * weight_cv
+            }
+        }
         
     c_current = np.copy(prob_template.total_concentrations)
     
@@ -166,8 +198,11 @@ def optimize_concentrations(
         PrimerRole.B3: np.arange(0.1e-6, 0.5e-6, 0.1e-6),
     }
     
-    best_score, _ = evaluate(c_current)
+    best_score, best_metrics = evaluate(c_current)
     stopped_on_max = True
+    
+    # Calculer occupations initiales pour le garde-fou 20%
+    occ_initial = best_metrics['initiations']
     
     for iteration in range(max_iter):
         changed = False
@@ -219,10 +254,27 @@ def optimize_concentrations(
                 c_candidats[idx] = c_test
                 score, metrics = evaluate(c_candidats)
                 
+                # Filtrage : garde-fou 20% sur la chute d'occupation
+                valid_occ = True
+                for p_name, initial_occ in occ_initial.items():
+                    candidat_occ = metrics['initiations'].get(p_name, 0.0)
+                    if initial_occ > 0 and candidat_occ < initial_occ * (1.0 - max_occ_drop_ratio):
+                        valid_occ = False
+                        break
+                
+                if not valid_occ:
+                    continue
+                
+                # Seuil d'amélioration absolue et relative
                 if score < best_score:
-                    best_score = score
-                    best_c = c_test
-                    changed = True
+                    rel_improvement = (best_score - score) / best_score if best_score > 0 else 0
+                    abs_improvement = best_score - score
+                    
+                    if rel_improvement > min_improvement_ratio and abs_improvement > min_absolute_improvement:
+                        best_score = score
+                        best_metrics = metrics
+                        best_c = c_test
+                        changed = True
                     
             c_current[idx] = best_c
             
