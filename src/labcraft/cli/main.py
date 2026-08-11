@@ -91,8 +91,6 @@ def analyze(
     # For now, we simulate everything together against each target to get the target occupation.
     # Actually, a full multiplex solve computes everything in one matrix!
     # To keep it simple, we solve the full matrix with Target A, then Target B, and aggregate.
-    all_risks = []
-    has_true_target = False
     
     prob = None
     strands = None
