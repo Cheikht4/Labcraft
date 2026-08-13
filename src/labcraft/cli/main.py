@@ -17,16 +17,10 @@ from labcraft.report.renderer import render_report
 from labcraft.cli.config import PanelConfig, build_engine_from_config
 from pydantic import ValidationError
 
-app = typer.Typer(help="LabCraft CLI - Thermodynamic multiplex primer panel design engine.")
+from labcraft.cli.parsers import build_config_from_cli, read_multi_fasta, ParseError
+from typing import Optional
 
-def read_fasta(filepath: str) -> str:
-    with open(filepath, 'r') as f:
-        lines = f.read().splitlines()
-    seq = "".join(line.strip() for line in lines if not line.startswith(">"))
-    seq = seq.upper()
-    seq = seq.replace("U", "T")
-    
-    return seq
+app = typer.Typer(help="LabCraft CLI - Thermodynamic multiplex primer panel design engine.")
 
 def hash_file(filepath: str) -> str:
     hasher = hashlib.sha256()
@@ -37,39 +31,81 @@ def hash_file(filepath: str) -> str:
 
 @app.command()
 def analyze(
-    config: str = typer.Argument(..., help="Path to the YAML panel configuration file."),
-    output: str = typer.Option("report.html", "-o", "--output", help="Output HTML report path.")
+    config: Optional[str] = typer.Option(None, "-c", "--config", help="Path to the YAML panel configuration file."),
+    primers: Optional[str] = typer.Option(None, "-p", "--primers", help="Path to primers FASTA/TXT file."),
+    targets: Optional[str] = typer.Option(None, "-t", "--targets", help="Path to targets FASTA/TXT file."),
+    output: str = typer.Option("report.html", "-o", "--output", help="Output HTML report path."),
+    temperature: Optional[float] = typer.Option(None, "--temperature", help="Experiment temperature in Celsius."),
+    enzyme: Optional[str] = typer.Option(None, "--enzyme", help="Enzyme name (e.g. bst2.0)."),
+    na: Optional[float] = typer.Option(None, "--na", help="Na+ concentration in mM."),
+    k: Optional[float] = typer.Option(None, "--k", help="K+ concentration in mM."),
+    tris: Optional[float] = typer.Option(None, "--tris", help="Tris concentration in mM."),
+    mg: Optional[float] = typer.Option(None, "--mg", help="Mg2+ concentration in mM."),
+    dntp: Optional[float] = typer.Option(None, "--dntp", help="dNTP concentration in mM."),
+    conc_fip_bip: Optional[float] = typer.Option(None, "--conc-fip-bip", help="FIP/BIP concentration in uM."),
+    conc_f3_b3: Optional[float] = typer.Option(None, "--conc-f3-b3", help="F3/B3 concentration in uM."),
+    conc_loop: Optional[float] = typer.Option(None, "--conc-loop", help="Loop primer concentration in uM."),
+    copies: Optional[float] = typer.Option(None, "--copies", help="Target copies per uL.")
 ):
     """
     Analyzes a multiplex primer panel and generates a comprehensive thermodynamic diagnostic report.
     """
-    typer.echo(f"Loading configuration from {config}...")
-    
+    if not config and not primers:
+        typer.echo("Erreur: Vous devez spécifier au moins un fichier de configuration YAML (-c) ou un fichier d'amorces (-p).")
+        raise typer.Exit(code=1)
+        
+    typer.echo("Loading configuration...")
     start_time = time.time()
-    file_hash = hash_file(config)
     
-    with open(config, "r") as f:
-        data = yaml.safe_load(f)
+    # Use config file for hash if available, otherwise primers file
+    file_hash = hash_file(config) if config else (hash_file(primers) if primers else "no-file")
 
     try:
-        config_obj = PanelConfig.model_validate(data)
+        config_obj = build_config_from_cli(
+            config_path=config,
+            primers_path=primers,
+            targets_path=targets,
+            temperature=temperature,
+            enzyme=enzyme,
+            na=na, k=k, tris=tris, mg=mg, dntp=dntp,
+            conc_fip_bip=conc_fip_bip,
+            conc_f3_b3=conc_f3_b3,
+            conc_loop=conc_loop,
+            copies=copies
+        )
+    except FileNotFoundError as e:
+        typer.echo(f"Erreur de fichier introuvable : {e.filename}")
+        raise typer.Exit(code=1)
+    except ParseError as e:
+        typer.echo(f"Erreur de lecture de fichier :\n{e}")
+        raise typer.Exit(code=1)
     except ValidationError as e:
         typer.echo(f"Erreur de validation de la configuration :\n{e}")
         raise typer.Exit(code=1)
 
     # 1. Parse Targets
-    targets = {}
+    targets_dict = {}
     for t in config_obj.targets:
-        seq = read_fasta(t.sequence_file)
-        targets[t.id] = seq
+        try:
+            records = read_multi_fasta(t.sequence_file)
+            for h, seq in records:
+                t_id = h.split()[0]
+                # In build_config_from_cli, we might have multiple targets in one file.
+                # If we parsed it via CLI -t, they are all inside config_obj.targets.
+                # We can just match the one we need, or collect them all.
+                if t_id == t.id or not config: # if not config, we just collect them all
+                    targets_dict[t_id] = seq
+        except Exception as e:
+            typer.echo(f"Erreur lors de la lecture du fichier cible {t.sequence_file}:\n{e}")
+            raise typer.Exit(code=1)
         
-    if not targets:
-        targets = {"Compétition Sans Cible": ""}
+    if not targets_dict:
+        targets_dict = {"Compétition Sans Cible": ""}
         
-    has_true_target = any(k != "Compétition Sans Cible" for k in targets.keys())
+    has_true_target = any(k != "Compétition Sans Cible" for k in targets_dict.keys())
 
     # 2. & 3. Build Internal Engine Components
-    primers, primer_to_panel, backend, backend_kwargs, mon_molar, enzyme, temp_celsius, profiles = build_engine_from_config(config_obj, targets)
+    primers, primer_to_panel, backend, backend_kwargs, mon_molar, enzyme, temp_celsius, profiles = build_engine_from_config(config_obj, targets_dict)
     
     if not primers:
         typer.echo("Erreur : Le panel d'amorces est vide. Veuillez définir au moins un jeu d'amorces (primer_sets).")
@@ -102,7 +138,7 @@ def analyze(
     with warnings.catch_warnings(record=True) as captured_warnings:
         warnings.simplefilter("always")
         
-        for t_id, t_seq in targets.items():
+        for t_id, t_seq in targets_dict.items():
             typer.echo(f"Solving for target {t_id}...")
         # Si c'est le faux target, on utilise le premier profil dispo (ou un par défaut)
         profile = profiles.get(t_id)
@@ -285,7 +321,7 @@ def analyze(
     
     mispriming_risks = []
     if config_obj.targets and len(config_obj.targets) > 1:
-        target_dict = targets  # targets est le dictionnaire {t.id: t.sequence} déjà chargé
+        target_dict = targets_dict  # targets est le dictionnaire {t.id: t.sequence} déjà chargé
         mispriming_risks = detect_inter_target_mispriming(
             primers, primer_to_panel, target_dict, backend, enzyme, temp_celsius, **backend_kwargs
         )

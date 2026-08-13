@@ -47,9 +47,12 @@ primer_sets:
 """)
 
     # Try to load and run the whole main analysis path logic for mispriming
-    from labcraft.cli.main import analyze
+    from labcraft.cli.main import app
+    from typer.testing import CliRunner
     # Just running analyze should work and not crash
     report_file = tmp_path / "report.html"
-    analyze(str(config_yaml), str(report_file))
+    runner = CliRunner()
+    result = runner.invoke(app, ["-c", str(config_yaml), "-o", str(report_file)])
+    assert result.exit_code == 0
     
     assert report_file.exists()
