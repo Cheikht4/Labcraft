@@ -72,8 +72,8 @@ def parse_primer_name(name: str) -> Tuple[str, str, Optional[str]]:
     Usually it's the last or second to last (if version is present).
     """
     aliases = {
-        "FLOOP": "LF", "FLP": "LF",
-        "BLOOP": "LB", "BLP": "LB"
+        "FLOOP": "LF", "FLP": "LF", "LOOPF": "LF",
+        "BLOOP": "LB", "BLP": "LB", "LOOPB": "LB"
     }
     valid_roles = {"F3", "B3", "FIP", "BIP", "LF", "LB", "F1", "F2", "B1", "B2", "FWD", "REV", "PROBE"}
     
@@ -150,12 +150,15 @@ def reconstruct_fip_bip(panel_name: str, primers: Dict[str, str], targets: List[
         elif p1rc_matches and not p1_matches:
             # p1 was provided already as the complement.
             return p1 + linker + p2
-        else:
+        elif p1_matches and p1rc_matches:
             raise ParseError(
                 f"Panel '{panel_name}': Unable to determine orientation for {role_prefix}1. "
-                f"Both or neither orientations match the target '{panel_name}'. "
-                f"Please provide a valid {role_prefix}IP instead."
+                f"Both orientations match the target '{panel_name}'."
             )
+        else:
+            import warnings
+            warnings.warn(f"L'orientation de {role_prefix}1 pour le panel '{panel_name}' n'a pas pu être vérifiée sur la cible (aucune correspondance). Convention standard (RC) appliquée.")
+            return reverse_complement(p1) + linker + p2
 
     if 'F1' in primers and 'F2' in primers:
         if 'FIP' not in primers:
@@ -214,7 +217,12 @@ def parse_primer_file(filepath: str, targets: List[Tuple[str, str]], linker: str
             if panel_name in t_names:
                 target_name = panel_name
             else:
-                raise ParseError(f"Panel '{panel_name}' does not match any target name. Available targets: {', '.join(t_names)}. If there are multiple targets, the panel name must match the target name exactly.")
+                for t_name in t_names:
+                    if panel_name.lower() in t_name.lower() or t_name.lower() in panel_name.lower():
+                        target_name = t_name
+                        break
+                if target_name is None:
+                    raise ParseError(f"Panel '{panel_name}' does not match any target name. Available targets: {', '.join(t_names)}. If there are multiple targets, the panel name must match the target name exactly or by inclusion.")
                 
         for v_key, roles_dict in versions.items():
             reconstruct_fip_bip(panel_name, roles_dict, targets, linker)
