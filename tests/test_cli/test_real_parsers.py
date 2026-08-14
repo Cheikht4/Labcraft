@@ -9,9 +9,6 @@ def test_real_primer_dengue_3():
     # 6 oligos physiques, avec target
     primer_file = FIXTURE_DIR / "primer_dengue_3.txt"
     target_fasta = Path("DEN3_M93130.fasta")
-    
-    if not primer_file.exists():
-        pytest.skip("Fixture not found")
         
     target_seq = read_multi_fasta(str(target_fasta))[0][1]
     
@@ -29,9 +26,6 @@ def test_real_amorceparida():
     primer_file = FIXTURE_DIR / "amorceparida.txt"
     target_fasta = Path("DEN3_M93130.fasta")
     
-    if not primer_file.exists():
-        pytest.skip("Fixture not found")
-        
     target_seq = read_multi_fasta(str(target_fasta))[0][1]
     
     with pytest.warns(UserWarning, match="n'a pas pu être vérifiée"):
@@ -42,9 +36,6 @@ def test_real_amorceparida():
 
 def test_real_nawar_dengue1():
     primer_file = FIXTURE_DIR / "Nawar_dengue1.txt"
-    
-    if not primer_file.exists():
-        pytest.skip("Fixture not found")
         
     # Nawar has two panels: '1' and 'DENV1'. 
     # Target name provided doesn't exactly match, but includes them

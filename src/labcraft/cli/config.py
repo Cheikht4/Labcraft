@@ -49,6 +49,7 @@ class PrimerConfig(BaseModel):
 
 class PrimerSetConfig(BaseModel):
     target: str
+    panel_name: str = ""
     primers: Dict[str, PrimerConfig]
     
     model_config = {"extra": "forbid"}
@@ -143,6 +144,7 @@ def build_engine_from_config(
     for pset in config.primer_sets:
         t_id = pset.target
         p_dict = pset.primers
+        panel_id = pset.panel_name if pset.panel_name else t_id
         
         copies_uL = target_copies.get(t_id, 1000.0)
         target_molar = target_copies_to_molar(copies_uL)
@@ -151,9 +153,9 @@ def build_engine_from_config(
         conc_map = {}
         
         for role_name, p_data in p_dict.items():
-            name = f"{role_name}_{t_id.replace('Synth', '')}"
+            name = f"{role_name}_{panel_id.replace('Synth', '')}"
             seq = p_data.seq
-            primer_to_panel[name] = t_id
+            primer_to_panel[name] = panel_id
             
             try:
                 role_enum = PrimerRole[role_name.upper()]

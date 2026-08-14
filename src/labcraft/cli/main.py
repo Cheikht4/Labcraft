@@ -45,7 +45,8 @@ def analyze(
     conc_fip_bip: Optional[float] = typer.Option(None, "--conc-fip-bip", help="FIP/BIP concentration in uM."),
     conc_f3_b3: Optional[float] = typer.Option(None, "--conc-f3-b3", help="F3/B3 concentration in uM."),
     conc_loop: Optional[float] = typer.Option(None, "--conc-loop", help="Loop primer concentration in uM."),
-    copies: Optional[float] = typer.Option(None, "--copies", help="Target copies per uL.")
+    copies: Optional[float] = typer.Option(None, "--copies", help="Target copies per uL."),
+    force_joint: bool = typer.Option(False, "--force-joint", help="Force joint analysis of multiple panels for the same target.")
 ):
     """
     Analyzes a multiplex primer panel and generates a comprehensive thermodynamic diagnostic report.
@@ -104,267 +105,292 @@ def analyze(
         
     has_true_target = any(k != "Compétition Sans Cible" for k in targets_dict.keys())
 
-    # 2. & 3. Build Internal Engine Components
-    primers, primer_to_panel, backend, backend_kwargs, mon_molar, enzyme, temp_celsius, profiles = build_engine_from_config(config_obj, targets_dict)
+    target_to_panels = {}
+    for pset in config_obj.primer_sets:
+        target_to_panels.setdefault(pset.target, []).append(pset)
     
-    if not primers:
-        typer.echo("Erreur : Le panel d'amorces est vide. Veuillez définir au moins un jeu d'amorces (primer_sets).")
-        raise typer.Exit(code=1)
-    
-    # 4. Simulation
-    typer.echo("Building complex network and solving thermodynamic equilibrium...")
-    
-    # Target occupation dictionary to collect
-    target_occupations = {}
-    all_fractions = {}
-    all_risks = []
-    max_residual_global = 0.0
-    all_unfolding_penalties = {}
-    
-    # Interaction matrix for heatmap
-    interaction_matrix = {}
-    
-    # For now, we simulate everything together against each target to get the target occupation.
-    # Actually, a full multiplex solve computes everything in one matrix!
-    # To keep it simple, we solve the full matrix with Target A, then Target B, and aggregate.
-    
-    prob = None
-    strands = None
-    complexes = None
-    
-    import warnings
-    captured_warnings_texts = []
-    
-    with warnings.catch_warnings(record=True) as captured_warnings:
-        warnings.simplefilter("always")
+    has_collisions = any(len(panels) > 1 for panels in target_to_panels.values())
+    config_list = []
+    if has_collisions and not force_joint:
+        typer.echo("Attention: Plusieurs panels alternatifs ciblant la même séquence ont été détectés.")
+        typer.echo("Analyse séparée des panels...")
+        import copy
+        for pset in config_obj.primer_sets:
+            new_config = copy.deepcopy(config_obj)
+            new_config.primer_sets = [pset]
+            config_list.append(new_config)
+    else:
+        config_list.append(config_obj)
         
-        for t_id, t_seq in targets_dict.items():
-            typer.echo(f"Solving for target {t_id}...")
-        # Si c'est le faux target, on utilise le premier profil dispo (ou un par défaut)
-        profile = profiles.get(t_id)
-        if profile is None and profiles:
-            profile = next(iter(profiles.values()))
+    for i_cfg, current_config in enumerate(config_list):
+        if len(config_list) > 1:
+            panel_n = current_config.primer_sets[0].panel_name or str(i_cfg)
+            current_output = output.replace('.html', f'_{panel_n}.html')
+            typer.echo(f'--- Analyse du panel {panel_n} ---')
+        else:
+            current_output = output
             
-        prob, strands, complexes, unfolding_penalties = enumerate_complexes(
-            primers, t_seq, backend, profile=profile, temp_celsius=temp_celsius, mon_molar=mon_molar, buffer=config_obj.experiment.buffer.model_dump() if config_obj.experiment.buffer else None
-        )
+        # 2. & 3. Build Internal Engine Components
+        primers, primer_to_panel, backend, backend_kwargs, mon_molar, enzyme, temp_celsius, profiles = build_engine_from_config(current_config, targets_dict)
         
-        res = solve_dual(prob)
-        max_residual_global = max(max_residual_global, res.max_residual)
+        if not primers:
+            typer.echo("Erreur : Le panel d'amorces est vide. Veuillez définir au moins un jeu d'amorces (primer_sets).")
+            raise typer.Exit(code=1)
         
-        # Diagnostics
-        amplifiable_flags = []
-        concs = []
-        dimer_details = []
+        # 4. Simulation
+        typer.echo("Building complex network and solving thermodynamic equilibrium...")
         
-        for i, c_name in enumerate(complexes):
-            stoich = prob.stoichiometry[i]
-            conc = res.concentrations[i]
-            concs.append(conc)
+        # Target occupation dictionary to collect
+        target_occupations = {}
+        all_fractions = {}
+        all_risks = []
+        max_residual_global = 0.0
+        all_unfolding_penalties = {}
+        
+        # Interaction matrix for heatmap
+        interaction_matrix = {}
+        
+        # For now, we simulate everything together against each target to get the target occupation.
+        # Actually, a full multiplex solve computes everything in one matrix!
+        # To keep it simple, we solve the full matrix with Target A, then Target B, and aggregate.
+        
+        prob = None
+        strands = None
+        complexes = None
+        
+        import warnings
+        captured_warnings_texts = []
+        
+        with warnings.catch_warnings(record=True) as captured_warnings:
+            warnings.simplefilter("always")
             
-            is_amp = False
-            details = {}
-            # Ignore complexes containing target sites
-            has_target = any(k >= len(primers) and val > 0 for k, val in enumerate(prob.stoichiometry[i]))
-            
-            if not has_target:
-                p_counts = {k: prob.stoichiometry[i][k] for k, val in enumerate(prob.stoichiometry[i]) if val > 0 and k < len(primers)}
-                total_primers = sum(p_counts.values())
+            for t_id, t_seq in targets_dict.items():
+                typer.echo(f"Solving for target {t_id}...")
+            # Si c'est le faux target, on utilise le premier profil dispo (ou un par défaut)
+            profile = profiles.get(t_id)
+            if profile is None and profiles:
+                profile = next(iter(profiles.values()))
                 
-                if total_primers == 2:
-                    if len(p_counts) == 1:
-                        # Homodimère
-                        k = list(p_counts.keys())[0]
-                        p_a = primers[k]
-                        is_amp, dg_3p, details = evaluate_pair_amplifiable(p_a, p_a, backend, enzyme, temp_celsius, **backend_kwargs)
-                        from labcraft.report.alignment import dotbracket_to_alignment, get_alignment_columns
-                        if 'alignment' not in details:
-                            details['alignment'] = dotbracket_to_alignment(details['seq_a'], details['seq_b'], details['structure'])
-                        if 'alignment_columns' not in details:
-                            cols = get_alignment_columns(details['seq_a'], details['seq_b'], details['structure'], details.get('extensible_strand'))
-                            details['alignment_columns'] = cols
-                            
-                            three_prime_idx = next((i for i, c in enumerate(cols) if c.get('role') == 'three_prime'), -1)
-                            template_count = sum(1 for c in cols if c.get('role') == 'template')
-                            before_arrow = sum(1 for c in cols[:three_prime_idx] if not c.get('is_truncation')) if three_prime_idx != -1 else 0
-                            
-                            details['arrow_metrics'] = {
-                                "show": three_prime_idx != -1 and template_count > 0,
-                                "margin_cols": before_arrow,
-                                "width_cols": template_count
-                            }
-                    elif len(p_counts) == 2:
-                        # Hétérodimère
-                        k1, k2 = list(p_counts.keys())
-                        p_a = primers[k1]
-                        p_b = primers[k2]
-                        is_amp, dg_3p, details = evaluate_pair_amplifiable(p_a, p_b, backend, enzyme, temp_celsius, **backend_kwargs)
-                        from labcraft.report.alignment import dotbracket_to_alignment, get_alignment_columns
-                        if 'alignment' not in details:
-                            details['alignment'] = dotbracket_to_alignment(details['seq_a'], details['seq_b'], details['structure'])
-                        if 'alignment_columns' not in details:
-                            cols = get_alignment_columns(details['seq_a'], details['seq_b'], details['structure'], details.get('extensible_strand'))
-                            details['alignment_columns'] = cols
-                            
-                            three_prime_idx = next((i for i, c in enumerate(cols) if c.get('role') == 'three_prime'), -1)
-                            template_count = sum(1 for c in cols if c.get('role') == 'template')
-                            before_arrow = sum(1 for c in cols[:three_prime_idx] if not c.get('is_truncation')) if three_prime_idx != -1 else 0
-                            
-                            details['arrow_metrics'] = {
-                                "show": three_prime_idx != -1 and template_count > 0,
-                                "margin_cols": before_arrow,
-                                "width_cols": template_count
-                            }
-            amplifiable_flags.append(is_amp)
-            dimer_details.append(details)
+            prob, strands, complexes, unfolding_penalties = enumerate_complexes(
+                primers, t_seq, backend, profile=profile, temp_celsius=temp_celsius, mon_molar=mon_molar, buffer=config_obj.experiment.buffer.model_dump() if config_obj.experiment.buffer else None
+            )
             
-        risks = evaluate_risks(complexes, concs, amplifiable_flags, is_warm_start=False, dimer_details=dimer_details)
-        fractions = compute_fractions(strands, complexes, prob.stoichiometry, res.free_concentrations, prob.delta_g, temp_celsius, primer_to_panel)
-        
-        # Update globals
-        # Note: In a real system, the solver would include ALL targets simultaneously.
-        # We merge risks (take the max concentration).
-        for r in risks:
-            if not any(ar.complex_name == r.complex_name for ar in all_risks):
-                all_risks.append(r)
-                
-        # Target occupation
-        target_occupations[t_id] = {}
-        for s in strands:
-            if s.endswith("_site"):
-                idx = strands.index(s)
-                occ = (prob.total_concentrations[idx] - res.free_concentrations[idx]) / prob.total_concentrations[idx]
-                target_occupations[t_id][s] = occ
-                
-        all_fractions.update(fractions)
-        if t_id not in all_unfolding_penalties:
-            all_unfolding_penalties[t_id] = unfolding_penalties
+            res = solve_dual(prob)
+            max_residual_global = max(max_residual_global, res.max_residual)
             
-        # Extract interaction matrix (only need to do it once, as it's target-independent for dimer interactions)
-        # Extract interaction matrix (only need to do it once, as it's target-independent for dimer interactions)
-        if not interaction_matrix:
-            def get_parent(name: str) -> str:
-                return name.split('#')[0] if '#' in name else name
-                
-            unique_parents = list(dict.fromkeys(get_parent(p.name) for p in primers))
+            # Diagnostics
+            amplifiable_flags = []
+            concs = []
+            dimer_details = []
             
-            for parent1 in unique_parents:
-                interaction_matrix[parent1] = {}
-                for parent2 in unique_parents:
-                    interaction_matrix[parent1][parent2] = 0.0 # Default safe value
+            for i, c_name in enumerate(complexes):
+                stoich = prob.stoichiometry[i]
+                conc = res.concentrations[i]
+                concs.append(conc)
+                
+                is_amp = False
+                details = {}
+                # Ignore complexes containing target sites
+                has_target = any(k >= len(primers) and val > 0 for k, val in enumerate(prob.stoichiometry[i]))
+                
+                if not has_target:
+                    p_counts = {k: prob.stoichiometry[i][k] for k, val in enumerate(prob.stoichiometry[i]) if val > 0 and k < len(primers)}
+                    total_primers = sum(p_counts.values())
                     
-            for p1 in primers:
-                parent1 = get_parent(p1.name)
-                for p2 in primers:
-                    parent2 = get_parent(p2.name)
+                    if total_primers == 2:
+                        if len(p_counts) == 1:
+                            # Homodimère
+                            k = list(p_counts.keys())[0]
+                            p_a = primers[k]
+                            is_amp, dg_3p, details = evaluate_pair_amplifiable(p_a, p_a, backend, enzyme, temp_celsius, **backend_kwargs)
+                            from labcraft.report.alignment import dotbracket_to_alignment, get_alignment_columns
+                            if 'alignment' not in details:
+                                details['alignment'] = dotbracket_to_alignment(details['seq_a'], details['seq_b'], details['structure'])
+                            if 'alignment_columns' not in details:
+                                cols = get_alignment_columns(details['seq_a'], details['seq_b'], details['structure'], details.get('extensible_strand'))
+                                details['alignment_columns'] = cols
+                                
+                                three_prime_idx = next((i for i, c in enumerate(cols) if c.get('role') == 'three_prime'), -1)
+                                template_count = sum(1 for c in cols if c.get('role') == 'template')
+                                before_arrow = sum(1 for c in cols[:three_prime_idx] if not c.get('is_truncation')) if three_prime_idx != -1 else 0
+                                
+                                details['arrow_metrics'] = {
+                                    "show": three_prime_idx != -1 and template_count > 0,
+                                    "margin_cols": before_arrow,
+                                    "width_cols": template_count
+                                }
+                        elif len(p_counts) == 2:
+                            # Hétérodimère
+                            k1, k2 = list(p_counts.keys())
+                            p_a = primers[k1]
+                            p_b = primers[k2]
+                            is_amp, dg_3p, details = evaluate_pair_amplifiable(p_a, p_b, backend, enzyme, temp_celsius, **backend_kwargs)
+                            from labcraft.report.alignment import dotbracket_to_alignment, get_alignment_columns
+                            if 'alignment' not in details:
+                                details['alignment'] = dotbracket_to_alignment(details['seq_a'], details['seq_b'], details['structure'])
+                            if 'alignment_columns' not in details:
+                                cols = get_alignment_columns(details['seq_a'], details['seq_b'], details['structure'], details.get('extensible_strand'))
+                                details['alignment_columns'] = cols
+                                
+                                three_prime_idx = next((i for i, c in enumerate(cols) if c.get('role') == 'three_prime'), -1)
+                                template_count = sum(1 for c in cols if c.get('role') == 'template')
+                                before_arrow = sum(1 for c in cols[:three_prime_idx] if not c.get('is_truncation')) if three_prime_idx != -1 else 0
+                                
+                                details['arrow_metrics'] = {
+                                    "show": three_prime_idx != -1 and template_count > 0,
+                                    "margin_cols": before_arrow,
+                                    "width_cols": template_count
+                                }
+                amplifiable_flags.append(is_amp)
+                dimer_details.append(details)
+                
+            risks = evaluate_risks(complexes, concs, amplifiable_flags, is_warm_start=False, dimer_details=dimer_details)
+            fractions = compute_fractions(strands, complexes, prob.stoichiometry, res.free_concentrations, prob.delta_g, temp_celsius, primer_to_panel)
+            
+            # Update globals
+            # Note: In a real system, the solver would include ALL targets simultaneously.
+            # We merge risks (take the max concentration).
+            for r in risks:
+                if not any(ar.complex_name == r.complex_name for ar in all_risks):
+                    all_risks.append(r)
                     
-                    if p1.name == p2.name:
-                        res = backend.calc_homodimer(p1.sequence, temp_celsius=temp_celsius, **backend_kwargs)
-                    else:
-                        res = backend.calc_heterodimer(p1.sequence, p2.sequence, temp_celsius=temp_celsius, **backend_kwargs)
+            # Target occupation
+            target_occupations[t_id] = {}
+            for s in strands:
+                if s.endswith("_site"):
+                    idx = strands.index(s)
+                    occ = (prob.total_concentrations[idx] - res.free_concentrations[idx]) / prob.total_concentrations[idx]
+                    target_occupations[t_id][s] = occ
+                    
+            all_fractions.update(fractions)
+            if t_id not in all_unfolding_penalties:
+                all_unfolding_penalties[t_id] = unfolding_penalties
+                
+            # Extract interaction matrix (only need to do it once, as it's target-independent for dimer interactions)
+            # Extract interaction matrix (only need to do it once, as it's target-independent for dimer interactions)
+            if not interaction_matrix:
+                def get_parent(name: str) -> str:
+                    return name.split('#')[0] if '#' in name else name
+                    
+                unique_parents = list(dict.fromkeys(get_parent(p.name) for p in primers))
+                
+                for parent1 in unique_parents:
+                    interaction_matrix[parent1] = {}
+                    for parent2 in unique_parents:
+                        interaction_matrix[parent1][parent2] = 0.0 # Default safe value
                         
-                    current_dg = interaction_matrix[parent1][parent2]
-                    # We take the minimum (strongest) delta G among all variants
-                    if current_dg == 0.0 or res.dg_kcal < current_dg:
-                        interaction_matrix[parent1][parent2] = res.dg_kcal
-    # 5. Verdict
-    def get_parent(name: str) -> str:
-        return name.split('#')[0] if '#' in name else name
-
-    loop_primer_parents = {get_parent(p.name) for p in primers if p.role in (PrimerRole.LF, PrimerRole.LB)}
+                for p1 in primers:
+                    parent1 = get_parent(p1.name)
+                    for p2 in primers:
+                        parent2 = get_parent(p2.name)
+                        
+                        if p1.name == p2.name:
+                            res = backend.calc_homodimer(p1.sequence, temp_celsius=temp_celsius, **backend_kwargs)
+                        else:
+                            res = backend.calc_heterodimer(p1.sequence, p2.sequence, temp_celsius=temp_celsius, **backend_kwargs)
+                            
+                        current_dg = interaction_matrix[parent1][parent2]
+                        # We take the minimum (strongest) delta G among all variants
+                        if current_dg == 0.0 or res.dg_kcal < current_dg:
+                            interaction_matrix[parent1][parent2] = res.dg_kcal
+        # 5. Verdict
+        def get_parent(name: str) -> str:
+            return name.split('#')[0] if '#' in name else name
     
-    verdict = generate_verdict(all_fractions, target_occupations, all_risks, loop_primer_parents=loop_primer_parents)
-    
-    # Recommandations (basées sur les risques réels, pas seulement le verdict)
-    # Recommendations (based on actual risks, not just verdict)
-    from labcraft.optimize.recommendations import generate_recommendations
-    recommendations = generate_recommendations(verdict, risks=all_risks)
-    
-    # Contrôle des Sondes TaqMan : déclenché par la présence de sondes, pas par la chimie
-    # TaqMan probe check: triggered by presence of probes, not by chemistry field
-    probe_tm_results = []
-    has_probes = any(p.role == PrimerRole.PROBE for p in primers)
-    if has_probes:
-        probe_tm_results = check_probes_tm(primers, backend, temp_celsius, **backend_kwargs)
+        loop_primer_parents = {get_parent(p.name) for p in primers if p.role in (PrimerRole.LF, PrimerRole.LB)}
         
-    # Optimisation des concentrations
-    optimization_results = []
-    # On n'optimise que si le génome est présent et qu'il y a un vrai problème
-    # Mais le rapport peut toujours afficher les résultats.
-    # We need the last `prob`, `complexes`, `strands`
-    # Let's run it.
-    from labcraft.optimize.concentrations import optimize_concentrations
-    free_fractions = {p: f.free for p, f in all_fractions.items()}
-    if prob and complexes and strands:
-        optimization_results = optimize_concentrations(
-            prob_template=prob,
-            species_names=strands,
-            primers=primers,
-            target_dict=targets,
-            primer_to_panel=primer_to_panel,
-            original_free_fractions=free_fractions,
-            original_target_occupations={},
-            complex_names=complexes,
-            temp_celsius=temp_celsius,
-            backend=backend,
-            enzyme=enzyme
-        )
-    
-    
-    # 5.5 Multiplex Balance & Mispriming
-    from labcraft.metrics.balance import calculate_multiplex_balance
-    from labcraft.diagnostics.mispriming import detect_inter_target_mispriming
-    
-    panel_summaries, balance_cv = {}, None
-    if target_occupations:
-        panel_summaries, balance_cv = calculate_multiplex_balance(primer_to_panel, target_occupations, free_fractions, loop_primer_parents=loop_primer_parents)
-    
-    mispriming_risks = []
-    if config_obj.targets and len(config_obj.targets) > 1:
-        target_dict = targets_dict  # targets est le dictionnaire {t.id: t.sequence} déjà chargé
-        mispriming_risks = detect_inter_target_mispriming(
-            primers, primer_to_panel, target_dict, backend, enzyme, temp_celsius, **backend_kwargs
-        )
-    
-    
-    # 6. Generate Report
-    typer.echo("Generating HTML report...")
-    
-    metadata = {
-        "version": importlib.metadata.version("labcraft") if importlib.metadata.version else "0.0.1",
-        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime()),
-        "file_hash": file_hash,
-        "max_residual": max_residual_global,
-        "temperature": temp_celsius,
-        "buffer": config_obj.experiment.buffer.model_dump() if config_obj.experiment.buffer else "Reference conditions (1.0 M Na+, 0 mM Mg2+)",
-        "enzyme": enzyme.name,
-        "dimer_dg_threshold": enzyme.dimer_dg_threshold,
-        "concentrations_fip_bip": "Per target (check config)",
-        "concentrations_target": "Per target (check config)",
-        "interaction_matrix": interaction_matrix,
-        "primer_names": list(interaction_matrix.keys()),
-        "unfolding_penalties": all_unfolding_penalties,
-        "target_occupations": target_occupations,
-        "has_true_target": has_true_target,
-        "primer_to_panel": primer_to_panel,
-        "panel_summaries": panel_summaries,
-        "balance_cv": balance_cv,
-        "mispriming_risks": mispriming_risks,
-        "chemistry": config_obj.experiment.chemistry,
-        "optimization_results": optimization_results,
-        "probe_tm_results": probe_tm_results,
-        "recommendations": recommendations,
-        "loop_primer_parents": list(loop_primer_parents),
-        "primers_parent": primers,
-        "warnings": [str(w.message) for w in captured_warnings]
-    }
-    
-    html = render_report(verdict, all_fractions, all_risks, metadata)
-    
-    with open(output, "w") as f:
-        f.write(html)
+        verdict = generate_verdict(all_fractions, target_occupations, all_risks, loop_primer_parents=loop_primer_parents)
         
-    typer.echo(f"Analysis complete in {time.time() - start_time:.2f}s. Report saved to {output}.")
-    
+        # Recommandations (basées sur les risques réels, pas seulement le verdict)
+        # Recommendations (based on actual risks, not just verdict)
+        from labcraft.optimize.recommendations import generate_recommendations
+        recommendations = generate_recommendations(verdict, risks=all_risks)
+        
+        # Contrôle des Sondes TaqMan : déclenché par la présence de sondes, pas par la chimie
+        # TaqMan probe check: triggered by presence of probes, not by chemistry field
+        probe_tm_results = []
+        has_probes = any(p.role == PrimerRole.PROBE for p in primers)
+        if has_probes:
+            probe_tm_results = check_probes_tm(primers, backend, temp_celsius, **backend_kwargs)
+            
+        # Optimisation des concentrations
+        optimization_results = []
+        # On n'optimise que si le génome est présent et qu'il y a un vrai problème
+        # Mais le rapport peut toujours afficher les résultats.
+        # We need the last `prob`, `complexes`, `strands`
+        # Let's run it.
+        from labcraft.optimize.concentrations import optimize_concentrations
+        free_fractions = {p: f.free for p, f in all_fractions.items()}
+        if prob and complexes and strands:
+            optimization_results = optimize_concentrations(
+                prob_template=prob,
+                species_names=strands,
+                primers=primers,
+                target_dict=targets,
+                primer_to_panel=primer_to_panel,
+                original_free_fractions=free_fractions,
+                original_target_occupations={},
+                complex_names=complexes,
+                temp_celsius=temp_celsius,
+                backend=backend,
+                enzyme=enzyme
+            )
+        
+        
+        # 5.5 Multiplex Balance & Mispriming
+        from labcraft.metrics.balance import calculate_multiplex_balance
+        from labcraft.diagnostics.mispriming import detect_inter_target_mispriming
+        
+        panel_summaries, balance_cv = {}, None
+        if target_occupations:
+            panel_summaries, balance_cv = calculate_multiplex_balance(primer_to_panel, target_occupations, free_fractions, loop_primer_parents=loop_primer_parents)
+        
+        mispriming_risks = []
+        if config_obj.targets and len(config_obj.targets) > 1:
+            target_dict = targets_dict  # targets est le dictionnaire {t.id: t.sequence} déjà chargé
+            mispriming_risks = detect_inter_target_mispriming(
+                primers, primer_to_panel, target_dict, backend, enzyme, temp_celsius, **backend_kwargs
+            )
+        
+        
+        # 6. Generate Report
+        typer.echo("Generating HTML report...")
+        
+        metadata = {
+            "version": importlib.metadata.version("labcraft") if importlib.metadata.version else "0.0.1",
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime()),
+            "file_hash": file_hash,
+            "max_residual": max_residual_global,
+            "temperature": temp_celsius,
+            "buffer": config_obj.experiment.buffer.model_dump() if config_obj.experiment.buffer else "Reference conditions (1.0 M Na+, 0 mM Mg2+)",
+            "enzyme": enzyme.name,
+            "dimer_dg_threshold": enzyme.dimer_dg_threshold,
+            "concentrations_fip_bip": "Per target (check config)",
+            "concentrations_target": "Per target (check config)",
+            "interaction_matrix": interaction_matrix,
+            "primer_names": list(interaction_matrix.keys()),
+            "unfolding_penalties": all_unfolding_penalties,
+            "target_occupations": target_occupations,
+            "has_true_target": has_true_target,
+            "primer_to_panel": primer_to_panel,
+            "panel_summaries": panel_summaries,
+            "balance_cv": balance_cv,
+            "mispriming_risks": mispriming_risks,
+            "chemistry": config_obj.experiment.chemistry,
+            "optimization_results": optimization_results,
+            "probe_tm_results": probe_tm_results,
+            "recommendations": recommendations,
+            "loop_primer_parents": list(loop_primer_parents),
+            "primers_parent": primers,
+            "warnings": [str(w.message) for w in captured_warnings]
+        }
+        
+        html = render_report(verdict, all_fractions, all_risks, metadata)
+        
+        with open(current_output, "w") as f:
+            f.write(html)
+            
+        typer.echo(f"Analysis complete in {time.time() - start_time:.2f}s. Report saved to {current_output}.")
+        
 if __name__ == "__main__":
     app()

@@ -240,6 +240,7 @@ def parse_primer_file(filepath: str, targets: List[Tuple[str, str]], linker: str
             # Let's check config.py
             config_sets.append(PrimerSetConfig(
                 target=target_name,
+                panel_name=p_name,
                 primers=primer_configs
             ))
             
