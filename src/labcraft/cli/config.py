@@ -185,7 +185,7 @@ def build_engine_from_config(
             
             # Enregistrer le nom parent dans primer_to_panel (pour les cas sans dégénérescence)
             # Register parent name in primer_to_panel (for non-degenerate cases)
-            primer_to_panel[name] = t_id
+            primer_to_panel[name] = panel_id
             
             # Parse la séquence parente pour localiser les sous-domaines par position
             # Parse the parent sequence to locate sub-domains by position
@@ -198,7 +198,7 @@ def build_engine_from_config(
                 # Enregistrer chaque variant dans primer_to_panel
                 # Register each variant in primer_to_panel
                 if len(variants) > 1:
-                    primer_to_panel[v_name] = t_id
+                    primer_to_panel[v_name] = panel_id
                 
                 if role_name.upper() in ("FIP", "BIP") and isinstance(p_data.domains, PrimerDomains):
                     d = p_data.domains
