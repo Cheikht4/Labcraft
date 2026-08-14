@@ -38,3 +38,9 @@ jobs:
         
       - name: Run pytest
         run: pytest --maxfail=1 --cov=labcraft --cov-report=xml tests/
+
+      - name: Run pytest from another directory
+        run: |
+          mkdir -p /tmp/test_dir
+          cd /tmp/test_dir
+          pytest $GITHUB_WORKSPACE/tests/
