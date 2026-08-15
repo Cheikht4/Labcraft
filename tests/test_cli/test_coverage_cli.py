@@ -10,7 +10,7 @@ def test_coverage_cli(tmp_path: Path):
     fasta_file = tmp_path / "strains.fasta"
     dummy_seq = "GAAGAAGCTGTGCAGCCTG" + "N"*20 + "TGGCTTTTGGGCCTGACTTC" + "N"*20 + "GCACGGTGTAGCAGACTAG" + "N"*20 + "TCCCCACGACGGAGCTACAG"
     
-    fasta_text = ">S1_parfaite\n" + dummy_seq + "\n>S2_mism_interne\n" + dummy_seq + "\n>S3_veto_3p\n" + dummy_seq + "\n>S4_loop_fail\n" + dummy_seq + "\n"
+    fasta_text = ">S1_parfaite\n" + dummy_seq + "\n>S2_mism_interne\n" + dummy_seq + "\n>S3_veto_3p\n" + dummy_seq + "\n>S4_loop_fail\n" + dummy_seq + "\n>S5_count_lost\n" + dummy_seq + "\n"
     fasta_file.write_text(fasta_text)
     
     csv_file = tmp_path / "sites.csv"
@@ -18,7 +18,7 @@ def test_coverage_cli(tmp_path: Path):
         writer = csv.DictWriter(f, fieldnames=["strain_id", "primer_role", "position", "strand", "site_seq", "n_mismatches", "panel"])
         writer.writeheader()
         
-        strains = ["S1_parfaite", "S2_mism_interne", "S3_veto_3p", "S4_loop_fail"]
+        strains = ["S1_parfaite", "S2_mism_interne", "S3_veto_3p", "S4_loop_fail", "S5_count_lost"]
         
         for s in strains:
             f3_seq = "GCCACCTTAAGCCACAGTA"
@@ -29,6 +29,8 @@ def test_coverage_cli(tmp_path: Path):
             elif s == "S3_veto_3p":
                 f3_seq = "GCCACCTTAAGCCACAGTT"
                 f3_mm = 1
+            elif s == "S5_count_lost":
+                f3_mm = 3  # Count lost, but sequence is perfect so Thermo is covered
                 
             writer.writerow({"strain_id": s, "primer_role": "F3", "position": 0, "strand": "+", "site_seq": f3_seq, "n_mismatches": f3_mm, "panel": "Test"})
             writer.writerow({"strain_id": s, "primer_role": "B3", "position": 0, "strand": "-", "site_seq": "CCCTCCCATGACACAAC", "n_mismatches": 0, "panel": "Test"})
@@ -65,7 +67,9 @@ def test_coverage_cli(tmp_path: Path):
     assert "S1_parfaite" in html_content
     assert "S2_mism_interne" in html_content
     assert "S3_veto_3p" in html_content
+    assert "S5_count_lost" in html_content
     assert "S4_loop_fail" in html_content
     
     assert "Divergences Comptage vs Thermodynamique" in html_content
     assert "S3_veto_3p" in html_content
+    assert "S5_count_lost" in html_content

@@ -114,6 +114,19 @@ class CoverageAnalyzer:
         )
 
     def analyze_strains(self, csv_records: List[Dict]) -> List[StrainVerdict]:
+        # Validate CSV columns
+        if not csv_records:
+            return []
+        
+        first_row = csv_records[0]
+        expected_cols = {"strain_id", "position", "strand", "n_mismatches"}
+        found_cols = set(first_row.keys())
+        missing = expected_cols - found_cols
+        if missing:
+            raise ValueError(f"Le CSV est incomplet. Colonnes attendues : {expected_cols}, trouvées : {found_cols}. Manquant : {missing}")
+        if "primer_role" not in found_cols and "primer_name" not in found_cols:
+            raise ValueError("Le CSV doit contenir 'primer_role' ou 'primer_name'.")
+
         # Group records by strain
         records_by_strain = {}
         for r in csv_records:
@@ -129,12 +142,22 @@ class CoverageAnalyzer:
             genome = self.fasta_dict[s_id].upper()
             
             evaluations = {}
+            # We also store the csv n_mismatches to calculate count rule correctly
+            csv_mismatches_dict = {}
             for r in records:
-                p_name = r["primer_name"]
-                if p_name not in self.primers_by_name:
-                    continue
-                primer = self.primers_by_name[p_name]
+                p_name = r.get("primer_role", r.get("primer_name"))
+                primer = None
+                if p_name in self.primers_by_name:
+                    primer = self.primers_by_name[p_name]
+                else:
+                    for p in self.primers:
+                        if p.role.name == p_name or p.role.value == p_name:
+                            primer = p
+                            break
                 
+                if not primer:
+                    continue
+                    
                 if "site_seq" in r and r["site_seq"]:
                     site_seq = r["site_seq"]
                 else:
@@ -143,7 +166,8 @@ class CoverageAnalyzer:
                     
                 eval_obj = self.evaluate_site(primer, site_seq, r["strand"])
                 eval_obj.strain_id = s_id
-                evaluations[p_name] = eval_obj
+                evaluations[primer.name] = eval_obj
+                csv_mismatches_dict[primer.name] = int(r["n_mismatches"])
 
             # Check if all init primers are present
             init_primers = [p for p in self.primers if p.role in (PrimerRole.F3, PrimerRole.B3, PrimerRole.FIP, PrimerRole.BIP)]
@@ -160,14 +184,15 @@ class CoverageAnalyzer:
                     continue
                     
                 ev = evaluations[p.name]
+                csv_mms = csv_mismatches_dict[p.name]
                 
                 # Thermo rule
                 if ev.verdict in (SiteVerdict.VETO_3P, SiteVerdict.ABSENT):
                     is_amp_thermo = False
                     if not limiting: limiting = p.name
                     
-                # Count rule
-                if ev.n_mismatches_count > self.max_mismatches_count:
+                # Count rule (USING CSV COLUMN)
+                if csv_mms > self.max_mismatches_count:
                     is_amp_count = False
                     
             strain_verdicts.append(StrainVerdict(

@@ -3,7 +3,7 @@ from pathlib import Path
 from labcraft.cli.parsers import parse_primer_file
 from labcraft.cli.parsers import read_multi_fasta
 
-FIXTURE_DIR = Path(__file__).parents[1] / "fixtures" / "primer-analysis-suite"
+FIXTURE_DIR = Path(__file__).parents[1] / "fixtures" / "real_primer_files"
 
 def test_real_primer_dengue_3():
     # 6 oligos physiques, avec target

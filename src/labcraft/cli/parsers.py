@@ -210,7 +210,9 @@ def parse_primer_file(filepath: str, targets: List[Tuple[str, str]], linker: str
             
         # Match target
         target_name = None
-        if len(targets) == 1:
+        if len(targets) == 0:
+            target_name = panel_name
+        elif len(targets) == 1:
             target_name = targets[0][0]
         else:
             t_names = [t[0] for t in targets]

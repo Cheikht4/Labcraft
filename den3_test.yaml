@@ -9,12 +9,12 @@ experiment:
     dntp_mM: 1.4
 
 targets:
-  - id: "DEN3_M93130"
+  - id: "M93130.1"
     sequence_file: "DEN3_M93130.fasta"
     copies_per_uL: 100.0
 
 primer_sets:
-  - target: "DEN3_M93130"
+  - target: "M93130.1"
     primers:
       F3:
         seq: "GCCACCTTAAGCCACAGTA"

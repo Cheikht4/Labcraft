@@ -27,18 +27,21 @@ def test_full_coverage_suite():
     
     csv_records = []
     for s_id in fasta_dict.keys():
-        csv_records.append({"strain_id": s_id, "primer_name": "F3", "primer_role": "F3", "position": 0, "strand": "+", "site_seq": ""})
+        mm = 0
+        if s_id == "Strain_Tol": mm = 1
+        elif s_id == "Strain_Veto": mm = 1
+        elif s_id == "Strain_Drop": mm = 3
+        csv_records.append({"strain_id": s_id, "primer_name": "F3", "primer_role": "F3", "position": 0, "strand": "+", "site_seq": "", "n_mismatches": mm})
         
         # Perfect matches for the others
-        csv_records.append({"strain_id": s_id, "primer_name": "B3", "position": 0, "strand": "-", "site_seq": "CCCTCCCATGACACAAC"})
-        csv_records.append({"strain_id": s_id, "primer_name": "FIP", "position": 0, "strand": "+", "site_seq": "GAAGAAGCTGTGCAGCCTG"})
-        csv_records.append({"strain_id": s_id, "primer_name": "BIP", "position": 0, "strand": "+", "site_seq": "CTAGTCTGCTACACCGTGC"})
+        csv_records.append({"strain_id": s_id, "primer_name": "B3", "primer_role": "B3", "position": 0, "strand": "-", "site_seq": "CCCTCCCATGACACAAC", "n_mismatches": 0})
+        csv_records.append({"strain_id": s_id, "primer_name": "FIP", "primer_role": "FIP", "position": 0, "strand": "+", "site_seq": "GAAGAAGCTGTGCAGCCTG", "n_mismatches": 0})
+        csv_records.append({"strain_id": s_id, "primer_name": "BIP", "primer_role": "BIP", "position": 0, "strand": "+", "site_seq": "CTAGTCTGCTACACCGTGC", "n_mismatches": 0})
         
         if s_id == "Strain_Loop":
-            csv_records.append({"strain_id": s_id, "primer_name": "LF", "position": 0, "strand": "+", "site_seq": "CCTTGGACGGGGAA"})
+            csv_records.append({"strain_id": s_id, "primer_name": "LF", "primer_role": "LF", "position": 0, "strand": "+", "site_seq": "CCTTGGACGGGGAA", "n_mismatches": 2})
         else:
-            csv_records.append({"strain_id": s_id, "primer_name": "LF", "position": 0, "strand": "+", "site_seq": "CCTTGGACGGGGCT"})
-
+            csv_records.append({"strain_id": s_id, "primer_name": "LF", "primer_role": "LF", "position": 0, "strand": "+", "site_seq": "CCTTGGACGGGGCT", "n_mismatches": 0})
     backend = ViennaSaltShiftBackend(UnifiedSaltModel())
     enzyme = get_enzyme("Bst2.0")
     analyzer = CoverageAnalyzer(primers, fasta_dict, backend, enzyme, temp_celsius=63.0, dg_threshold=-3.0, max_mismatches_count=2)
