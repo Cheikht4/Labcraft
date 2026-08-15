@@ -223,41 +223,14 @@ def enumerate_complexes(
                         resolved_bottom.append(b_targ)
                 bottom_under_top = "".join(resolved_bottom)
                 
-                # Comptage exact des mésappariements
+                # Comptage exact des mésappariements et énergie
+                from labcraft.thermo.mismatch import calculate_hybridization_dg
+                dg_hyb, ddg_mismatch = calculate_hybridization_dg(
+                    p.binding_domain, bottom_under_top, temp_celsius, backend, bd_lna=bd_lna, **backend_kwargs
+                )
+                
                 comp = {'A': 'T', 'T': 'A', 'C': 'G', 'G': 'C'}
                 n_mismatches = sum(1 for a, b in zip(p.binding_domain, bottom_under_top) if comp.get(a, '') != b)
-
-                if n_mismatches == 0:
-                    # CHEMIN EXISTANT : si 0 mésappariement, on utilise backend.calc_duplex sans rien changer
-                    res_hyb = backend.calc_duplex(
-                        p.binding_domain, _revcomp(p.binding_domain), 
-                        temp_celsius=temp_celsius, 
-                        lna_positions_a=bd_lna,
-                        lna_positions_b=(),
-                        **backend_kwargs
-                    )
-                    dg_hyb = res_hyb.dg_kcal
-                else:
-                    # CHEMIN NOUVEAU : si au moins 1 mésappariement, on applique le différentiel
-                    from labcraft.thermo.mismatch import nn_duplex_energy
-                    
-                    # On calcule le dG de base parfaitement apparié via le backend pour avoir sels/LNA inclus
-                    res_hyb_perfect = backend.calc_duplex(
-                        p.binding_domain, _revcomp(p.binding_domain),
-                        temp_celsius=temp_celsius,
-                        lna_positions_a=bd_lna,
-                        lna_positions_b=(),
-                        **backend_kwargs
-                    )
-                    dg_hyb_base = res_hyb_perfect.dg_kcal
-                    
-                    # On calcule le décalage (shift) lié au mésappariement
-                    perfect_bottom = "".join(comp.get(c, c) for c in p.binding_domain)
-                    _, _, dg_perfect_nn = nn_duplex_energy(p.binding_domain, perfect_bottom, temp_celsius)
-                    _, _, dg_mismatched_nn = nn_duplex_energy(p.binding_domain, bottom_under_top, temp_celsius)
-                    
-                    ddg_mismatch = dg_mismatched_nn - dg_perfect_nn
-                    dg_hyb = dg_hyb_base + ddg_mismatch
 
                 # Évaluation de l'extensibilité 3'
                 from labcraft.diagnostics.enzyme import get_enzyme

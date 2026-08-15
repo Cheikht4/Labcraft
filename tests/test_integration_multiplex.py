@@ -52,7 +52,7 @@ primer_sets:
     # Just running analyze should work and not crash
     report_file = tmp_path / "report.html"
     runner = CliRunner()
-    result = runner.invoke(app, ["-c", str(config_yaml), "-o", str(report_file)])
+    result = runner.invoke(app, ["analyze", "-c", str(config_yaml), "-o", str(report_file)])
     assert result.exit_code == 0
     
     assert report_file.exists()

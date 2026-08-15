@@ -392,5 +392,69 @@ def analyze(
             
         typer.echo(f"Analysis complete in {time.time() - start_time:.2f}s. Report saved to {current_output}.")
         
+
+
+@app.command()
+def coverage(
+    primers: str = typer.Option(..., "-p", "--primers", help="Path to primers FASTA/TXT file."),
+    fasta: str = typer.Option(..., "-f", "--fasta", help="Path to multi-FASTA file of strains."),
+    sites: str = typer.Option(..., "-s", "--sites", help="Path to candidate sites CSV."),
+    output: str = typer.Option("coverage_report.html", "-o", "--output", help="Output HTML report path."),
+    temperature: float = typer.Option(65.0, "--temperature", help="Experiment temperature in Celsius."),
+    dg_threshold: float = typer.Option(-6.0, "--dg-threshold", help="Viability dG threshold."),
+    max_mismatches: int = typer.Option(2, "--max-mismatches", help="Counting rule threshold.")
+):
+    """Analyse de la couverture thermodynamique multi-souches."""
+    import csv
+    import time
+    from labcraft.cli.parsers import parse_primer_file, read_multi_fasta
+    from labcraft.thermo.backends.vienna_salt import ViennaSaltShiftBackend
+    from labcraft.thermo.salt import UnifiedSaltModel
+    from labcraft.diagnostics.enzyme import get_enzyme
+    from labcraft.lamp.coverage import CoverageAnalyzer
+    from labcraft.report.coverage_report import render_coverage_report
+
+    print("Lecture des entrées...")
+    targets = []
+    configs = parse_primer_file(primers, targets)
+    if not configs:
+        print("Aucun panel trouvé dans le fichier d'amorces.")
+        raise typer.Exit(1)
+    
+    panel_config = configs[0]
+    
+    fasta_list = read_multi_fasta(fasta)
+    fasta_dict = {name: seq for name, seq in fasta_list}
+    
+    print(f"Chargement de {len(fasta_dict)} souches.")
+    
+    csv_records = []
+    with open(sites, 'r') as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            csv_records.append(row)
+            
+    backend = ViennaSaltShiftBackend(UnifiedSaltModel())
+    enzyme = get_enzyme("Bst2.0")
+    
+    analyzer = CoverageAnalyzer(
+        panel_config.primers, fasta_dict, backend, enzyme,
+        temp_celsius=temperature,
+        dg_threshold=dg_threshold,
+        max_mismatches_count=max_mismatches
+    )
+    
+    print("Analyse thermodynamique des souches...")
+    t0 = time.time()
+    verdicts = analyzer.analyze_strains(csv_records)
+    t1 = time.time()
+    
+    print(f"Analyse terminée en {t1 - t0:.2f} s.")
+    
+    render_coverage_report(
+        verdicts, output, panel_config.name, dg_threshold, max_mismatches
+    )
+    print(f"Rapport généré : {output}")
+
 if __name__ == "__main__":
     app()

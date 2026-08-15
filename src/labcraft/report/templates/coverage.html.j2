@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Rapport de Couverture: {{ panel_name }}</title>
+    <style>
+        body { font-family: sans-serif; margin: 20px; color: #333; }
+        h1, h2, h3 { color: #2c3e50; }
+        .summary { background: #ecf0f1; padding: 15px; border-radius: 5px; margin-bottom: 20px; }
+        .divergence-box { background: #fff3cd; padding: 15px; border-left: 5px solid #ffc107; margin-bottom: 20px; }
+        .disclaimer { font-size: 0.9em; color: #7f8c8d; font-style: italic; margin-bottom: 30px; }
+        table { border-collapse: collapse; width: 100%; margin-bottom: 30px; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: center; }
+        th { background-color: #f8f9fa; }
+        .strain-id { text-align: left; font-family: monospace; }
+        .parfait { background-color: #d4edda; color: #155724; }
+        .tolerable { background-color: #fff3cd; color: #856404; }
+        .veto_3p { background-color: #f8d7da; color: #721c24; font-weight: bold; }
+        .absent { background-color: #e2e3e5; color: #383d41; }
+        .amplifiable-yes { color: #28a745; font-weight: bold; }
+        .amplifiable-no { color: #dc3545; font-weight: bold; }
+        .missing-data { background-color: #f1f1f1; }
+    </style>
+</head>
+<body>
+    <h1>Rapport de Couverture Thermodynamique : {{ panel_name }}</h1>
+    
+    <div class="disclaimer">
+        « Couverture théorique in silico. Cette analyse repose sur la thermodynamique d'équilibre 
+        et sur une règle d'extension publiée ; elle ne remplace pas une validation expérimentale. 
+        Un mésappariement interne dégrade la liaison sans nécessairement empêcher l'amorçage, 
+        alors qu'un mésappariement sur les deux dernières bases en 3' l'interdit. »
+    </div>
+    
+    <div class="summary">
+        <h2>Résumé global</h2>
+        <p><strong>Souches analysées :</strong> {{ total_strains }}</p>
+        <p><strong>Couverture Thermodynamique (dG &le; {{ dg_threshold }}) :</strong> {{ covered_thermo }} / {{ total_strains }} ({{ thermo_rate }}%)</p>
+        <p><strong>Couverture Comptage (&le; {{ max_mismatches_count }} mismatches) :</strong> {{ covered_count }} / {{ total_strains }} ({{ count_rate }}%)</p>
+        {% if worst_primer %}
+        <p><strong>Amorce limitante (thermo) :</strong> {{ worst_primer }}</p>
+        {% endif %}
+    </div>
+
+    {% if divergences %}
+    <div class="divergence-box">
+        <h2>Divergences Comptage vs Thermodynamique ({{ divergences|length }})</h2>
+        <p>Souches pour lesquelles la règle de comptage (&le; {{ max_mismatches_count }} mismatches) et l'évaluation thermodynamique donnent des verdicts opposés :</p>
+        <ul>
+        {% for div in divergences %}
+            <li>
+                <strong>{{ div.strain_id }}</strong> : 
+                Comptage = {{ 'Amplifiable' if div.is_amplifiable_count else 'Non' }}, 
+                Thermo = {{ 'Amplifiable' if div.is_amplifiable_thermo else 'Non' }}
+                {% if not div.is_amplifiable_thermo %}
+                (Cause thermo: {{ div.limiting_primer_thermo }})
+                {% endif %}
+            </li>
+        {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+
+    <h2>Matrice des Souches</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Souche</th>
+                <th>Verdict Thermo</th>
+                <th>Verdict Comptage</th>
+                {% for p in sorted_primers %}
+                <th>{{ p }}</th>
+                {% endfor %}
+            </tr>
+        </thead>
+        <tbody>
+            {% for v in verdicts %}
+            <tr>
+                <td class="strain-id">{{ v.strain_id }}</td>
+                <td class="{{ 'amplifiable-yes' if v.is_amplifiable_thermo else 'amplifiable-no' }}">{{ 'OUI' if v.is_amplifiable_thermo else 'NON' }}</td>
+                <td class="{{ 'amplifiable-yes' if v.is_amplifiable_count else 'amplifiable-no' }}">{{ 'OUI' if v.is_amplifiable_count else 'NON' }}</td>
+                
+                {% for p in sorted_primers %}
+                    {% if p in v.evaluations %}
+                        {% set ev = v.evaluations[p] %}
+                        {% if ev.verdict == SiteVerdict.PARFAIT %}
+                            <td class="parfait" title="dG: {{ '%.2f'|format(ev.dg_hyb) }}, Mismatches: {{ ev.n_mismatches_count }}">Parfait</td>
+                        {% elif ev.verdict == SiteVerdict.TOLERABLE %}
+                            <td class="tolerable" title="dG: {{ '%.2f'|format(ev.dg_hyb) }}, Mismatches: {{ ev.n_mismatches_count }}">Tolérable ({{ ev.n_mismatches_count }})</td>
+                        {% elif ev.verdict == SiteVerdict.VETO_3P %}
+                            <td class="veto_3p" title="dG: {{ '%.2f'|format(ev.dg_hyb) }}, Pos bloquante: {{ ev.first_bad_pos }}">Veto 3'</td>
+                        {% else %}
+                            <td class="absent" title="dG: {{ '%.2f'|format(ev.dg_hyb) }}">Absent/Faible</td>
+                        {% endif %}
+                    {% else %}
+                        <td class="missing-data">-</td>
+                    {% endif %}
+                {% endfor %}
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</body>
+</html>

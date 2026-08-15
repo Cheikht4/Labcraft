@@ -45,7 +45,7 @@ def test_dimer_resolution_stoichiometry():
     out_path = config_path.replace(".yaml", "_out.html")
     
     try:
-        result = runner.invoke(app, ["-c", config_path, "-o", out_path])
+        result = runner.invoke(app, ["analyze", "-c", config_path, "-o", out_path])
         assert result.exit_code == 0, f"Erreur CLI: {result.stdout}"
         
         # Verify the report was created and has no errors
@@ -98,7 +98,7 @@ def test_no_buffer_config():
     
     out_path = config_path.replace(".yaml", "_out.html")
     try:
-        result = runner.invoke(app, ["-c", config_path, "-o", out_path])
+        result = runner.invoke(app, ["analyze", "-c", config_path, "-o", out_path])
         assert result.exit_code == 0, f"Erreur CLI: {result.stdout}"
         assert os.path.exists(out_path)
     finally:

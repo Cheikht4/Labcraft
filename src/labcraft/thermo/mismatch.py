@@ -228,3 +228,58 @@ def evaluate_primer_target_binding(
         "first_bad_pos": bad_pos,
         "covered": covered
     }
+
+
+def calculate_hybridization_dg(
+    primer_seq: str,
+    bottom_under_top: str,
+    temp_celsius: float,
+    backend,
+    bd_lna=(),
+    **backend_kwargs
+) -> tuple[float, float]:
+    """
+    Calcule le dG d'hybridation en utilisant le backend par défaut pour un
+    duplex parfait, et en appliquant un ddG (shift) calculé via nn_duplex_energy
+    s'il y a des mésappariements.
+    
+    Args:
+        primer_seq: Séquence de l'amorce 5'->3'
+        bottom_under_top: Séquence cible antiparallèle sous l'amorce
+        temp_celsius: Température d'hybridation
+        backend: Le backend thermodynamique (ex: ViennaSaltShiftBackend)
+        
+    Returns:
+        (dg_hyb_final, ddg_mismatch)
+    """
+    comp = {'A': 'T', 'T': 'A', 'C': 'G', 'G': 'C'}
+    n_mismatches = sum(1 for a, b in zip(primer_seq, bottom_under_top) if comp.get(a, '') != b)
+
+    def _revcomp(s):
+        return "".join(comp.get(c, 'N') for c in reversed(s))
+
+    if n_mismatches == 0:
+        res_hyb = backend.calc_duplex(
+            primer_seq, _revcomp(primer_seq),
+            temp_celsius=temp_celsius,
+            lna_positions_a=bd_lna,
+            lna_positions_b=(),
+            **backend_kwargs
+        )
+        return res_hyb.dg_kcal, 0.0
+
+    res_hyb_perfect = backend.calc_duplex(
+        primer_seq, _revcomp(primer_seq),
+        temp_celsius=temp_celsius,
+        lna_positions_a=bd_lna,
+        lna_positions_b=(),
+        **backend_kwargs
+    )
+    dg_hyb_base = res_hyb_perfect.dg_kcal
+
+    perfect_bottom = "".join(comp.get(c, c) for c in primer_seq)
+    _, _, dg_perfect_nn = nn_duplex_energy(primer_seq, perfect_bottom, temp_celsius)
+    _, _, dg_mismatched_nn = nn_duplex_energy(primer_seq, bottom_under_top, temp_celsius)
+
+    ddg_mismatch = dg_mismatched_nn - dg_perfect_nn
+    return dg_hyb_base + ddg_mismatch, ddg_mismatch
