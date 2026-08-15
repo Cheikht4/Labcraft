@@ -407,24 +407,31 @@ def coverage(
     """Analyse de la couverture thermodynamique multi-souches."""
     import csv
     import time
-    from labcraft.cli.parsers import parse_primer_file, read_multi_fasta
-    from labcraft.thermo.backends.vienna_salt import ViennaSaltShiftBackend
-    from labcraft.thermo.salt import UnifiedSaltModel
-    from labcraft.diagnostics.enzyme import get_enzyme
+    import tempfile
+    from labcraft.cli.parsers import build_config_from_cli, read_multi_fasta
+    from labcraft.cli.config import build_engine_from_config
     from labcraft.lamp.coverage import CoverageAnalyzer
     from labcraft.report.coverage_report import render_coverage_report
 
     print("Lecture des entrées...")
-    targets = []
-    configs = parse_primer_file(primers, targets)
-    if not configs:
-        print("Aucun panel trouvé dans le fichier d'amorces.")
-        raise typer.Exit(1)
-    
-    panel_config = configs[0]
-    
     fasta_list = read_multi_fasta(fasta)
     fasta_dict = {name: seq for name, seq in fasta_list}
+    
+    first_strain_path = None
+    if fasta_list:
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".fasta") as tmp:
+            tmp.write(f">{fasta_list[0][0]}\n{fasta_list[0][1]}\n")
+            first_strain_path = tmp.name
+
+    config_obj = build_config_from_cli(
+        config_path=None,
+        primers_path=primers,
+        targets_path=first_strain_path,
+        temperature=temperature
+    )
+    
+    dummy_targets = {fasta_list[0][0]: fasta_list[0][1]} if fasta_list else {}
+    physical_primers, _, backend, _, _, enzyme, _, _ = build_engine_from_config(config_obj, dummy_targets)
     
     print(f"Chargement de {len(fasta_dict)} souches.")
     
@@ -434,11 +441,8 @@ def coverage(
         for row in reader:
             csv_records.append(row)
             
-    backend = ViennaSaltShiftBackend(UnifiedSaltModel())
-    enzyme = get_enzyme("Bst2.0")
-    
     analyzer = CoverageAnalyzer(
-        panel_config.primers, fasta_dict, backend, enzyme,
+        physical_primers, fasta_dict, backend, enzyme,
         temp_celsius=temperature,
         dg_threshold=dg_threshold,
         max_mismatches_count=max_mismatches
@@ -451,10 +455,8 @@ def coverage(
     
     print(f"Analyse terminée en {t1 - t0:.2f} s.")
     
+    panel_name = config_obj.primer_sets[0].panel_name if config_obj.primer_sets else "Unknown"
     render_coverage_report(
-        verdicts, output, panel_config.name, dg_threshold, max_mismatches
+        verdicts, output, panel_name, dg_threshold, max_mismatches
     )
     print(f"Rapport généré : {output}")
-
-if __name__ == "__main__":
-    app()

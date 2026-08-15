@@ -19,8 +19,8 @@ def test_coverage_analyzer():
     }
     
     csv_records = [
-        {"strain_id": "Strain_Perf", "primer_name": "F3", "position": 0, "strand": "+", "site_seq": "GCCACCTTAAGCCACAGTA"},
-        {"strain_id": "Strain_Veto", "primer_name": "F3", "position": 0, "strand": "+", "site_seq": "GCCACCTTAAGCCACAGTT"},
+        {"strain_id": "Strain_Perf", "primer_role": "F3", "n_mismatches": 0, "position": 0, "strand": "+", "site_seq": "GCCACCTTAAGCCACAGTA"},
+        {"strain_id": "Strain_Veto", "primer_role": "F3", "n_mismatches": 0, "position": 0, "strand": "+", "site_seq": "GCCACCTTAAGCCACAGTT"},
     ]
     
     backend = ViennaSaltShiftBackend(UnifiedSaltModel())
