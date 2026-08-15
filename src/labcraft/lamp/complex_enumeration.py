@@ -222,58 +222,49 @@ def enumerate_complexes(
                     else:
                         resolved_bottom.append(b_targ)
                 bottom_under_top = "".join(resolved_bottom)
+                
+                # Comptage exact des mésappariements
+                comp = {'A': 'T', 'T': 'A', 'C': 'G', 'G': 'C'}
+                n_mismatches = sum(1 for a, b in zip(p.binding_domain, bottom_under_top) if comp.get(a, '') != b)
 
-                from labcraft.thermo.mismatch import nn_duplex_energy, three_prime_extensible
-                
-                # Calcul thermodynamique natif avec mismatch
-                dh, ds, dg_native = nn_duplex_energy(p.binding_domain, bottom_under_top, temp_celsius)
-                
-                # Correction saline : on applique UnifiedSaltModel
-                from labcraft.thermo.salt import UnifiedSaltModel
-                salt_model = UnifiedSaltModel()
-                na_mm = backend_kwargs.get("na_mm", 50.0)
-                mg_mm = backend_kwargs.get("mg_mm", 0.0)
-                k_mm = backend_kwargs.get("k_mm", 0.0)
-                tris_mm = backend_kwargs.get("tris_mm", 0.0)
-                dntp_mm = backend_kwargs.get("dntp_mm", 0.0)
-                
-                gc_frac = (p.binding_domain.count('G') + p.binding_domain.count('C')) / len(p.binding_domain)
-                dh_corr, ds_corr = salt_model.corrected_thermodynamics(
-                    dh_kcal=dh,
-                    ds_cal=ds,
-                    f_gc=gc_frac,
-                    n_bp=len(p.binding_domain),
-                    na_molar=na_mm / 1000.0,
-                    k_molar=k_mm / 1000.0,
-                    tris_molar=tris_mm / 1000.0,
-                    mg_molar=mg_mm / 1000.0,
-                    dntp_molar=dntp_mm / 1000.0
-                )
-                temp_k = temp_celsius + 273.15
-                dg_native = dh_corr - temp_k * (ds_corr / 1000.0)
-                    
-                # Correction LNA
-                if bd_lna:
-                    from labcraft.thermo.lna import apply_lna_correction
-                    # La correction LNA est appliquée sur le dH/dS en principe, mais le backend le fait sur dG ou dH/dS.
-                    # Pour simplifier et suivre l'implémentation native, on l'ajoute au dG calculé
-                    # ou on utilise le backend pour avoir le delta.
-                    res_perfect_lna = backend.calc_duplex(p.binding_domain, _revcomp(p.binding_domain), temp_celsius=temp_celsius, lna_positions_a=bd_lna, lna_positions_b=(), **backend_kwargs)
-                    res_perfect_nolna = backend.calc_duplex(p.binding_domain, _revcomp(p.binding_domain), temp_celsius=temp_celsius, lna_positions_a=(), lna_positions_b=(), **backend_kwargs)
-                    lna_delta = res_perfect_lna.dg_kcal - res_perfect_nolna.dg_kcal
-                    dg_hyb = dg_native + lna_delta
+                if n_mismatches == 0:
+                    # CHEMIN EXISTANT : si 0 mésappariement, on utilise backend.calc_duplex sans rien changer
+                    res_hyb = backend.calc_duplex(
+                        p.binding_domain, _revcomp(p.binding_domain), 
+                        temp_celsius=temp_celsius, 
+                        lna_positions_a=bd_lna,
+                        lna_positions_b=(),
+                        **backend_kwargs
+                    )
+                    dg_hyb = res_hyb.dg_kcal
                 else:
-                    dg_hyb = dg_native
+                    # CHEMIN NOUVEAU : si au moins 1 mésappariement, on applique le différentiel
+                    from labcraft.thermo.mismatch import nn_duplex_energy
                     
+                    # On calcule le dG de base parfaitement apparié via le backend pour avoir sels/LNA inclus
+                    res_hyb_perfect = backend.calc_duplex(
+                        p.binding_domain, _revcomp(p.binding_domain),
+                        temp_celsius=temp_celsius,
+                        lna_positions_a=bd_lna,
+                        lna_positions_b=(),
+                        **backend_kwargs
+                    )
+                    dg_hyb_base = res_hyb_perfect.dg_kcal
+                    
+                    # On calcule le décalage (shift) lié au mésappariement
+                    perfect_bottom = "".join(comp.get(c, c) for c in p.binding_domain)
+                    _, _, dg_perfect_nn = nn_duplex_energy(p.binding_domain, perfect_bottom, temp_celsius)
+                    _, _, dg_mismatched_nn = nn_duplex_energy(p.binding_domain, bottom_under_top, temp_celsius)
+                    
+                    ddg_mismatch = dg_mismatched_nn - dg_perfect_nn
+                    dg_hyb = dg_hyb_base + ddg_mismatch
+
                 # Évaluation de l'extensibilité 3'
                 from labcraft.diagnostics.enzyme import get_enzyme
+                from labcraft.thermo.mismatch import three_prime_extensible
                 # Fallback to Bst2.0 if not provided
                 enzyme = backend_kwargs.get("enzyme", get_enzyme("Bst2.0"))
                 extensible, first_bad_pos, severity = three_prime_extensible(p.binding_domain, bottom_under_top, enzyme)
-                
-                n_mismatches = sum(1 for i in range(len(p.binding_domain)) if resolved_bottom[i] != bottom_under_top[i]) # Wait, resolved_bottom is already bottom_under_top
-                # Better mismatch count:
-                n_mismatches = sum(1 for a, b in zip(p.binding_domain, bottom_under_top) if comp.get(a, '') != b)
                 
                 site_info["mismatches"] = n_mismatches
                 site_info["extensible"] = extensible

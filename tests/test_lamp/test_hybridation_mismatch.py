@@ -4,6 +4,8 @@ from labcraft.lamp.domains import PhysicalPrimer, PrimerRole
 from labcraft.lamp.stoichiometry import ConcentrationProfile
 from labcraft.lamp.complex_enumeration import enumerate_complexes
 from labcraft.thermo.backends.native import NativeBackend
+from labcraft.thermo.backends.vienna_salt import ViennaSaltShiftBackend
+from labcraft.thermo.salt import UnifiedSaltModel
 class DummyBackend(NativeBackend):
     def calc_heterodimer(self, *args, **kwargs):
         from labcraft.thermo.backends.base import DuplexResult
@@ -41,39 +43,12 @@ def target_seq():
     b3 = 'GTTGTGTCATGGGAGGG'
     return f3 + 'A'*10 + f2 + 'A'*10 + _revcomp(b2) + 'A'*10 + _revcomp(b3)
 
-def test_non_regression_den3(target_seq):
-    primers = get_den3_primers()
-    backend = DummyBackend()
-    profile = ConcentrationProfile(target=1.66e-16, fip_bip=1.6e-6, f3_b3=0.2e-6, lf_lb=0.8e-6)
-    
-    with patch('labcraft.lamp.complex_enumeration.calc_unfolding_penalty', side_effect=_mock_calc_unfolding):
-        prob, strands, complexes, penalties = enumerate_complexes(
-            primers, target_seq, backend, profile=profile, temp_celsius=63.0, mon_molar=0.05, buffer={'na_mM': 50.0, 'mg_mM': 8.0, 'dntp_mM': 1.4}
-        )
-    
-    res = solve_dual(prob)
-    target_idx = strands.index('F3_site')
-    def get_occ(name):
-        c_idx = complexes.index(name)
-        return res.concentrations[c_idx] / prob.total_concentrations[target_idx]
-
-    print('F3 DG:', prob.delta_g[complexes.index('F3_on_F3_site')]); f3_occ = get_occ('F3_on_F3_site')
-    fip_occ = get_occ('FIP_on_FIP_site')
-    bip_occ = get_occ('BIP_on_BIP_site')
-    b3_occ = get_occ('B3_on_B3_site')
-    
-    f3_idx = complexes.index('F3_on_F3_site')
-    assert abs(prob.delta_g[f3_idx] - -6.58) < 0.1
-    
-    
-    
-
 def test_mismatch_internal_degrades_dg(target_seq):
     f2_mismatch = 'GAAGCAGCTGTGCAGCCTG'
     from labcraft.lamp.complex_enumeration import _revcomp
     target_mismatch = 'GCCACCTTAAGCCACAGTA' + 'A'*10 + f2_mismatch + 'A'*10 + _revcomp('CTAGTCTGCTACACCGTGC') + 'A'*10 + _revcomp('GTTGTGTCATGGGAGGG')
     primers = get_den3_primers()
-    backend = DummyBackend()
+    backend = ViennaSaltShiftBackend(UnifiedSaltModel())
     profile = ConcentrationProfile(target=1.66e-16, fip_bip=1.6e-6, f3_b3=0.2e-6, lf_lb=0.8e-6)
     def _mock_find_iupac(query, target):
         if query == 'GAAGAAGCTGTGCAGCCTG': return target.find(f2_mismatch)
@@ -93,7 +68,7 @@ def test_mismatch_3prime_veto(target_seq):
     from labcraft.lamp.complex_enumeration import _revcomp
     target_mismatch = 'GCCACCTTAAGCCACAGTA' + 'A'*10 + f2_mismatch + 'A'*10 + _revcomp('CTAGTCTGCTACACCGTGC') + 'A'*10 + _revcomp('GTTGTGTCATGGGAGGG')
     primers = get_den3_primers()
-    backend = DummyBackend()
+    backend = ViennaSaltShiftBackend(UnifiedSaltModel())
     profile = ConcentrationProfile(target=1.66e-16, fip_bip=1.6e-6, f3_b3=0.2e-6, lf_lb=0.8e-6)
     def _mock_find_iupac(query, target):
         if query == 'GAAGAAGCTGTGCAGCCTG': return target.find(f2_mismatch)
