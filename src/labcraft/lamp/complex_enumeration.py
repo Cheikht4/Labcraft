@@ -177,28 +177,106 @@ def enumerate_complexes(
             site_idx = n_primers + next(k for k, s in enumerate(target_sites) if s["name"] == site_name)
             site_info = next(s for s in target_sites if s["name"] == site_name)
             
-            # Le backend calcule l'hybridation sur le domaine de liaison SEUL
-            # On passe p.binding_domain et son reverse complement exact
-            
             # Extract lna_positions for the binding domain only
-            # binding_domain is a substring of sequence. But how to map lna_positions to binding_domain?
-            # Actually, `PhysicalPrimer` doesn't currently easily expose `lna_positions` mapped to `binding_domain` because
-            # domains are complex. However, target hybridization usually happens on the F2/B2 or F3/B3 domains.
-            # `PhysicalPrimer` parsing handles it globally. To be accurate, we should map them if we can,
-            # or just calculate on the whole sequence.
-            # But the existing code uses p.binding_domain.
-            # Since LNA is an intrinsic part of the primer, we can find the offset of binding_domain in sequence.
             offset = p.sequence.find(p.binding_domain)
             bd_lna = tuple(pos - offset for pos in p.lna_positions if offset <= pos < offset + len(p.binding_domain)) if offset != -1 else ()
             
-            res_hyb = backend.calc_duplex(
-                p.binding_domain, _revcomp(p.binding_domain), 
-                temp_celsius=temp_celsius, 
-                lna_positions_a=bd_lna,
-                lna_positions_b=(), # target has no LNA
-                **backend_kwargs
-            )
-            dg_hyb = res_hyb.dg_kcal
+            # Extraire la séquence RÉELLE du génome
+            s0 = site_info["start"]
+            e0 = site_info["end"]
+            extracted_target = target_seq[s0:e0].upper()
+            
+            # Gestion des longueurs (fallback sur comportement précédent si longueur inattendue)
+            if len(extracted_target) != len(p.binding_domain):
+                warnings.warn(f"Longueur inattendue pour le site {site_name} (site={len(extracted_target)}, amorce={len(p.binding_domain)}). Fallback sur match parfait.")
+                res_hyb = backend.calc_duplex(
+                    p.binding_domain, _revcomp(p.binding_domain), 
+                    temp_celsius=temp_celsius, 
+                    lna_positions_a=bd_lna,
+                    lna_positions_b=(),
+                    **backend_kwargs
+                )
+                dg_hyb = res_hyb.dg_kcal
+                extensible = True
+                n_mismatches = 0
+            else:
+                # Orientation sous l'amorce (antiparallèle, gauche à droite = 5'->3' pour l'amorce, 3'->5' pour le template)
+                if site_info["strand"] == "+":
+                    # L'amorce s'hybride au brin -. La séquence du brin - sous l'amorce (lue 3'->5') est le complément exact de la cible extraite.
+                    bottom_under_top = "".join({'A':'T','T':'A','C':'G','G':'C'}.get(c, c) for c in extracted_target)
+                else:
+                    # L'amorce s'hybride au brin +. Le brin + sous l'amorce (lu 3'->5') est l'inverse exact de la cible extraite.
+                    bottom_under_top = extracted_target[::-1]
+                
+                # Résolution des IUPAC
+                from labcraft.lamp.domains import IUPAC_MATCHABLE
+                resolved_bottom = []
+                for b_prim, b_targ in zip(p.binding_domain, bottom_under_top):
+                    comp = {'A': 'T', 'T': 'A', 'C': 'G', 'G': 'C'}
+                    set_p = IUPAC_MATCHABLE.get(b_prim, set())
+                    # b_targ is on the template strand
+                    set_t_comp = set(comp.get(base, base) for base in IUPAC_MATCHABLE.get(b_targ, set([b_targ])))
+                    if set_p and set_t_comp and set_p.intersection(set_t_comp):
+                        shared = list(set_p.intersection(set_t_comp))[0]
+                        resolved_bottom.append(comp[shared])
+                    else:
+                        resolved_bottom.append(b_targ)
+                bottom_under_top = "".join(resolved_bottom)
+
+                from labcraft.thermo.mismatch import nn_duplex_energy, three_prime_extensible
+                
+                # Calcul thermodynamique natif avec mismatch
+                dh, ds, dg_native = nn_duplex_energy(p.binding_domain, bottom_under_top, temp_celsius)
+                
+                # Correction saline : on applique UnifiedSaltModel
+                from labcraft.thermo.salt import UnifiedSaltModel
+                salt_model = UnifiedSaltModel()
+                na_mm = backend_kwargs.get("na_mm", 50.0)
+                mg_mm = backend_kwargs.get("mg_mm", 0.0)
+                k_mm = backend_kwargs.get("k_mm", 0.0)
+                tris_mm = backend_kwargs.get("tris_mm", 0.0)
+                dntp_mm = backend_kwargs.get("dntp_mm", 0.0)
+                
+                gc_frac = (p.binding_domain.count('G') + p.binding_domain.count('C')) / len(p.binding_domain)
+                dh_corr, ds_corr = salt_model.corrected_thermodynamics(
+                    dh_kcal=dh,
+                    ds_cal=ds,
+                    f_gc=gc_frac,
+                    n_bp=len(p.binding_domain),
+                    na_molar=na_mm / 1000.0,
+                    k_molar=k_mm / 1000.0,
+                    tris_molar=tris_mm / 1000.0,
+                    mg_molar=mg_mm / 1000.0,
+                    dntp_molar=dntp_mm / 1000.0
+                )
+                temp_k = temp_celsius + 273.15
+                dg_native = dh_corr - temp_k * (ds_corr / 1000.0)
+                    
+                # Correction LNA
+                if bd_lna:
+                    from labcraft.thermo.lna import apply_lna_correction
+                    # La correction LNA est appliquée sur le dH/dS en principe, mais le backend le fait sur dG ou dH/dS.
+                    # Pour simplifier et suivre l'implémentation native, on l'ajoute au dG calculé
+                    # ou on utilise le backend pour avoir le delta.
+                    res_perfect_lna = backend.calc_duplex(p.binding_domain, _revcomp(p.binding_domain), temp_celsius=temp_celsius, lna_positions_a=bd_lna, lna_positions_b=(), **backend_kwargs)
+                    res_perfect_nolna = backend.calc_duplex(p.binding_domain, _revcomp(p.binding_domain), temp_celsius=temp_celsius, lna_positions_a=(), lna_positions_b=(), **backend_kwargs)
+                    lna_delta = res_perfect_lna.dg_kcal - res_perfect_nolna.dg_kcal
+                    dg_hyb = dg_native + lna_delta
+                else:
+                    dg_hyb = dg_native
+                    
+                # Évaluation de l'extensibilité 3'
+                from labcraft.diagnostics.enzyme import get_enzyme
+                # Fallback to Bst2.0 if not provided
+                enzyme = backend_kwargs.get("enzyme", get_enzyme("Bst2.0"))
+                extensible, first_bad_pos, severity = three_prime_extensible(p.binding_domain, bottom_under_top, enzyme)
+                
+                n_mismatches = sum(1 for i in range(len(p.binding_domain)) if resolved_bottom[i] != bottom_under_top[i]) # Wait, resolved_bottom is already bottom_under_top
+                # Better mismatch count:
+                n_mismatches = sum(1 for a, b in zip(p.binding_domain, bottom_under_top) if comp.get(a, '') != b)
+                
+                site_info["mismatches"] = n_mismatches
+                site_info["extensible"] = extensible
             
             # Le calcul de l'accessibilité
             if p.role in (PrimerRole.LF, PrimerRole.LB):
@@ -218,12 +296,18 @@ def enumerate_complexes(
                     temp_celsius=temp_celsius, mon_molar=mon_molar
                 )
                 
-            unfolding_penalties[site_name] = dg_unfold
+            unfolding_penalties[site_name] = {
+                "dg_unfold": dg_unfold,
+                "mismatches": site_info.get("mismatches", 0),
+                "extensible": site_info.get("extensible", True)
+            }
             
             # Couplage
             dg_eff = dg_hyb + dg_unfold
             
-            if dg_eff < 0:
+            # Application du veto ARMS 3'
+            # Si le 3' n'est pas extensible, le complexe ne peut pas initier l'amplification.
+            if extensible and dg_eff < 0:
                 stoich = [0] * n_strands
                 stoich[idx_p] = 1
                 stoich[site_idx] = 1

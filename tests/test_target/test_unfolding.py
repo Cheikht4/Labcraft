@@ -123,7 +123,7 @@ class TestTargetUnfolding:
         
         site_name = "F3_site"
         assert site_name in unfold_penalties
-        dg_windowed = unfold_penalties[site_name]
+        dg_windowed = unfold_penalties[site_name]["dg_unfold"]
         
         # Appel direct sans windowing
         start = target_seq.find(primer.binding_domain)
@@ -166,7 +166,7 @@ class TestTargetUnfolding:
         
         site_name = "F3_site"
         assert site_name in unfold_penalties
-        dg_windowed = unfold_penalties[site_name]
+        dg_windowed = unfold_penalties[site_name]["dg_unfold"]
         
         # Résultat attendu : le repliement de la fenêtre isolée
         start = target_seq.find(primer.binding_domain)

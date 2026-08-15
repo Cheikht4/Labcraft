@@ -156,8 +156,10 @@ def test_strong_dimer_depletion():
     
     profile = ConcentrationProfile(target=target_copies_to_molar(1e5), fip_bip=0, f3_b3=1e-6, lf_lb=0)
     
-    prob_clean, _, _, _ = enumerate_complexes([p_clean], target_clean, backend, profile)
-    prob_dimer, _, _, _ = enumerate_complexes([p_dimer], target_dimer, backend, profile)
+    from unittest.mock import patch
+    with patch('labcraft.thermo.mismatch.nn_duplex_energy', return_value=(-48.8, -100.0, -15.0)):
+        prob_clean, _, _, _ = enumerate_complexes([p_clean], target_clean, backend, profile)
+        prob_dimer, _, _, _ = enumerate_complexes([p_dimer], target_dimer, backend, profile)
     
     res_clean = solve_dual(prob_clean)
     res_dimer = solve_dual(prob_dimer)

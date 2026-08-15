@@ -679,11 +679,22 @@
                     </tr>
                 </thead>
                 <tbody>
-                    {% for site_name, penalty in penalties.items() %}
+                    {% for site_name, info in penalties.items() %}
+                    {% set penalty = info.dg_unfold if info is mapping else info %}
+                    {% set mismatches = info.mismatches if info is mapping else 0 %}
+                    {% set extensible = info.extensible if info is mapping else True %}
                     {% set target_occ = metadata.target_occupations.get(target, {}).get(site_name, 0.0) %}
                     {% set site_parent = site_name.replace('_site', '').split('#')[0] %}
                     <tr>
-                        <td>{{ site_name }}</td>
+                        <td>
+                            {{ site_name }}
+                            {% if mismatches > 0 %}
+                                <span class="badge badge-warning" title="{{ mismatches }} mésappariement(s)">{{ mismatches }} mismatches</span>
+                            {% endif %}
+                            {% if not extensible %}
+                                <span class="badge badge-danger" title="Extension bloquée par mésappariement 3'">3' Bloqué</span>
+                            {% endif %}
+                        </td>
                         {% if site_parent in metadata.loop_primer_parents %}
                             <td style="color: var(--color-muted); font-style: italic;">n/a, brin simple (boucle)</td>
                             <td style="color: var(--color-muted); font-style: italic;">n/a, brin simple (boucle)</td>
