@@ -113,10 +113,16 @@ def reverse_complement(seq: str) -> str:
     return "".join(comp.get(c, c) for c in reversed(seq))
 
 
-def reconstruct_fip_bip(panel_name: str, primers: Dict[str, str], targets: List[Tuple[str, str]], linker: str = "") -> None:
+def reconstruct_fip_bip(
+    panel_name: str,
+    primers: Dict[str, str],
+    targets: List[Tuple[str, str]],
+    linker: str = ""
+) -> Dict[str, PrimerDomains]:
     """
     Reconstructs FIP from F1/F2 and BIP from B1/B2 in-place within `primers`.
     Verifies orientation using `_find_iupac_substring` against the target sequence.
+    Returns a dictionary of PrimerDomains for reconstructed composite primers.
     """
     # Find matching target
     target_seq = None
@@ -128,28 +134,23 @@ def reconstruct_fip_bip(panel_name: str, primers: Dict[str, str], targets: List[
                 target_seq = t_seq
                 break
 
-    def check_orientation(p1: str, p2: str, role_prefix: str) -> str:
+    def check_orientation(p1: str, p2: str, role_prefix: str) -> Tuple[str, str]:
         # p1 is F1 or B1. p2 is F2 or B2.
-        # Logic:
-        # F2 matches target. F1 matches target. F1c is RC(F1).
-        # FIP = F1c + linker + F2.
-        # B2 matches RC(target). B1 matches RC(target). B1c is RC(B1).
-        # BIP = B1c + linker + B2.
-        
-        # If target is missing, we default to assuming p1 was provided as the sense strand sequence (e.g. F1) 
-        # and needs to be reverse-complemented to form F1c.
+        # Returns (composite_seq, tail_domain_seq)
         if not target_seq:
-            return reverse_complement(p1) + linker + p2
+            p1c = reverse_complement(p1)
+            return p1c + linker + p2, p1c
             
         p1_matches = _find_iupac_substring(p1, target_seq) >= 0
         p1rc_matches = _find_iupac_substring(reverse_complement(p1), target_seq) >= 0
         
         if p1_matches and not p1rc_matches:
             # p1 is in the same sense as the target. We need its RC.
-            return reverse_complement(p1) + linker + p2
+            p1c = reverse_complement(p1)
+            return p1c + linker + p2, p1c
         elif p1rc_matches and not p1_matches:
             # p1 was provided already as the complement.
-            return p1 + linker + p2
+            return p1 + linker + p2, p1
         elif p1_matches and p1rc_matches:
             raise ParseError(
                 f"Panel '{panel_name}': Unable to determine orientation for {role_prefix}1. "
@@ -158,29 +159,40 @@ def reconstruct_fip_bip(panel_name: str, primers: Dict[str, str], targets: List[
         else:
             import warnings
             warnings.warn(f"L'orientation de {role_prefix}1 pour le panel '{panel_name}' n'a pas pu être vérifiée sur la cible (aucune correspondance). Convention standard (RC) appliquée.")
-            return reverse_complement(p1) + linker + p2
+            p1c = reverse_complement(p1)
+            return p1c + linker + p2, p1c
+
+    domains_created: Dict[str, PrimerDomains] = {}
 
     if 'F1' in primers and 'F2' in primers:
+        f1_seq = primers['F1']
+        f2_seq = primers['F2']
         if 'FIP' not in primers:
-            primers['FIP'] = check_orientation(primers['F1'], primers['F2'], 'F')
+            fip_seq, f1c_seq = check_orientation(f1_seq, f2_seq, 'F')
+            primers['FIP'] = fip_seq
+            domains_created['FIP'] = PrimerDomains(F2=f2_seq, F1c=f1c_seq, linker=linker)
         del primers['F1']
         del primers['F2']
         
     if 'B1' in primers and 'B2' in primers:
+        b1_seq = primers['B1']
+        b2_seq = primers['B2']
         if 'BIP' not in primers:
-            # For B1, it usually targets the opposite strand. 
-            # If target_seq is the sense strand, B1 itself matches the RC strand,
-            # so B1rc will match the sense strand.
-            # We use the same `check_orientation` logic:
-            # If B1 matches target, it means it was given as B1c.
-            # If RC(B1) matches target, it means it was given as B1, we need RC(B1).
-            # The logic is identical.
-            primers['BIP'] = check_orientation(primers['B1'], primers['B2'], 'B')
+            bip_seq, b1c_seq = check_orientation(b1_seq, b2_seq, 'B')
+            primers['BIP'] = bip_seq
+            domains_created['BIP'] = PrimerDomains(B2=b2_seq, B1c=b1c_seq, linker=linker)
         del primers['B1']
         del primers['B2']
 
+    return domains_created
 
-def parse_primer_file(filepath: str, targets: List[Tuple[str, str]], linker: str = "") -> List[PrimerSetConfig]:
+
+def parse_primer_file(
+    filepath: str,
+    targets: List[Tuple[str, str]],
+    linker: str = "",
+    allow_unmatched_targets: bool = False
+) -> List[PrimerSetConfig]:
     """
     Parses a primer file and constructs PrimerSetConfig objects.
     Groups primers by PanelName and Version.
@@ -224,22 +236,20 @@ def parse_primer_file(filepath: str, targets: List[Tuple[str, str]], linker: str
                         target_name = t_name
                         break
                 if target_name is None:
-                    raise ParseError(f"Panel '{panel_name}' does not match any target name. Available targets: {', '.join(t_names)}. If there are multiple targets, the panel name must match the target name exactly or by inclusion.")
+                    if allow_unmatched_targets:
+                        target_name = targets[0][0] if targets else panel_name
+                    else:
+                        raise ParseError(f"Panel '{panel_name}' does not match any target name. Available targets: {', '.join(t_names)}. If there are multiple targets, the panel name must match the target name exactly or by inclusion.")
                 
         for v_key, roles_dict in versions.items():
-            reconstruct_fip_bip(panel_name, roles_dict, targets, linker)
+            domains_map = reconstruct_fip_bip(panel_name, roles_dict, targets, linker)
             
             primer_configs = {}
             for role, seq in roles_dict.items():
-                primer_configs[role] = PrimerConfig(seq=seq)
+                dom = domains_map.get(role)
+                primer_configs[role] = PrimerConfig(seq=seq, domains=dom)
                 
             p_name = panel_name if v_key == "default" else f"{panel_name}_{v_key}"
-            # But the PrimerSetConfig target must be the target_name
-            # Wait, the PrimerSetConfig doesn't have a panel_name field natively, it's inferred from the target?
-            # No, config expects one PrimerSetConfig per panel.
-            # If there are multiple versions, how does the engine know their names?
-            # Currently PrimerSetConfig only has `target` and `primers`. The physical primers derive their panel name from ... where?
-            # Let's check config.py
             config_sets.append(PrimerSetConfig(
                 target=target_name,
                 panel_name=p_name,
@@ -267,7 +277,8 @@ def build_config_from_cli(
     conc_f3_b3: Optional[float] = None,
     conc_loop: Optional[float] = None,
     copies: Optional[float] = None,
-    linker: str = ""
+    linker: str = "",
+    allow_unmatched_targets: bool = False
 ) -> PanelConfig:
     # 1. Load base config from YAML if provided
     base_data = {}
@@ -303,7 +314,12 @@ def build_config_from_cli(
             
     # 4. Handle Primers
     if primers_path:
-        new_sets = parse_primer_file(primers_path, target_list, linker=linker)
+        new_sets = parse_primer_file(
+            primers_path,
+            target_list,
+            linker=linker,
+            allow_unmatched_targets=allow_unmatched_targets
+        )
         
         # Override concentrations
         for pset in new_sets:

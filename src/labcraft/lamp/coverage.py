@@ -1,18 +1,27 @@
+"""Thermodynamic coverage analysis for multi-strain LAMP panels.
+Analyse thermodynamique de couverture multi-souches pour panels LAMP.
+"""
+
+from __future__ import annotations
+
 import csv
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from enum import Enum
 
-from labcraft.lamp.domains import PhysicalPrimer, PrimerRole
+from labcraft.lamp.domains import PhysicalPrimer, PrimerRole, IUPAC_MATCHABLE
 from labcraft.thermo.backends.vienna_salt import ViennaSaltShiftBackend
-from labcraft.thermo.mismatch import calculate_hybridization_dg, three_prime_extensible
+from labcraft.thermo.mismatch import calculate_hybridization_dg, three_prime_extensible, nn_duplex_energy
 from labcraft.diagnostics.enzyme import PolymeraseProfile
+
 
 class SiteVerdict(Enum):
     PARFAIT = "parfait"
     TOLERABLE = "tolerable"
     VETO_3P = "veto_3p"
+    NON_VIABLE = "non_viable"
     ABSENT = "absent"
+
 
 @dataclass
 class SiteEvaluation:
@@ -24,21 +33,49 @@ class SiteEvaluation:
     dg_hyb: Optional[float] = None
     first_bad_pos: Optional[int] = None
     severity: Optional[str] = None
-    
+
+
 @dataclass
 class StrainVerdict:
     strain_id: str
-    evaluations: Dict[str, SiteEvaluation] # key = primer_name
+    evaluations: Dict[str, SiteEvaluation]  # key = role name (e.g. "F3", "B3", "FIP", "BIP", "LF", "LB")
     is_amplifiable_thermo: bool
     is_amplifiable_count: bool
     limiting_primer_thermo: Optional[str] = None
 
+
+def _evaluation_rank(eval_obj: SiteEvaluation) -> Tuple[int, int, float]:
+    """Calcule le rang de qualité d'une évaluation (plus élevé = meilleur).
+    Computes quality rank of a site evaluation (higher = better).
+
+    Hiérarchie / Hierarchy:
+    1. Verdict : PARFAIT (4) > TOLERABLE (3) > NON_VIABLE (2) > VETO_3P (1) > ABSENT (0)
+    2. Moins de mésappariements / Fewer mismatches
+    3. Stabilité thermodynamique (dG plus négatif) / Thermodynamic stability (more negative dG)
+    """
+    verdict_scores = {
+        SiteVerdict.PARFAIT: 4,
+        SiteVerdict.TOLERABLE: 3,
+        SiteVerdict.NON_VIABLE: 2,
+        SiteVerdict.VETO_3P: 1,
+        SiteVerdict.ABSENT: 0,
+    }
+    v_score = verdict_scores.get(eval_obj.verdict, 0)
+    mm_score = -eval_obj.n_mismatches_count
+    dg_score = -eval_obj.dg_hyb if eval_obj.dg_hyb is not None else -999.0
+    return (v_score, mm_score, dg_score)
+
+
 class CoverageAnalyzer:
+    """Analyseur de couverture multi-souches basé sur la thermodynamique et les règles d'élongation.
+    Multi-strain coverage analyzer based on thermodynamics and elongation rules.
+    """
+
     def __init__(
         self,
         primers: List[PhysicalPrimer],
         fasta_dict: Dict[str, str],
-        backend,
+        backend: ViennaSaltShiftBackend,
         enzyme: PolymeraseProfile,
         temp_celsius: float = 65.0,
         dg_threshold: float = -6.0,
@@ -52,155 +89,242 @@ class CoverageAnalyzer:
         self.temp_celsius = temp_celsius
         self.dg_threshold = dg_threshold
         self.max_mismatches_count = max_mismatches_count
-        
+
+        # Cache pour l'énergie des duplexes parfaits
         # Cache for perfectly matched duplex energy
         self._perfect_dg_cache: Dict[str, float] = {}
 
-    def _get_perfect_dg(self, primer: PhysicalPrimer) -> float:
-        if primer.name not in self._perfect_dg_cache:
+    def _get_perfect_dg_seq(self, seq: str) -> float:
+        """Calcule et met en cache le dG d'un duplexe parfait pour une séquence donnée.
+        Computes and caches the perfect duplex dG for a given sequence.
+        """
+        if seq not in self._perfect_dg_cache:
             comp = {'A': 'T', 'T': 'A', 'C': 'G', 'G': 'C'}
-            perfect_bottom = "".join(comp.get(c, 'N') for c in primer.binding_domain)
-            # Use calculate_hybridization_dg which automatically caches base energy via the backend
+            perfect_bottom = "".join(comp.get(c, 'N') for c in seq)
             dg_hyb, _ = calculate_hybridization_dg(
-                primer.binding_domain, perfect_bottom, self.temp_celsius, self.backend
+                seq, perfect_bottom, self.temp_celsius, self.backend
             )
-            self._perfect_dg_cache[primer.name] = dg_hyb
-        return self._perfect_dg_cache[primer.name]
+            self._perfect_dg_cache[seq] = dg_hyb
+        return self._perfect_dg_cache[seq]
 
     def evaluate_site(self, primer: PhysicalPrimer, site_seq: str, strand: str) -> SiteEvaluation:
-        # site_seq is extracted from + strand.
+        """Évalue thermodynamiquement un site d'hybridation avec résolution IUPAC.
+        Thermodynamically evaluates a binding site with IUPAC base resolution.
+
+        Convention de brin / Strand convention:
+        - '+' : la séquence de l'amorce correspond au brin sens (+) de la cible.
+          '+' : primer sequence matches sense (+) strand of target.
+        - '-' : le complément inverse de l'amorce apparaît sur le brin sens (+).
+          '-' : reverse complement of primer appears on sense (+) strand.
+        """
         comp = {'A': 'T', 'T': 'A', 'C': 'G', 'G': 'C'}
         if strand == '+':
             bottom_under_top = "".join(comp.get(c, 'N') for c in site_seq)
         else:
             bottom_under_top = site_seq[::-1]
-        n_mismatches = sum(1 for a, b in zip(primer.binding_domain, bottom_under_top) if comp.get(a, '') != b)
 
-        if n_mismatches == 0:
-            dg_hyb = self._get_perfect_dg(primer)
+        # Résolution IUPAC et comptage des mésappariements
+        # IUPAC resolution and mismatch counting
+        resolved_primer_chars = []
+        mismatch_count = 0
+
+        for a, b in zip(primer.binding_domain, bottom_under_top):
+            a_set = IUPAC_MATCHABLE.get(a.upper())
+            b_comp = comp.get(b.upper(), '')
+            b_comp_set = IUPAC_MATCHABLE.get(b_comp)
+
+            if a_set is not None and b_comp_set is not None and a_set.intersection(b_comp_set):
+                # Appariement valide / Valid base pair
+                matched_bases = a_set.intersection(b_comp_set)
+                if b_comp in matched_bases:
+                    resolved_primer_chars.append(b_comp)
+                else:
+                    resolved_primer_chars.append(sorted(matched_bases)[0])
+            else:
+                # Mésappariement / Mismatch
+                mismatch_count += 1
+                if a.upper() in ('A', 'C', 'G', 'T'):
+                    resolved_primer_chars.append(a.upper())
+                elif a_set:
+                    resolved_primer_chars.append(sorted(a_set)[0])
+                else:
+                    resolved_primer_chars.append('N')
+
+        resolved_primer_seq = "".join(resolved_primer_chars)
+
+        # Calcul thermodynamique / Thermodynamic calculation
+        if mismatch_count == 0:
+            dg_hyb = self._get_perfect_dg_seq(resolved_primer_seq)
         else:
-            dg_perfect_backend = self._get_perfect_dg(primer)
-            
-            from labcraft.thermo.mismatch import nn_duplex_energy
-            perfect_bottom = "".join(comp.get(c, c) for c in primer.binding_domain)
-            _, _, dg_perfect_nn = nn_duplex_energy(primer.binding_domain, perfect_bottom, self.temp_celsius)
-            _, _, dg_mismatched_nn = nn_duplex_energy(primer.binding_domain, bottom_under_top, self.temp_celsius)
-            
+            dg_perfect_backend = self._get_perfect_dg_seq(resolved_primer_seq)
+            perfect_bottom = "".join(comp.get(c, c) for c in resolved_primer_seq)
+            _, _, dg_perfect_nn = nn_duplex_energy(resolved_primer_seq, perfect_bottom, self.temp_celsius)
+            _, _, dg_mismatched_nn = nn_duplex_energy(resolved_primer_seq, bottom_under_top, self.temp_celsius)
             ddg_mismatch = dg_mismatched_nn - dg_perfect_nn
             dg_hyb = dg_perfect_backend + ddg_mismatch
 
+        # Règle d'extension enzymatique en 3' / Enzymatic 3' extension rule
         extensible, first_bad_pos, severity = three_prime_extensible(
-            primer.binding_domain, bottom_under_top, self.enzyme
+            resolved_primer_seq, bottom_under_top, self.enzyme
         )
 
-        if n_mismatches == 0:
+        if mismatch_count == 0:
             verdict = SiteVerdict.PARFAIT
         elif not extensible:
             verdict = SiteVerdict.VETO_3P
         elif dg_hyb > self.dg_threshold:
-            verdict = SiteVerdict.ABSENT
+            verdict = SiteVerdict.NON_VIABLE
         else:
             verdict = SiteVerdict.TOLERABLE
 
         return SiteEvaluation(
-            strain_id="", # filled by caller
+            strain_id="",
             primer_name=primer.name,
             primer_role=primer.role,
             verdict=verdict,
-            n_mismatches_count=n_mismatches,
+            n_mismatches_count=mismatch_count,
             dg_hyb=dg_hyb,
             first_bad_pos=first_bad_pos,
             severity=severity
         )
 
     def analyze_strains(self, csv_records: List[Dict]) -> List[StrainVerdict]:
-        # Validate CSV columns
+        """Analyse l'ensemble des souches à partir des enregistrements de sites candidats.
+        Analyzes all strains from candidate site records.
+        """
         if not csv_records:
             return []
-        
-        first_row = csv_records[0]
-        expected_cols = {"strain_id", "position", "strand", "n_mismatches"}
-        found_cols = set(first_row.keys())
-        missing = expected_cols - found_cols
-        if missing:
-            raise ValueError(f"Le CSV est incomplet. Colonnes attendues : {expected_cols}, trouvées : {found_cols}. Manquant : {missing}")
-        if "primer_role" not in found_cols and "primer_name" not in found_cols:
-            raise ValueError("Le CSV doit contenir 'primer_role' ou 'primer_name'.")
 
+        # Validation stricte du contrat CSV / Strict CSV contract validation
+        first_row = csv_records[0]
+        found_cols = set(first_row.keys())
+        required_cols = {"strain_id", "strand", "n_mismatches"}
+        has_primer_col = ("primer_role" in found_cols) or ("primer_name" in found_cols)
+
+        missing = required_cols - found_cols
+        if not has_primer_col:
+            missing.add("primer_role (ou primer_name)")
+
+        if missing:
+            expected_display = {"strain_id", "primer_role", "strand", "position", "site_seq", "n_mismatches"}
+            raise ValueError(
+                f"Le fichier CSV de sites est incomplet. "
+                f"Colonnes attendues : {sorted(expected_display)}, "
+                f"colonnes trouvées : {sorted(found_cols)}. "
+                f"Colonnes obligatoires manquantes : {sorted(missing)}."
+            )
+
+        # Regrouper les enregistrements par souche
         # Group records by strain
-        records_by_strain = {}
+        records_by_strain: Dict[str, List[Dict]] = {}
         for r in csv_records:
             s_id = r["strain_id"]
             if s_id not in records_by_strain:
                 records_by_strain[s_id] = []
             records_by_strain[s_id].append(r)
 
-        strain_verdicts = []
-        for s_id, records in records_by_strain.items():
-            if s_id not in self.fasta_dict:
-                continue
+        # Amorces d'initiation requises pour l'amplification
+        # Required initiation primer roles
+        init_roles = {PrimerRole.F3, PrimerRole.B3, PrimerRole.FIP, PrimerRole.BIP}
+
+        strain_verdicts: List[StrainVerdict] = []
+
+        for s_id in self.fasta_dict.keys():
+            records = records_by_strain.get(s_id, [])
             genome = self.fasta_dict[s_id].upper()
-            
-            evaluations = {}
-            # We also store the csv n_mismatches to calculate count rule correctly
-            csv_mismatches_dict = {}
+
+            # Évaluer tous les sites / variantes par rôle
+            # Evaluate all sites / variants grouped by role
+            role_evaluations: Dict[str, List[Tuple[SiteEvaluation, int]]] = {}
+
             for r in records:
-                p_name = r.get("primer_role", r.get("primer_name"))
-                primer = None
-                if p_name in self.primers_by_name:
-                    primer = self.primers_by_name[p_name]
+                p_ident = r.get("primer_role") or r.get("primer_name")
+                if not p_ident:
+                    continue
+
+                matching_primers = []
+                if p_ident in self.primers_by_name:
+                    matching_primers.append(self.primers_by_name[p_ident])
                 else:
                     for p in self.primers:
-                        if p.role.name == p_name or p.role.value == p_name:
-                            primer = p
-                            break
-                
-                if not primer:
-                    continue
-                    
-                if "site_seq" in r and r["site_seq"]:
-                    site_seq = r["site_seq"]
-                else:
-                    pos = int(r["position"])
-                    site_seq = genome[pos : pos + len(primer.binding_domain)]
-                    
-                eval_obj = self.evaluate_site(primer, site_seq, r["strand"])
-                eval_obj.strain_id = s_id
-                evaluations[primer.name] = eval_obj
-                csv_mismatches_dict[primer.name] = int(r["n_mismatches"])
+                        if p.role.name == p_ident or p.role.value == p_ident or p.name == p_ident:
+                            matching_primers.append(p)
 
-            # Check if all init primers are present
-            init_primers = [p for p in self.primers if p.role in (PrimerRole.F3, PrimerRole.B3, PrimerRole.FIP, PrimerRole.BIP)]
-            
+                if not matching_primers:
+                    continue
+
+                csv_mm = int(r["n_mismatches"]) if "n_mismatches" in r and r["n_mismatches"] != "" else 0
+
+                for primer in matching_primers:
+                    if "site_seq" in r and r["site_seq"]:
+                        site_seq = r["site_seq"]
+                    else:
+                        pos = int(r.get("position", 0))
+                        site_seq = genome[pos : pos + len(primer.binding_domain)]
+
+                    eval_obj = self.evaluate_site(primer, site_seq, r["strand"])
+                    eval_obj.strain_id = s_id
+
+                    role_key = primer.role.value
+                    if role_key not in role_evaluations:
+                        role_evaluations[role_key] = []
+                    role_evaluations[role_key].append((eval_obj, csv_mm))
+
+            # Sélectionner la meilleure variante pour chaque rôle
+            # Select the best variant for each role
+            best_evaluations: Dict[str, SiteEvaluation] = {}
+            best_csv_mms: Dict[str, int] = {}
+
+            for role_key, ev_list in role_evaluations.items():
+                best_ev, best_mm = max(ev_list, key=lambda pair: _evaluation_rank(pair[0]))
+                best_evaluations[role_key] = best_ev
+                best_csv_mms[role_key] = best_mm
+
+            # Déterminer la viabilité d'amplification
+            # Determine amplification viability
             is_amp_thermo = True
             is_amp_count = True
-            limiting = None
-            
-            for p in init_primers:
-                if p.name not in evaluations:
+            limiting: Optional[str] = None
+
+            # Vérifier toutes les amorces d'initiation
+            # Check all initiation primers
+            for role in init_roles:
+                role_key = role.value
+                if role_key not in best_evaluations:
+                    # Site totalement introuvable / Completely absent site
                     is_amp_thermo = False
                     is_amp_count = False
-                    if not limiting: limiting = p.name
+                    if not limiting:
+                        limiting = role_key
+                    best_evaluations[role_key] = SiteEvaluation(
+                        strain_id=s_id,
+                        primer_name=role_key,
+                        primer_role=role,
+                        verdict=SiteVerdict.ABSENT,
+                        n_mismatches_count=99,
+                        dg_hyb=None
+                    )
                     continue
-                    
-                ev = evaluations[p.name]
-                csv_mms = csv_mismatches_dict[p.name]
-                
-                # Thermo rule
-                if ev.verdict in (SiteVerdict.VETO_3P, SiteVerdict.ABSENT):
+
+                ev = best_evaluations[role_key]
+                csv_mm = best_csv_mms.get(role_key, ev.n_mismatches_count)
+
+                # Règle thermodynamique / Thermodynamic rule
+                if ev.verdict in (SiteVerdict.VETO_3P, SiteVerdict.ABSENT, SiteVerdict.NON_VIABLE):
                     is_amp_thermo = False
-                    if not limiting: limiting = p.name
-                    
-                # Count rule (USING CSV COLUMN)
-                if csv_mms > self.max_mismatches_count:
+                    if not limiting:
+                        limiting = role_key
+
+                # Règle par comptage / Counting rule
+                if csv_mm > self.max_mismatches_count:
                     is_amp_count = False
-                    
+
             strain_verdicts.append(StrainVerdict(
                 strain_id=s_id,
-                evaluations=evaluations,
+                evaluations=best_evaluations,
                 is_amplifiable_thermo=is_amp_thermo,
                 is_amplifiable_count=is_amp_count,
                 limiting_primer_thermo=limiting
             ))
-            
+
         return strain_verdicts

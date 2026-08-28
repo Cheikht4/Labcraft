@@ -398,11 +398,18 @@ def analyze(
 def coverage(
     primers: str = typer.Option(..., "-p", "--primers", help="Path to primers FASTA/TXT file."),
     fasta: str = typer.Option(..., "-f", "--fasta", help="Path to multi-FASTA file of strains."),
-    sites: str = typer.Option(..., "-s", "--sites", help="Path to candidate sites CSV."),
+    sites: Optional[str] = typer.Option(None, "-s", "--sites", help="Path to candidate sites CSV (optional, automatic screening if omitted)."),
     output: str = typer.Option("coverage_report.html", "-o", "--output", help="Output HTML report path."),
+    panel: Optional[str] = typer.Option(None, "--panel", help="Panel name to analyze if multiple panels are present in primers file."),
     temperature: float = typer.Option(65.0, "--temperature", help="Experiment temperature in Celsius."),
-    dg_threshold: float = typer.Option(-6.0, "--dg-threshold", help="Viability dG threshold."),
-    max_mismatches: int = typer.Option(2, "--max-mismatches", help="Counting rule threshold.")
+    na: float = typer.Option(50.0, "--na", help="Na+ concentration in mM."),
+    mg: float = typer.Option(8.0, "--mg", help="Mg2+ concentration in mM."),
+    dntp: float = typer.Option(1.4, "--dntp", help="dNTP concentration in mM."),
+    dg_threshold: float = typer.Option(-6.0, "--dg-threshold", help="Viability dG threshold in kcal/mol."),
+    max_mismatches: int = typer.Option(2, "--max-mismatches", help="Counting rule threshold."),
+    errors: int = typer.Option(2, "--errors", help="Max errors for seeding outside 3' zone."),
+    strict_3prime: int = typer.Option(3, "--strict-3prime", help="Length of strict 3' zone for seeding."),
+    export_sites: Optional[str] = typer.Option(None, "--export-sites", help="Export candidate sites to CSV.")
 ):
     """Analyse de la couverture thermodynamique multi-souches."""
     import csv
@@ -411,6 +418,7 @@ def coverage(
     from labcraft.cli.parsers import build_config_from_cli, read_multi_fasta
     from labcraft.cli.config import build_engine_from_config
     from labcraft.lamp.coverage import CoverageAnalyzer
+    from labcraft.target.seeding import find_candidate_sites
     from labcraft.report.coverage_report import render_coverage_report
 
     print("Lecture des entrées...")
@@ -427,20 +435,60 @@ def coverage(
         config_path=None,
         primers_path=primers,
         targets_path=first_strain_path,
-        temperature=temperature
+        temperature=temperature,
+        na=na,
+        mg=mg,
+        dntp=dntp,
+        allow_unmatched_targets=True
     )
     
+    # Sélection du panel si plusieurs sont présents
+    if panel:
+        filtered_sets = [ps for ps in config_obj.primer_sets if ps.panel_name == panel or ps.target == panel]
+        if not filtered_sets:
+            available = [ps.panel_name for ps in config_obj.primer_sets]
+            raise ValueError(f"Panel '{panel}' non trouvé. Panels disponibles : {available}")
+        config_obj.primer_sets = filtered_sets
+    elif len(config_obj.primer_sets) > 1:
+        available = [ps.panel_name for ps in config_obj.primer_sets]
+        print(f"Plusieurs panels détectés ({', '.join(available)}). Analyse du premier panel '{config_obj.primer_sets[0].panel_name}'. Utilisez --panel pour en choisir un autre.")
+        config_obj.primer_sets = [config_obj.primer_sets[0]]
+
+    selected_panel_name = config_obj.primer_sets[0].panel_name if config_obj.primer_sets else "DefaultPanel"
+
     dummy_targets = {fasta_list[0][0]: fasta_list[0][1]} if fasta_list else {}
     physical_primers, _, backend, _, _, enzyme, _, _ = build_engine_from_config(config_obj, dummy_targets)
     
     print(f"Chargement de {len(fasta_dict)} souches.")
     
     csv_records = []
-    with open(sites, 'r') as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            csv_records.append(row)
-            
+    if sites:
+        print(f"Lecture des sites candidats depuis : {sites}")
+        with open(sites, 'r') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                csv_records.append(row)
+    else:
+        print(f"Criblage interne des sites candidats (erreurs <= {errors}, zone 3' stricte = {strict_3prime})...")
+        t_seed_0 = time.time()
+        csv_records = find_candidate_sites(
+            fasta_dict,
+            physical_primers,
+            max_errors=errors,
+            strict_3prime_len=strict_3prime,
+            panel_name=selected_panel_name
+        )
+        t_seed_1 = time.time()
+        print(f"Criblage terminé en {t_seed_1 - t_seed_0:.3f} s ({len(csv_records)} sites trouvés).")
+
+    if export_sites:
+        with open(export_sites, 'w', newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=["strain_id", "primer_role", "position", "strand", "site_seq", "n_mismatches", "panel"])
+            writer.writeheader()
+            for r in csv_records:
+                writer.writerow({k: r.get(k, "") for k in ["strain_id", "primer_role", "position", "strand", "site_seq", "n_mismatches", "panel"]})
+        print(f"Sites candidats exportés dans : {export_sites}")
+
     analyzer = CoverageAnalyzer(
         physical_primers, fasta_dict, backend, enzyme,
         temp_celsius=temperature,
@@ -455,8 +503,11 @@ def coverage(
     
     print(f"Analyse terminée en {t1 - t0:.2f} s.")
     
-    panel_name = config_obj.primer_sets[0].panel_name if config_obj.primer_sets else "Unknown"
     render_coverage_report(
-        verdicts, output, panel_name, dg_threshold, max_mismatches
+        verdicts, output, selected_panel_name, dg_threshold, max_mismatches
     )
     print(f"Rapport généré : {output}")
+
+
+if __name__ == "__main__":
+    app()

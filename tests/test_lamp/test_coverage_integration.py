@@ -14,7 +14,8 @@ def test_full_coverage_suite():
         "Strain_Tol":  "GCCACCTTAAGCGACAGTA" + "A"*50,
         "Strain_Veto": "GCCACCTTAAGCCACAGTT" + "A"*50,
         "Strain_Drop": "GCCACATTAAGACAAAGTA" + "A"*50,
-        "Strain_Loop": "GCCACCTTAAGCCACAGTA" + "A"*50
+        "Strain_Loop": "GCCACCTTAAGCCACAGTA" + "A"*50,
+        "Strain_Missing": "A"*70
     }
     
     primers = [
@@ -27,6 +28,8 @@ def test_full_coverage_suite():
     
     csv_records = []
     for s_id in fasta_dict.keys():
+        if s_id == "Strain_Missing":
+            continue
         mm = 0
         if s_id == "Strain_Tol": mm = 1
         elif s_id == "Strain_Veto": mm = 1
@@ -63,7 +66,12 @@ def test_full_coverage_suite():
     
     assert verdicts["Strain_Drop"].is_amplifiable_thermo == False
     assert verdicts["Strain_Drop"].is_amplifiable_count == False
-    assert verdicts["Strain_Drop"].evaluations["F3"].verdict == SiteVerdict.ABSENT
+    assert verdicts["Strain_Drop"].evaluations["F3"].verdict == SiteVerdict.NON_VIABLE
+    assert verdicts["Strain_Drop"].evaluations["F3"].dg_hyb is not None
+    
+    assert verdicts["Strain_Missing"].is_amplifiable_thermo == False
+    assert verdicts["Strain_Missing"].evaluations["F3"].verdict == SiteVerdict.ABSENT
+    assert verdicts["Strain_Missing"].evaluations["F3"].dg_hyb is None
     
     assert verdicts["Strain_Loop"].is_amplifiable_thermo == True
     assert verdicts["Strain_Loop"].evaluations["LF"].verdict == SiteVerdict.VETO_3P

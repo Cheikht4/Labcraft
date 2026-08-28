@@ -77,9 +77,16 @@ class PanelConfig(BaseModel):
         if self.experiment.buffer:
             mg = self.experiment.buffer.mg_mM
             dntp = self.experiment.buffer.dntp_mM
-            if mg <= dntp:
+            if dntp > 0 and (mg / dntp) < 3.0:
                 import warnings
-                warnings.warn("mg_mM is less than or equal to dntp_mM.")
+                warnings.warn(
+                    f"Rapport Mg/dNTP faible ({mg:.1f} mM / {dntp:.1f} mM = {mg/dntp:.2f} < 3.0). "
+                    "L'approximation de chélation par soustraction directe commence à se dégrader.",
+                    UserWarning
+                )
+            elif mg <= dntp:
+                import warnings
+                warnings.warn("mg_mM is less than or equal to dntp_mM.", UserWarning)
         return self
 
 from typing import Tuple
