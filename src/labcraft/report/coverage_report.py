@@ -77,7 +77,11 @@ def render_coverage_report(
                 "dg": ev.dg_hyb,
                 "ddg": ev.ddg,
                 "mismatches": ev.n_mismatches_count,
-                "variant": ev.primer_name
+                "variant": ev.primer_name,
+                "first_bad_pos": ev.first_bad_pos,
+                "severity": ev.severity,
+                "position": ev.position,
+                "strand": ev.strand
             }
         json_data["strains"].append(s_data)
         

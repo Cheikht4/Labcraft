@@ -410,6 +410,7 @@ def coverage(
     max_mismatches: int = typer.Option(2, "--max-mismatches", help="Counting rule threshold."),
     errors: int = typer.Option(2, "--errors", help="Max errors for seeding outside 3' zone."),
     strict_3prime: int = typer.Option(3, "--strict-3prime", help="Length of strict 3' zone for seeding."),
+    strict_3prime_tolerate: int = typer.Option(2, "--strict-3prime-tolerate", help="Number of tolerated substitutions in strict 3' zone for seeding."),
     export_sites: Optional[str] = typer.Option(None, "--export-sites", help="Export candidate sites to CSV.")
 ):
     """Analyse de la couverture thermodynamique multi-souches."""
@@ -470,13 +471,14 @@ def coverage(
             for row in reader:
                 csv_records.append(row)
     else:
-        print(f"Criblage interne des sites candidats (erreurs <= {errors}, zone 3' stricte = {strict_3prime})...")
+        print(f"Criblage interne des sites candidats (erreurs <= {errors}, zone 3' stricte = {strict_3prime}, tolérance 3' = {strict_3prime_tolerate})...")
         t_seed_0 = time.time()
         csv_records = find_candidate_sites(
             fasta_dict,
             physical_primers,
             max_errors=errors,
             strict_3prime_len=strict_3prime,
+            strict_3prime_tolerate=strict_3prime_tolerate,
             panel_name=selected_panel_name
         )
         t_seed_1 = time.time()

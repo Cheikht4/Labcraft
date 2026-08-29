@@ -9,12 +9,16 @@ Role: permissive screening generating CANDIDATE sites, which are then re-scored
 by the thermodynamic layer of LabCraft.
 
 Modèle de criblage / Screening model:
-LabCraft crible sur SUBSTITUTIONS SEULES ({s<=n}), par cohérence avec le modèle
-thermodynamique NN qui suppose un alignement sans brèche. La recherche tolérante
-aux indels reste dans l'outil d'origine (lamp_coverage.py).
-LabCraft screens on SUBSTITUTIONS ONLY ({s<=n}), in consistency with the NN
-thermodynamic model which assumes gapless alignment. Indel-tolerant search
-remains in the original tool (lamp_coverage.py).
+Le criblage est PERMISSIF par construction : il ne doit filtrer que ce que la
+couche thermodynamique ne saurait pas noter (les indels, via substitutions
+seules {s<=n}), jamais ce qu'elle sait noter (les mésappariements, y compris
+en 3'). Par conséquent, strict_3prime_tolerate=2 par défaut afin de transmettre
+les sites mutés en 3' à three_prime_extensible qui portera le diagnostic veto_3p.
+The screening is PERMISSIVE by design: it filters only what thermodynamics
+cannot score (indels, via substitutions only {s<=n}), never what it can score
+(mismatches, including 3' terminal ones). Therefore, strict_3prime_tolerate=2
+by default so that 3' mutated sites are passed to three_prime_extensible for
+proper veto_3p diagnosis.
 """
 
 from __future__ import annotations
@@ -48,11 +52,11 @@ def build_primer_regex(
     primer_seq: str,
     max_errors: int,
     strict_3prime_len: int = 3,
-    strict_3prime_tolerate: int = 0,
+    strict_3prime_tolerate: int = 2,
     is_rc: bool = False
 ) -> str:
-    """Construit une expression régulière tolérante en 5' et stricte en 3' (substitutions seules).
-    Builds a regex pattern tolerant in 5' and strict in 3' (substitutions only).
+    """Construit une expression régulière tolérante en 5' et permissive en 3' (substitutions seules).
+    Builds a regex pattern tolerant in 5' and permissive in 3' (substitutions only).
     """
     tolerate_positions = set()
     if strict_3prime_tolerate == 1:
@@ -98,7 +102,7 @@ def primer_matches_sequence(
     primer_seq: str,
     max_errors: int,
     strict_3prime_len: int = 3,
-    strict_3prime_tolerate: int = 0
+    strict_3prime_tolerate: int = 2
 ) -> Optional[Tuple[int, int, str]]:
     """Vérifie si l'amorce s'hybride à la séquence cible (brin sens ou anti-sens).
     Checks whether the primer matches the target sequence (sense or antisense strand).
@@ -153,7 +157,7 @@ def find_candidate_sites(
     primers: List[PhysicalPrimer],
     max_errors: int = 2,
     strict_3prime_len: int = 3,
-    strict_3prime_tolerate: int = 0,
+    strict_3prime_tolerate: int = 2,
     panel_name: str = "DefaultPanel"
 ) -> List[Dict[str, Any]]:
     """Crible permissivement les génomes de souches pour extraire tous les sites candidats.

@@ -5,6 +5,7 @@ Analyse thermodynamique de couverture multi-souches pour panels LAMP.
 from __future__ import annotations
 
 import csv
+import warnings
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 from enum import Enum
@@ -34,6 +35,8 @@ class SiteEvaluation:
     ddg: Optional[float] = None
     first_bad_pos: Optional[int] = None
     severity: Optional[str] = None
+    position: Optional[int] = None
+    strand: Optional[str] = None
 
 
 @dataclass
@@ -84,6 +87,14 @@ class CoverageAnalyzer:
         dg_threshold: Optional[float] = None,
         max_mismatches_count: int = 2
     ):
+        if not isinstance(backend, ViennaSaltShiftBackend):
+            warnings.warn(
+                "Aucun modèle de sel/tampon (ViennaSaltShiftBackend) fourni à CoverageAnalyzer. "
+                "Repli sur les conditions de référence standard du backend (1 M NaCl / sans correction de sel LAMP). "
+                "Les énergies de duplexe peuvent différer de la force ionique réelle.",
+                UserWarning
+            )
+
         self.primers = primers
         self.primers_by_name = {p.name: p for p in primers}
         self.fasta_dict = fasta_dict
@@ -116,7 +127,8 @@ class CoverageAnalyzer:
         primer: PhysicalPrimer,
         site_seq: str,
         strand: str,
-        strain_id: str = ""
+        strain_id: str = "",
+        position: Optional[int] = None
     ) -> SiteEvaluation:
         """Évalue thermodynamiquement un site d'hybridation avec résolution IUPAC.
         Thermodynamically evaluates a binding site with IUPAC base resolution.
@@ -209,7 +221,9 @@ class CoverageAnalyzer:
             dg_hyb=dg_hyb,
             ddg=ddg,
             first_bad_pos=first_bad_pos,
-            severity=severity
+            severity=severity,
+            position=position,
+            strand=strand
         )
 
     def analyze_strains(self, csv_records: List[Dict]) -> List[StrainVerdict]:
@@ -278,24 +292,22 @@ class CoverageAnalyzer:
                     continue
 
                 csv_mm = int(r["n_mismatches"]) if "n_mismatches" in r and r["n_mismatches"] != "" else 0
+                pos_val = int(r["position"]) if "position" in r and r["position"] != "" else None
 
                 for primer in matching_primers:
                     req_len = len(primer.binding_domain)
                     site_seq = r.get("site_seq", "")
                     if len(site_seq) != req_len:
                         # Ceinture et bretelles : tentative de ré-extraction par coordonnées
-                        pos_str = r.get("position", "")
-                        if pos_str != "":
-                            pos = int(pos_str)
-                            if 0 <= pos <= len(genome) - req_len:
-                                site_seq = genome[pos : pos + req_len]
+                        if pos_val is not None and 0 <= pos_val <= len(genome) - req_len:
+                            site_seq = genome[pos_val : pos_val + req_len]
                         if len(site_seq) != req_len:
                             raise ValueError(
                                 f"Longueur de site ({len(site_seq)} nt) incompatible avec l'amorce "
                                 f"{primer.name} ({req_len} nt) pour la souche '{s_id}'."
                             )
 
-                    eval_obj = self.evaluate_site(primer, site_seq, r["strand"], strain_id=s_id)
+                    eval_obj = self.evaluate_site(primer, site_seq, r["strand"], strain_id=s_id, position=pos_val)
 
                     role_key = primer.role.value
                     if role_key not in role_evaluations:
@@ -336,7 +348,9 @@ class CoverageAnalyzer:
                         verdict=SiteVerdict.ABSENT,
                         n_mismatches_count=99,
                         dg_hyb=None,
-                        ddg=None
+                        ddg=None,
+                        position=None,
+                        strand=None
                     )
                     continue
 

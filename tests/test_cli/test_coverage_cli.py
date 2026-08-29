@@ -369,3 +369,136 @@ def test_coverage_200_strains_real_performance(tmp_path: Path):
     print(f"\n[BENCHMARK] 201 souches DEN-3 analysées en {total_time:.2f} s. "
           f"Couverture Thermo: {json_data['covered_thermo']}/201 ({json_data['covered_thermo']/201*100:.1f}%), "
           f"Comptage: {json_data['covered_count']}/201 ({json_data['covered_count']/201*100:.1f}%)")
+
+
+def test_veto_3p_reachable_single_command(tmp_path: Path):
+    """Vérifie qu'une souche mutée sur la base 3' terminale d'une amorce d'initiation (ex: F3),
+    analysée par labcraft coverage sans option de seuil particulière, ressort VETO_3P (et non absent)."""
+    fixture_dir = Path(__file__).resolve().parent.parent / "fixtures" / "real_primer_files"
+    primers_path = fixture_dir / "primer_dengue_3.txt"
+    genome_path = fixture_dir / "DEN3_M93130.fasta"
+    
+    from labcraft.cli.parsers import read_multi_fasta
+    ref_seq = read_multi_fasta(str(genome_path))[0][1]
+    
+    # F3 se situe en pos 5473 sur M93130.1: CTCGTGTAGGAATGGGAG (18 nt)
+    # Mutons la base terminale en 3' (position 5473 + 17 = 5490) de G vers T
+    f3_pos = 5473
+    f3_term_pos = f3_pos + 17
+    assert ref_seq[f3_term_pos] == 'G'
+    mutated_seq = ref_seq[:f3_term_pos] + 'T' + ref_seq[f3_term_pos + 1:]
+    
+    fasta_file = tmp_path / "mutated_f3_term.fasta"
+    fasta_file.write_text(f">DEN3_F3_3p_mut\n{mutated_seq}\n")
+    
+    out_html = tmp_path / "coverage_f3_term.html"
+    
+    runner = CliRunner()
+    result = runner.invoke(app, [
+        "coverage",
+        "-p", str(primers_path),
+        "-f", str(fasta_file),
+        "--panel", "3",
+        "-o", str(out_html),
+        "--temperature", "63.0"
+    ])
+    
+    assert result.exit_code == 0, f"Error: {result.stdout}"
+    
+    json_data = json.loads((tmp_path / "coverage_f3_term.json").read_text())
+    strain_eval = json_data["strains"][0]["evals"]["F3"]
+    assert strain_eval["verdict"] == "veto_3p", f"Attendu: veto_3p, Obtenu: {strain_eval['verdict']}"
+    assert strain_eval["first_bad_pos"] == 1
+    assert strain_eval["severity"] == "block"
+    assert strain_eval["position"] == f3_pos
+    assert strain_eval["strand"] == "+"
+    assert json_data["strains"][0]["thermo"] is False
+
+
+def test_absent_site_when_heavily_mutated(tmp_path: Path):
+    """Vérifie qu'une souche avec plus de 2 substitutions dans la zone 5' ressort bien ABSENT."""
+    fixture_dir = Path(__file__).resolve().parent.parent / "fixtures" / "real_primer_files"
+    primers_path = fixture_dir / "primer_dengue_3.txt"
+    genome_path = fixture_dir / "DEN3_M93130.fasta"
+    
+    from labcraft.cli.parsers import read_multi_fasta
+    ref_seq = read_multi_fasta(str(genome_path))[0][1]
+    
+    # Mutons 4 bases dans le site F3 (pos 5473)
+    f3_pos = 5473
+    mutated_chars = list(ref_seq)
+    mutated_chars[f3_pos] = 'A' if ref_seq[f3_pos] != 'A' else 'T'
+    mutated_chars[f3_pos + 1] = 'A' if ref_seq[f3_pos + 1] != 'A' else 'T'
+    mutated_chars[f3_pos + 2] = 'A' if ref_seq[f3_pos + 2] != 'A' else 'T'
+    mutated_chars[f3_pos + 3] = 'A' if ref_seq[f3_pos + 3] != 'A' else 'T'
+    
+    fasta_file = tmp_path / "heavily_mutated.fasta"
+    fasta_file.write_text(f">DEN3_heavy_mut\n{''.join(mutated_chars)}\n")
+    
+    out_html = tmp_path / "coverage_heavy.html"
+    
+    runner = CliRunner()
+    result = runner.invoke(app, [
+        "coverage",
+        "-p", str(primers_path),
+        "-f", str(fasta_file),
+        "--panel", "3",
+        "-o", str(out_html),
+        "--temperature", "63.0"
+    ])
+    
+    assert result.exit_code == 0, f"Error: {result.stdout}"
+    json_data = json.loads((tmp_path / "coverage_heavy.json").read_text())
+    strain_eval = json_data["strains"][0]["evals"]["F3"]
+    assert strain_eval["verdict"] == "absent"
+
+
+def test_loop_primer_3prime_mutation_remains_amplifiable(tmp_path: Path):
+    """Vérifie qu'une mutation 3' terminale sur une amorce de boucle (LF/LB)
+    donne veto_3p sur l'amorce de boucle mais permet à la souche de rester amplifiable."""
+    fixture_dir = Path(__file__).resolve().parent.parent / "fixtures" / "real_primer_files"
+    primers_path = fixture_dir / "primer_dengue_3.txt"
+    genome_path = fixture_dir / "DEN3_M93130.fasta"
+    
+    from labcraft.cli.parsers import read_multi_fasta
+    ref_seq = read_multi_fasta(str(genome_path))[0][1]
+    
+    # LF est sur brin - en pos 5589 (18 nt). Mutons sa base terminale 3'
+    # LF primer = TGAATTCCAYGAGCGTTC
+    # Sur génome (brin +), le 3' terminal de LF correspond au complément inverse de la base 5' du site ou 3' du primer
+    lf_pos = 5589
+    mutated_chars = list(ref_seq)
+    mutated_chars[lf_pos] = 'A' if ref_seq[lf_pos] != 'A' else 'T'
+    
+    fasta_file = tmp_path / "mutated_lf.fasta"
+    fasta_file.write_text(f">DEN3_LF_mut\n{''.join(mutated_chars)}\n")
+    
+    out_html = tmp_path / "coverage_lf.html"
+    
+    runner = CliRunner()
+    result = runner.invoke(app, [
+        "coverage",
+        "-p", str(primers_path),
+        "-f", str(fasta_file),
+        "--panel", "3",
+        "-o", str(out_html),
+        "--temperature", "63.0"
+    ])
+    
+    assert result.exit_code == 0, f"Error: {result.stdout}"
+    json_data = json.loads((tmp_path / "coverage_lf.json").read_text())
+    strain = json_data["strains"][0]
+    # LF a un veto_3p mais l'amplification globale reste True
+    assert strain["evals"]["LF"]["verdict"] == "veto_3p"
+    assert strain["thermo"] is True
+    assert strain["count"] is True
+
+
+def test_coverage_analyzer_warning_when_no_buffer():
+    """Vérifie qu'un avertissement est émis si CoverageAnalyzer est construit sans ViennaSaltShiftBackend."""
+    from labcraft.thermo.backends.vienna import ViennaRNABackend
+    p = PhysicalPrimer('F3', 'GCCACCTTAAGCCACAGTA', PrimerRole.F3, 'GCCACCTTAAGCCACAGTA')
+    enzyme = get_enzyme("Bst2.0")
+    
+    with pytest.warns(UserWarning, match="Aucun modèle de sel/tampon"):
+        CoverageAnalyzer([p], {"S1": "GCCACCTTAAGCCACAGTA"}, ViennaRNABackend(), enzyme)
