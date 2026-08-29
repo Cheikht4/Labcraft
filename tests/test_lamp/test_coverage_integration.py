@@ -11,7 +11,7 @@ from labcraft.diagnostics.enzyme import get_enzyme
 def test_full_coverage_suite():
     fasta_dict = {
         "Strain_Perf": "GCCACCTTAAGCCACAGTA" + "A"*50,
-        "Strain_Tol":  "GCCACCTTAAGCGACAGTA" + "A"*50,
+        "Strain_Tol":  "GCCACCTTTAGCCACAGTA" + "A"*50,
         "Strain_Veto": "GCCACCTTAAGCCACAGTT" + "A"*50,
         "Strain_Drop": "GCCACATTAAGACAAAGTA" + "A"*50,
         "Strain_Loop": "GCCACCTTAAGCCACAGTA" + "A"*50,

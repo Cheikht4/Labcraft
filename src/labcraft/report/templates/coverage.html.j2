@@ -36,7 +36,8 @@
     <div class="summary">
         <h2>Résumé global</h2>
         <p><strong>Souches analysées :</strong> {{ total_strains }}</p>
-        <p><strong>Couverture Thermodynamique (dG &le; {{ dg_threshold }} kcal/mol) :</strong> {{ covered_thermo }} / {{ total_strains }} ({{ thermo_rate }}%)</p>
+        <p><strong>Couverture Thermodynamique (&Delta;&Delta;G &le; {{ ddg_max }} kcal/mol{% if dg_threshold is not none %}, &Delta;G &le; {{ dg_threshold }} kcal/mol{% endif %}) :</strong> {{ covered_thermo }} / {{ total_strains }} ({{ thermo_rate }}%)</p>
+        <p style="font-size:0.9em; color:#555; margin-top:-10px;"><em>(Un &Delta;&Delta;G &le; {{ ddg_max }} kcal/mol préserve &ge; {{ '%.1f'|format(frac_ka) }}% de la constante d'association du site parfait à {{ temperature }}°C. Paramètre d'analyse par défaut à calibrer sur données expérimentales.)</em></p>
         <p><strong>Couverture Comptage (&le; {{ max_mismatches_count }} mismatches) :</strong> {{ covered_count }} / {{ total_strains }} ({{ count_rate }}%)</p>
         {% if worst_primer %}
         <p><strong>Amorce limitante (thermo) :</strong> {{ worst_primer }}</p>
@@ -86,13 +87,13 @@
                         {% set ev = v.evaluations[p] %}
                         {% set p_label = ev.primer_name if ev.primer_name != p else '' %}
                         {% if ev.verdict == SiteVerdict.PARFAIT %}
-                            <td class="parfait" title="{% if p_label %}Variante: {{ p_label }}, {% endif %}dG: {{ '%.2f'|format(ev.dg_hyb) }} kcal/mol, Mismatches: {{ ev.n_mismatches_count }}">Parfait{% if p_label %} <small>({{ p_label }})</small>{% endif %}</td>
+                            <td class="parfait" title="{% if p_label %}Variante: {{ p_label }}, {% endif %}dG: {{ '%.2f'|format(ev.dg_hyb) }} kcal/mol, ddG: 0.00 kcal/mol, Mismatches: {{ ev.n_mismatches_count }}">Parfait{% if p_label %} <small>({{ p_label }})</small>{% endif %}</td>
                         {% elif ev.verdict == SiteVerdict.TOLERABLE %}
-                            <td class="tolerable" title="{% if p_label %}Variante: {{ p_label }}, {% endif %}dG: {{ '%.2f'|format(ev.dg_hyb) }} kcal/mol, Mismatches: {{ ev.n_mismatches_count }}">Tolérable ({{ ev.n_mismatches_count }} mm){% if p_label %} <small>({{ p_label }})</small>{% endif %}</td>
+                            <td class="tolerable" title="{% if p_label %}Variante: {{ p_label }}, {% endif %}dG: {{ '%.2f'|format(ev.dg_hyb) }} kcal/mol, ddG: +{{ '%.2f'|format(ev.ddg) }} kcal/mol, Mismatches: {{ ev.n_mismatches_count }}">Tolérable (+{{ '%.2f'|format(ev.ddg) }} kcal/mol, {{ ev.n_mismatches_count }} mm){% if p_label %} <small>({{ p_label }})</small>{% endif %}</td>
                         {% elif ev.verdict == SiteVerdict.VETO_3P %}
                             <td class="veto_3p" title="{% if p_label %}Variante: {{ p_label }}, {% endif %}dG: {{ '%.2f'|format(ev.dg_hyb) if ev.dg_hyb is not none else 'N/A' }}, Pos bloquante: {{ ev.first_bad_pos }}">Veto 3'{% if p_label %} <small>({{ p_label }})</small>{% endif %}</td>
                         {% elif ev.verdict == SiteVerdict.NON_VIABLE %}
-                            <td class="non_viable" title="{% if p_label %}Variante: {{ p_label }}, {% endif %}dG: {{ '%.2f'|format(ev.dg_hyb) }} kcal/mol (seuil: {{ dg_threshold }}), Mismatches: {{ ev.n_mismatches_count }}">Faible ({{ '%.2f'|format(ev.dg_hyb) }} kcal/mol, {{ ev.n_mismatches_count }} mm){% if p_label %} <small>({{ p_label }})</small>{% endif %}</td>
+                            <td class="non_viable" title="{% if p_label %}Variante: {{ p_label }}, {% endif %}dG: {{ '%.2f'|format(ev.dg_hyb) }} kcal/mol, ddG: +{{ '%.2f'|format(ev.ddg) if ev.ddg is not none else 'N/A' }} kcal/mol (seuil ddG_max: {{ ddg_max }}), Mismatches: {{ ev.n_mismatches_count }}">Faible (dG={{ '%.2f'|format(ev.dg_hyb) }}, +{{ '%.2f'|format(ev.ddg) }} kcal/mol, {{ ev.n_mismatches_count }} mm){% if p_label %} <small>({{ p_label }})</small>{% endif %}</td>
                         {% else %}
                             <td class="absent" title="Site non trouvé">Absent</td>
                         {% endif %}

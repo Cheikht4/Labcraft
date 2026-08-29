@@ -405,7 +405,8 @@ def coverage(
     na: float = typer.Option(50.0, "--na", help="Na+ concentration in mM."),
     mg: float = typer.Option(8.0, "--mg", help="Mg2+ concentration in mM."),
     dntp: float = typer.Option(1.4, "--dntp", help="dNTP concentration in mM."),
-    dg_threshold: float = typer.Option(-6.0, "--dg-threshold", help="Viability dG threshold in kcal/mol."),
+    ddg_max: float = typer.Option(3.0, "--ddg-max", help="Maximum allowable delta-delta-G penalty (kcal/mol) relative to perfect duplex."),
+    dg_threshold: Optional[float] = typer.Option(None, "--dg-threshold", help="Optional absolute viability dG ceiling in kcal/mol (disabled by default)."),
     max_mismatches: int = typer.Option(2, "--max-mismatches", help="Counting rule threshold."),
     errors: int = typer.Option(2, "--errors", help="Max errors for seeding outside 3' zone."),
     strict_3prime: int = typer.Option(3, "--strict-3prime", help="Length of strict 3' zone for seeding."),
@@ -483,15 +484,17 @@ def coverage(
 
     if export_sites:
         with open(export_sites, 'w', newline='') as f:
-            writer = csv.DictWriter(f, fieldnames=["strain_id", "primer_role", "position", "strand", "site_seq", "n_mismatches", "panel"])
+            fieldnames = ["strain_id", "primer_role", "primer_name", "position", "strand", "site_seq", "n_mismatches", "panel"]
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
             for r in csv_records:
-                writer.writerow({k: r.get(k, "") for k in ["strain_id", "primer_role", "position", "strand", "site_seq", "n_mismatches", "panel"]})
+                writer.writerow({k: r.get(k, "") for k in fieldnames})
         print(f"Sites candidats exportés dans : {export_sites}")
 
     analyzer = CoverageAnalyzer(
         physical_primers, fasta_dict, backend, enzyme,
         temp_celsius=temperature,
+        ddg_max=ddg_max,
         dg_threshold=dg_threshold,
         max_mismatches_count=max_mismatches
     )
@@ -504,7 +507,9 @@ def coverage(
     print(f"Analyse terminée en {t1 - t0:.2f} s.")
     
     render_coverage_report(
-        verdicts, output, selected_panel_name, dg_threshold, max_mismatches
+        verdicts, output, selected_panel_name,
+        ddg_max=ddg_max, dg_threshold=dg_threshold,
+        max_mismatches_count=max_mismatches, temperature_C=temperature
     )
     print(f"Rapport généré : {output}")
 

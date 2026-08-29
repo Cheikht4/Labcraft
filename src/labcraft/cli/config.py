@@ -239,6 +239,7 @@ def build_engine_from_config(
                         primers.append(PhysicalPrimer(
                             v_name, bare_seq, role_enum, variant_f2, variant_f1c, variant_linker,
                             nominal_concentration=variant_conc, parent_name=name,
+                            parent_binding_domain=d_f2_raw,
                             blocked_3prime=is_blocked, label_5prime=label,
                             lna_positions=tuple(lna_pos)
                         ))
@@ -246,6 +247,7 @@ def build_engine_from_config(
                         primers.append(PhysicalPrimer(
                             v_name, bare_seq, role_enum, d_f2_bare, d_f1c_bare, d_linker_bare,
                             nominal_concentration=variant_conc, parent_name=name,
+                            parent_binding_domain=d_f2_raw,
                             blocked_3prime=is_blocked, label_5prime=label,
                             lna_positions=tuple(lna_pos)
                         ))
@@ -260,6 +262,7 @@ def build_engine_from_config(
                     primers.append(PhysicalPrimer(
                         v_name, bare_seq, role_enum, bare_seq, 
                         nominal_concentration=variant_conc, parent_name=name,
+                        parent_binding_domain=seq,
                         blocked_3prime=is_blocked, label_5prime=label,
                         lna_positions=tuple(lna_pos)
                     ))

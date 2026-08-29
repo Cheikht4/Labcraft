@@ -144,6 +144,18 @@ def reconstruct_fip_bip(
         p1_matches = _find_iupac_substring(p1, target_seq) >= 0
         p1rc_matches = _find_iupac_substring(reverse_complement(p1), target_seq) >= 0
         
+        # Si la recherche exacte échoue, tenter un criblage tolérant (max 2 erreurs)
+        # If exact search fails, try tolerant screening (up to 2 errors)
+        if not p1_matches and not p1rc_matches:
+            from labcraft.target.seeding import primer_matches_sequence
+            match_res = primer_matches_sequence(target_seq, p1, max_errors=2, strict_3prime_len=0)
+            if match_res is not None:
+                _, _, strand = match_res
+                if strand == '+':
+                    p1_matches = True
+                else:
+                    p1rc_matches = True
+        
         if p1_matches and not p1rc_matches:
             # p1 is in the same sense as the target. We need its RC.
             p1c = reverse_complement(p1)
@@ -334,4 +346,6 @@ def build_config_from_cli(
                     
         config.primer_sets.extend(new_sets)
 
-    return config
+    # Re-valider le modèle pour déclencher les validateurs (ex: check_mg_dntp)
+    # Re-validate model to trigger post-validation checks (e.g. check_mg_dntp)
+    return PanelConfig.model_validate(config.model_dump())

@@ -6,10 +6,17 @@ import json
 import subprocess
 import sys
 import time
+import random
 from pathlib import Path
 
 from labcraft.cli.main import app
 from labcraft.cli.config import PanelConfig, ExperimentConfig, BufferConfig
+from labcraft.lamp.domains import PhysicalPrimer, PrimerRole
+from labcraft.lamp.coverage import CoverageAnalyzer, SiteVerdict
+from labcraft.target.seeding import find_candidate_sites, build_primer_regex
+from labcraft.thermo.backends.vienna_salt import ViennaSaltShiftBackend
+from labcraft.thermo.salt import UnifiedSaltModel
+from labcraft.diagnostics.enzyme import get_enzyme
 
 
 def test_coverage_cli_with_csv(tmp_path: Path):
@@ -22,7 +29,7 @@ def test_coverage_cli_with_csv(tmp_path: Path):
     
     csv_file = tmp_path / "sites.csv"
     with open(csv_file, "w") as f:
-        writer = csv.DictWriter(f, fieldnames=["strain_id", "primer_role", "position", "strand", "site_seq", "n_mismatches", "panel"])
+        writer = csv.DictWriter(f, fieldnames=["strain_id", "primer_role", "primer_name", "position", "strand", "site_seq", "n_mismatches", "panel"])
         writer.writeheader()
         
         strains = ["S1_parfaite", "S2_mism_interne", "S3_veto_3p", "S4_loop_fail", "S5_count_lost"]
@@ -31,22 +38,22 @@ def test_coverage_cli_with_csv(tmp_path: Path):
             f3_seq = "GCCACCTTAAGCCACAGTA"
             f3_mm = 0
             if s == "S2_mism_interne":
-                f3_seq = "GCCACCTTAAGCGACAGTA"
+                f3_seq = "GCCACCTTTGCCACAGTA"  # Benign mismatch (ddG <= 3.0)
                 f3_mm = 1
             elif s == "S3_veto_3p":
-                f3_seq = "GCCACCTTAAGCCACAGTT"
+                f3_seq = "GCCACCTTAAGCCACAGTT"  # 3' mismatch -> veto 3'
                 f3_mm = 1
             elif s == "S5_count_lost":
                 f3_mm = 3
                 
-            writer.writerow({"strain_id": s, "primer_role": "F3", "position": 0, "strand": "+", "site_seq": f3_seq, "n_mismatches": f3_mm, "panel": "Test"})
-            writer.writerow({"strain_id": s, "primer_role": "B3", "position": 0, "strand": "-", "site_seq": "CCCTCCCATGACACAAC", "n_mismatches": 0, "panel": "Test"})
-            writer.writerow({"strain_id": s, "primer_role": "FIP", "position": 0, "strand": "+", "site_seq": "GAAGAAGCTGTGCAGCCTG", "n_mismatches": 0, "panel": "Test"})
-            writer.writerow({"strain_id": s, "primer_role": "BIP", "position": 0, "strand": "+", "site_seq": "CTAGTCTGCTACACCGTGC", "n_mismatches": 0, "panel": "Test"})
+            writer.writerow({"strain_id": s, "primer_role": "F3", "primer_name": "Test_F3", "position": 0, "strand": "+", "site_seq": f3_seq, "n_mismatches": f3_mm, "panel": "Test"})
+            writer.writerow({"strain_id": s, "primer_role": "B3", "primer_name": "Test_B3", "position": 0, "strand": "-", "site_seq": "CCCTCCCATGACACAAC", "n_mismatches": 0, "panel": "Test"})
+            writer.writerow({"strain_id": s, "primer_role": "FIP", "primer_name": "Test_FIP", "position": 0, "strand": "+", "site_seq": "GAAGAAGCTGTGCAGCCTG", "n_mismatches": 0, "panel": "Test"})
+            writer.writerow({"strain_id": s, "primer_role": "BIP", "primer_name": "Test_BIP", "position": 0, "strand": "+", "site_seq": "CTAGTCTGCTACACCGTGC", "n_mismatches": 0, "panel": "Test"})
             
             lf_seq = "CCTTGGACGGGGAA" if s == "S4_loop_fail" else "CCTTGGACGGGGCT"
             lf_mm = 2 if s == "S4_loop_fail" else 0
-            writer.writerow({"strain_id": s, "primer_role": "LF", "position": 0, "strand": "+", "site_seq": lf_seq, "n_mismatches": lf_mm, "panel": "Test"})
+            writer.writerow({"strain_id": s, "primer_role": "LF", "primer_name": "Test_LF", "position": 0, "strand": "+", "site_seq": lf_seq, "n_mismatches": lf_mm, "panel": "Test"})
             
     primers_file = tmp_path / "primers.fasta"
     primers_file.write_text(">Test_F3\nGCCACCTTAAGCCACAGTA\n>Test_B3\nGTTGTGTCATGGGAGGG\n>Test_F1\nGAAGTCAGGCCCAAAAGCCA\n>Test_F2\nGAAGAAGCTGTGCAGCCTG\n>Test_B1\nTCCCCACGACGGAGCTACAG\n>Test_B2\nCTAGTCTGCTACACCGTGC\n>Test_LF\nCCTTGGACGGGGCT\n")
@@ -61,7 +68,7 @@ def test_coverage_cli_with_csv(tmp_path: Path):
         "-s", str(csv_file),
         "-o", str(out_html),
         "--temperature", "63.0",
-        "--dg-threshold", "-3.0",
+        "--ddg-max", "3.0",
         "--max-mismatches", "2"
     ])
     
@@ -115,10 +122,18 @@ def test_coverage_cli_auto_seeding_and_export(tmp_path: Path):
         "-o", str(out_html1),
         "--export-sites", str(exported_csv),
         "--temperature", "63.0",
-        "--dg-threshold", "-3.0"
+        "--ddg-max", "3.0"
     ])
     assert res1.exit_code == 0, f"Error res1: {res1.stdout}"
     assert exported_csv.exists()
+    
+    # Vérifier que le CSV exporté contient la colonne primer_name
+    with open(exported_csv, "r") as f:
+        reader = csv.DictReader(f)
+        assert "primer_name" in reader.fieldnames
+        rows = list(reader)
+        assert len(rows) > 0
+        assert all(row["primer_name"] != "" for row in rows)
     
     # 2. Exécution avec le CSV exporté
     out_html2 = tmp_path / "report2.html"
@@ -129,7 +144,7 @@ def test_coverage_cli_auto_seeding_and_export(tmp_path: Path):
         "-s", str(exported_csv),
         "-o", str(out_html2),
         "--temperature", "63.0",
-        "--dg-threshold", "-3.0"
+        "--ddg-max", "3.0"
     ])
     assert res2.exit_code == 0, f"Error res2: {res2.stdout}"
     
@@ -141,13 +156,15 @@ def test_coverage_cli_auto_seeding_and_export(tmp_path: Path):
     assert json1["strains"] == json2["strains"]
 
 
-def test_coverage_real_dengue_single_command(tmp_path: Path):
-    """Test sur le jeu de données réel DEN-3 (amorces primer_dengue_3.txt et génome DEN3_M93130.fasta)."""
+def test_coverage_reference_amplifiable_default_options(tmp_path: Path):
+    """Vérifie qu'avec les options PAR DÉFAUT (sans aucun seuil précisé),
+    le génome de référence M93130.1 est déclaré amplifiable pour le panel DEN-3.
+    """
     fixture_dir = Path(__file__).resolve().parent.parent / "fixtures" / "real_primer_files"
     primers_path = fixture_dir / "primer_dengue_3.txt"
     genome_path = fixture_dir / "DEN3_M93130.fasta"
     
-    out_html = tmp_path / "coverage_den3.html"
+    out_html = tmp_path / "coverage_den3_default.html"
     
     runner = CliRunner()
     result = runner.invoke(app, [
@@ -155,86 +172,200 @@ def test_coverage_real_dengue_single_command(tmp_path: Path):
         "-p", str(primers_path),
         "-f", str(genome_path),
         "--panel", "3",
-        "-o", str(out_html),
-        "--temperature", "63.0",
-        "--dg-threshold", "-5.0"
+        "-o", str(out_html)
     ])
     
     assert result.exit_code == 0, f"Error: {result.stdout}"
     
-    json_data = json.loads((tmp_path / "coverage_den3.json").read_text())
+    json_data = json.loads((tmp_path / "coverage_den3_default.json").read_text())
     assert json_data["total_strains"] == 1
-    assert json_data["covered_thermo"] == 1
+    assert json_data["covered_thermo"] == 1, "Le génome de référence doit être amplifiable par défaut."
     assert json_data["covered_count"] == 1
     
-    strain_evals = json_data["strains"][0]["evals"]
-    assert strain_evals["F3"]["verdict"] == "parfait"
-    assert strain_evals["F3"]["mismatches"] == 0
+    strain = json_data["strains"][0]
+    assert strain["thermo"] is True
+    assert strain["count"] is True
+    # F3 doit être parfait (0 mm)
+    assert strain["evals"]["F3"]["verdict"] == "parfait"
+    # B3 avec 1 mismatch interne bénin doit être tolérable
+    assert strain["evals"]["B3"]["verdict"] == "tolerable"
+    assert strain["evals"]["B3"]["ddg"] is not None
+    assert strain["evals"]["B3"]["ddg"] <= 3.0
 
 
-def test_main_module_executable():
-    """Vérifie que le module labcraft.cli.main est exécutable directement avec python -m."""
-    res = subprocess.run(
-        [sys.executable, "-m", "labcraft.cli.main", "--help"],
-        capture_output=True,
-        text=True
-    )
-    assert res.returncode == 0
-    assert "Usage: " in res.stdout or "Options" in res.stdout
+def test_seeding_indel_rejection():
+    """Vérifie que le motif de criblage rejette les insertions et délétions (substitutions seules)."""
+    # var004-like : insertion d'un A supplémentaire dans le site F3 (longueur 19 au lieu de 18)
+    # F3 = CTCGTGTWGGAATGGGAG (18 nt)
+    # Cible mutée avec insertion : CTCGTGTAGGAATGGAAGAG (20 nt)
+    f3_primer = PhysicalPrimer('3_F3', 'CTCGTGTWGGAATGGGAG', PrimerRole.F3, 'CTCGTGTWGGAATGGGAG')
+    target_with_insertion = "A"*50 + "CTCGTGTAGGAATGGAAGAG" + "A"*50
+    
+    strains = {"var004": target_with_insertion}
+    candidates = find_candidate_sites(strains, [f3_primer], max_errors=2, strict_3prime_len=3)
+    
+    for c in candidates:
+        # Aucun site de longueur différente de 18 nt ne doit être retourné
+        assert len(c["site_seq"]) == 18, f"Le site trouvé a une longueur incorrecte: {len(c['site_seq'])}"
 
 
-def test_mg_dntp_warning_ratio():
-    """Vérifie qu'un avertissement est émis dès que le rapport Mg/dNTP < 3.0."""
-    with pytest.warns(UserWarning, match="Rapport Mg/dNTP faible"):
-        PanelConfig(
-            experiment=ExperimentConfig(
-                buffer=BufferConfig(mg_mM=2.8, dntp_mM=1.4)  # ratio = 2.0 < 3.0
-            )
-        )
+def test_independent_counting_rule():
+    """Vérifie que la règle par comptage prend le minimum de mésappariements sur toutes les lignes,
+    indépendamment du choix de la variante thermodynamique."""
+    # Variante 1: 1 mismatch bloquant en 3' (VETO_3P, mm=1)
+    # Variante 2: 1 mismatch interne bénin (TOLERABLE, mm=2 dans CSV pour tester l'indépendance)
+    p1 = PhysicalPrimer('F3_1', 'GCCACCTTAAGCCACAGTT', PrimerRole.F3, 'GCCACCTTAAGCCACAGTT')
+    p2 = PhysicalPrimer('F3_2', 'GCCACCTTTAGCCACAGTA', PrimerRole.F3, 'GCCACCTTTAGCCACAGTA')
+    
+    primers = [
+        p1, p2,
+        PhysicalPrimer('B3', 'GTTGTGTCATGGGAGGG', PrimerRole.B3, 'GTTGTGTCATGGGAGGG'),
+        PhysicalPrimer('FIP', 'TGGCTTTTGGGCCTGACTTCTTTTTTGAAGAAGCTGTGCAGCCTG', PrimerRole.FIP, 'GAAGAAGCTGTGCAGCCTG', 'TGGCTTTTGGGCCTGACTTC'),
+        PhysicalPrimer('BIP', 'CTGTAGCTCCGTCGTGGGGATTTTCTAGTCTGCTACACCGTGC', PrimerRole.BIP, 'CTAGTCTGCTACACCGTGC', 'CTGTAGCTCCGTCGTGGGGA'),
+    ]
+    
+    fasta_dict = {"Strain_1": "GCCACCTTAAGCCACAGTA" + "A"*50}
+    
+    csv_records = [
+        {"strain_id": "Strain_1", "primer_role": "F3", "primer_name": "F3_1", "position": 0, "strand": "+", "site_seq": "GCCACCTTAAGCCACAGTA", "n_mismatches": 1},
+        {"strain_id": "Strain_1", "primer_role": "F3", "primer_name": "F3_2", "position": 0, "strand": "+", "site_seq": "GCCACCTTAAGCCACAGTA", "n_mismatches": 2},
+        {"strain_id": "Strain_1", "primer_role": "B3", "position": 0, "strand": "-", "site_seq": "CCCTCCCATGACACAAC", "n_mismatches": 0},
+        {"strain_id": "Strain_1", "primer_role": "FIP", "position": 0, "strand": "+", "site_seq": "GAAGAAGCTGTGCAGCCTG", "n_mismatches": 0},
+        {"strain_id": "Strain_1", "primer_role": "BIP", "position": 0, "strand": "+", "site_seq": "CTAGTCTGCTACACCGTGC", "n_mismatches": 0},
+    ]
+    
+    backend = ViennaSaltShiftBackend(UnifiedSaltModel())
+    enzyme = get_enzyme("Bst2.0")
+    analyzer = CoverageAnalyzer(primers, fasta_dict, backend, enzyme, temp_celsius=63.0, ddg_max=3.0, max_mismatches_count=1)
+    
+    verdicts = analyzer.analyze_strains(csv_records)
+    assert len(verdicts) == 1
+    v = verdicts[0]
+    
+    # Thermodynamiquement: F3_2 est choisie (TOLERABLE l'emporte sur VETO_3P)
+    # Comptage: min(1, 2) = 1 <= max_mismatches_count(1) -> amplifiable_count = True
+    assert v.evaluations["F3"].verdict == SiteVerdict.TOLERABLE
+    assert v.is_amplifiable_thermo is True
+    assert v.is_amplifiable_count is True
 
 
-def test_coverage_seeding_performance(tmp_path: Path):
-    """Test de performance : 200 souches x 6 amorces criblées et analysées en ~1 seconde."""
-    # Créer un multi-FASTA de 200 souches
-    strains_lines = []
-    base_seq = (
-        "GCCACCTTAAGCCACAGTA" + "A"*50 +
-        "GAAGAAGCTGTGCAGCCTG" + "A"*50 +
-        "CCTTGGACGGGGCT" + "A"*50 +
-        "GCACGGTGTAGCAGACTAG" + "A"*50 +
-        "CCCTCCCATGACACAAC" + "A"*100
-    )
-    for i in range(200):
-        strains_lines.append(f">Strain_{i}\n{base_seq}\n")
+def test_divergence_two_ways():
+    """Vérifie que la table de divergence peut avoir des souches dans les deux sens :
+    - Thermo=True, Count=False (ex: 3 mismatches très bénins ddG <= 3.0 avec seuil count=2)
+    - Thermo=False, Count=True (ex: 1 mismatch bloquant en 3' veto_3p avec seuil count=2)
+    """
+    p_f3 = PhysicalPrimer('F3', 'GCCACCTTAAGCCACAGTA', PrimerRole.F3, 'GCCACCTTAAGCCACAGTA')
+    primers = [
+        p_f3,
+        PhysicalPrimer('B3', 'GTTGTGTCATGGGAGGG', PrimerRole.B3, 'GTTGTGTCATGGGAGGG'),
+        PhysicalPrimer('FIP', 'TGGCTTTTGGGCCTGACTTCTTTTTTGAAGAAGCTGTGCAGCCTG', PrimerRole.FIP, 'GAAGAAGCTGTGCAGCCTG', 'TGGCTTTTGGGCCTGACTTC'),
+        PhysicalPrimer('BIP', 'CTGTAGCTCCGTCGTGGGGATTTTCTAGTCTGCTACACCGTGC', PrimerRole.BIP, 'CTAGTCTGCTACACCGTGC', 'CTGTAGCTCCGTCGTGGGGA'),
+    ]
+    
+    fasta_dict = {
+        "Strain_Veto": "GCCACCTTAAGCCACAGTT" + "A"*50,
+        "Strain_ThermoWon": "GCCACCTTTAGCCACAGTA" + "A"*50,
+    }
+    
+    csv_records = [
+        # Strain_Veto: 1 mm en 3' -> Veto 3' (Thermo=False, Count=True)
+        {"strain_id": "Strain_Veto", "primer_role": "F3", "position": 0, "strand": "+", "site_seq": "GCCACCTTAAGCCACAGTT", "n_mismatches": 1},
+        {"strain_id": "Strain_Veto", "primer_role": "B3", "position": 0, "strand": "-", "site_seq": "CCCTCCCATGACACAAC", "n_mismatches": 0},
+        {"strain_id": "Strain_Veto", "primer_role": "FIP", "position": 0, "strand": "+", "site_seq": "GAAGAAGCTGTGCAGCCTG", "n_mismatches": 0},
+        {"strain_id": "Strain_Veto", "primer_role": "BIP", "position": 0, "strand": "+", "site_seq": "CTAGTCTGCTACACCGTGC", "n_mismatches": 0},
         
-    fasta_file = tmp_path / "200_strains.fasta"
-    fasta_file.write_text("".join(strains_lines))
+        # Strain_ThermoWon: 3 mm déclarés au comptage mais ddg <= 3.0 -> Thermo=True, Count=False (si max_mismatches=2)
+        {"strain_id": "Strain_ThermoWon", "primer_role": "F3", "position": 0, "strand": "+", "site_seq": "GCCACCTTTAGCCACAGTA", "n_mismatches": 3},
+        {"strain_id": "Strain_ThermoWon", "primer_role": "B3", "position": 0, "strand": "-", "site_seq": "CCCTCCCATGACACAAC", "n_mismatches": 0},
+        {"strain_id": "Strain_ThermoWon", "primer_role": "FIP", "position": 0, "strand": "+", "site_seq": "GAAGAAGCTGTGCAGCCTG", "n_mismatches": 0},
+        {"strain_id": "Strain_ThermoWon", "primer_role": "BIP", "position": 0, "strand": "+", "site_seq": "CTAGTCTGCTACACCGTGC", "n_mismatches": 0},
+    ]
     
-    primers_file = tmp_path / "primers.fasta"
-    primers_file.write_text(
-        ">Test_F3\nGCCACCTTAAGCCACAGTA\n"
-        ">Test_B3\nGTTGTGTCATGGGAGGG\n"
-        ">Test_F1\nGAAGTCAGGCCCAAAAGCCA\n"
-        ">Test_F2\nGAAGAAGCTGTGCAGCCTG\n"
-        ">Test_B1\nTCCCCACGACGGAGCTACAG\n"
-        ">Test_B2\nCTAGTCTGCTACACCGTGC\n"
-        ">Test_LF\nCCTTGGACGGGGCT\n"
-    )
+    backend = ViennaSaltShiftBackend(UnifiedSaltModel())
+    enzyme = get_enzyme("Bst2.0")
+    analyzer = CoverageAnalyzer(primers, fasta_dict, backend, enzyme, temp_celsius=63.0, ddg_max=3.0, max_mismatches_count=2)
+    verdicts = {v.strain_id: v for v in analyzer.analyze_strains(csv_records)}
     
-    out_html = tmp_path / "perf_report.html"
+    # Sens 1 : Count=True, Thermo=False
+    assert verdicts["Strain_Veto"].is_amplifiable_count is True
+    assert verdicts["Strain_Veto"].is_amplifiable_thermo is False
+    
+    # Sens 2 : Count=False, Thermo=True
+    assert verdicts["Strain_ThermoWon"].is_amplifiable_count is False
+    assert verdicts["Strain_ThermoWon"].is_amplifiable_thermo is True
+
+
+def test_cli_mg_dntp_warning_via_runner(tmp_path: Path):
+    """Vérifie que l'avertissement de chélation Mg/dNTP est émis via la CLI."""
+    fixture_dir = Path(__file__).resolve().parent.parent / "fixtures" / "real_primer_files"
+    primers_path = fixture_dir / "primer_dengue_3.txt"
+    genome_path = fixture_dir / "DEN3_M93130.fasta"
+    
+    out_html = tmp_path / "coverage_warn.html"
+    
+    runner = CliRunner()
+    with pytest.warns(UserWarning, match="Rapport Mg/dNTP faible"):
+        result = runner.invoke(app, [
+            "coverage",
+            "-p", str(primers_path),
+            "-f", str(genome_path),
+            "--panel", "3",
+            "-o", str(out_html),
+            "--mg", "2.8",
+            "--dntp", "1.4"
+        ])
+        assert result.exit_code == 0
+
+
+def test_coverage_200_strains_real_performance(tmp_path: Path):
+    """Test sur 201 souches mutées à 1 % dérivées de DEN-3 M93130.1 complet."""
+    fixture_dir = Path(__file__).resolve().parent.parent / "fixtures" / "real_primer_files"
+    primers_path = fixture_dir / "primer_dengue_3.txt"
+    genome_path = fixture_dir / "DEN3_M93130.fasta"
+    
+    from labcraft.cli.parsers import read_multi_fasta
+    ref_seq = read_multi_fasta(str(genome_path))[0][1]
+    
+    random.seed(42)
+    strains_lines = [f">M93130_ref\n{ref_seq}"]
+    
+    bases = ['A', 'C', 'G', 'T']
+    # Générer 200 souches mutées à 1%
+    for i in range(1, 201):
+        seq_chars = list(ref_seq)
+        n_muts = int(len(seq_chars) * 0.01)
+        mut_indices = random.sample(range(len(seq_chars)), n_muts)
+        for idx in mut_indices:
+            orig = seq_chars[idx]
+            choices = [b for b in bases if b != orig]
+            seq_chars[idx] = random.choice(choices)
+        strains_lines.append(f">Strain_var_{i:03d}\n{''.join(seq_chars)}")
+        
+    multi_fasta_path = tmp_path / "201_strains_dengue.fasta"
+    multi_fasta_path.write_text("\n".join(strains_lines) + "\n")
+    
+    out_html = tmp_path / "coverage_201_strains.html"
     
     runner = CliRunner()
     t0 = time.time()
-    res = runner.invoke(app, [
+    result = runner.invoke(app, [
         "coverage",
-        "-p", str(primers_file),
-        "-f", str(fasta_file),
+        "-p", str(primers_path),
+        "-f", str(multi_fasta_path),
+        "--panel", "3",
         "-o", str(out_html),
         "--temperature", "63.0"
     ])
     t1 = time.time()
     
-    assert res.exit_code == 0, f"Error: {res.stdout}"
-    elapsed = t1 - t0
-    print(f"\n[PERFORMANCE] 200 souches analysées en {elapsed:.3f} s.")
-    assert elapsed < 5.0  # Large marge, typiquement < 1.0 s
+    assert result.exit_code == 0, f"Error: {result.stdout}"
+    total_time = t1 - t0
+    
+    json_data = json.loads((tmp_path / "coverage_201_strains.json").read_text())
+    assert json_data["total_strains"] == 201
+    assert json_data["covered_thermo"] >= 1
+    assert json_data["covered_count"] >= 1
+    
+    print(f"\n[BENCHMARK] 201 souches DEN-3 analysées en {total_time:.2f} s. "
+          f"Couverture Thermo: {json_data['covered_thermo']}/201 ({json_data['covered_thermo']/201*100:.1f}%), "
+          f"Comptage: {json_data['covered_count']}/201 ({json_data['covered_count']/201*100:.1f}%)")

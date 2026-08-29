@@ -12,8 +12,7 @@ def test_real_primer_dengue_3():
         
     target_seq = read_multi_fasta(str(target_fasta))[0][1]
     
-    with pytest.warns(UserWarning, match="n'a pas pu être vérifiée"):
-        sets = parse_primer_file(str(primer_file), [("DEN3_M93130", target_seq)])
+    sets = parse_primer_file(str(primer_file), [("DEN3_M93130", target_seq)])
         
     assert len(sets) == 2
     # Check that it produces 6 oligonucleotides

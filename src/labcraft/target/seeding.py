@@ -7,6 +7,14 @@ Rôle : criblage permissif produisant des sites CANDIDATS, re-notés ensuite
 par la couche thermodynamique de LabCraft.
 Role: permissive screening generating CANDIDATE sites, which are then re-scored
 by the thermodynamic layer of LabCraft.
+
+Modèle de criblage / Screening model:
+LabCraft crible sur SUBSTITUTIONS SEULES ({s<=n}), par cohérence avec le modèle
+thermodynamique NN qui suppose un alignement sans brèche. La recherche tolérante
+aux indels reste dans l'outil d'origine (lamp_coverage.py).
+LabCraft screens on SUBSTITUTIONS ONLY ({s<=n}), in consistency with the NN
+thermodynamic model which assumes gapless alignment. Indel-tolerant search
+remains in the original tool (lamp_coverage.py).
 """
 
 from __future__ import annotations
@@ -43,8 +51,8 @@ def build_primer_regex(
     strict_3prime_tolerate: int = 0,
     is_rc: bool = False
 ) -> str:
-    """Construit une expression régulière tolérante en 5' et stricte en 3'.
-    Builds a regex pattern tolerant in 5' and strict in 3'.
+    """Construit une expression régulière tolérante en 5' et stricte en 3' (substitutions seules).
+    Builds a regex pattern tolerant in 5' and strict in 3' (substitutions only).
     """
     tolerate_positions = set()
     if strict_3prime_tolerate == 1:
@@ -53,7 +61,6 @@ def build_primer_regex(
         tolerate_positions = {1, 2}
 
     if strict_3prime_len > 0 and len(primer_seq) > strict_3prime_len:
-        type_e = 's' if strict_3prime_tolerate > 0 else 'e'
         if not is_rc:
             # Brin sens / Sense strand
             seq_5 = primer_seq[:-strict_3prime_len]
@@ -66,7 +73,7 @@ def build_primer_regex(
                     pattern_3 += f"(?:{base_regex}){{s<=1}}"
                 else:
                     pattern_3 += base_regex
-            return f"(?e)(?:{pattern_5}){{{type_e}<={max_errors}}}{pattern_3}"
+            return f"(?e)(?:{pattern_5}){{s<={max_errors}}}{pattern_3}"
         else:
             # Brin anti-sens / Antisense strand (primer_seq is already primer_rc)
             primer_rc = primer_seq
@@ -80,10 +87,10 @@ def build_primer_regex(
                     pattern_3_rc += f"(?:{base_regex}){{s<=1}}"
                 else:
                     pattern_3_rc += base_regex
-            return f"(?e){pattern_3_rc}(?:{pattern_5_rc}){{{type_e}<={max_errors}}}"
+            return f"(?e){pattern_3_rc}(?:{pattern_5_rc}){{s<={max_errors}}}"
     else:
         pattern = seq_to_regex(primer_seq)
-        return f"(?e)({pattern}){{e<={max_errors}}}"
+        return f"(?e)({pattern}){{s<={max_errors}}}"
 
 
 def primer_matches_sequence(
@@ -119,6 +126,12 @@ def count_iupac_mismatches(primer_seq: str, site_seq: str, strand: str) -> int:
     """Compte les mésappariements entre l'amorce et le site extrait par intersection IUPAC.
     Counts mismatches between primer and extracted site using IUPAC set intersection.
     """
+    if len(primer_seq) != len(site_seq):
+        raise ValueError(
+            f"Longueur de séquence incohérente pour le comptage de mésappariements: "
+            f"amorce ({len(primer_seq)} nt) vs site ({len(site_seq)} nt)."
+        )
+
     comp = {'A': 'T', 'T': 'A', 'C': 'G', 'G': 'C'}
     if strand == '+':
         bottom_under_top = "".join(comp.get(c, 'N') for c in site_seq)
@@ -146,10 +159,8 @@ def find_candidate_sites(
     """Crible permissivement les génomes de souches pour extraire tous les sites candidats.
     Permissively screens strain genomes to extract all candidate binding sites.
 
-    Seules les amorces s'hybridant à la matrice initiale sont criblées :
-    F3, B3, FIP (via domaine F2), BIP (via domaine B2), LF, LB.
-    Only primers hybridizing to the initial template are screened:
-    F3, B3, FIP (via F2 domain), BIP (via B2 domain), LF, LB.
+    Optimisation : criblage effectué UNE SEULE FOIS par rôle/amorce parente non développée.
+    Optimization: screening performed ONCE per unexpanded parent role/primer.
     """
     # Rôles d'amorces participant à l'hybridation initiale
     # Primer roles involved in initial hybridization
@@ -158,24 +169,31 @@ def find_candidate_sites(
         PrimerRole.LF, PrimerRole.LB, PrimerRole.FWD, PrimerRole.REV
     }
 
-    # Filtrer et pré-compiler les expressions régulières pour la performance
-    # Filter and pre-compile regex patterns for maximum performance
+    # Filtrer et pré-compiler les expressions régulières uniques
+    # Filter and pre-compile unique regex patterns
+    seen_seeds = set()
     compiled_primers = []
     for p in primers:
         if p.role not in valid_roles:
             continue
-        p_seq = p.binding_domain.upper()
+        p_seq = (p.parent_binding_domain or p.binding_domain).upper()
+        p_key = (p.role, p.parent_name or p.name, p_seq)
+        if p_key in seen_seeds:
+            continue
+        seen_seeds.add(p_key)
+
         pat_sense = build_primer_regex(p_seq, max_errors, strict_3prime_len, strict_3prime_tolerate, is_rc=False)
         pat_rc = build_primer_regex(_revcomp(p_seq), max_errors, strict_3prime_len, strict_3prime_tolerate, is_rc=True)
         compiled_sense = regex.compile(pat_sense, regex.BESTMATCH)
         compiled_rc = regex.compile(pat_rc, regex.BESTMATCH)
-        compiled_primers.append((p, p_seq, compiled_sense, compiled_rc))
+        p_display_name = p.parent_name or p.name
+        compiled_primers.append((p.role, p_display_name, p_seq, compiled_sense, compiled_rc))
 
     candidate_records: List[Dict[str, Any]] = []
 
     for strain_id, genome_seq in strains.items():
         genome_upper = genome_seq.upper()
-        for primer, p_seq, reg_sense, reg_rc in compiled_primers:
+        for role, p_name, p_seq, reg_sense, reg_rc in compiled_primers:
             match = reg_sense.search(genome_upper)
             strand = '+'
             if match is None:
@@ -188,8 +206,8 @@ def find_candidate_sites(
                 n_mm = count_iupac_mismatches(p_seq, site_seq, strand)
                 candidate_records.append({
                     "strain_id": strain_id,
-                    "primer_role": primer.role.value,
-                    "primer_name": primer.name,
+                    "primer_role": role.value,
+                    "primer_name": p_name,
                     "position": start,
                     "strand": strand,
                     "site_seq": site_seq,

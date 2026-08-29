@@ -135,6 +135,7 @@ class PhysicalPrimer:
     linker: str | None = None
     nominal_concentration: float | None = None
     parent_name: str | None = None
+    parent_binding_domain: str | None = None
     blocked_3prime: bool = False
     label_5prime: str | None = None
     lna_positions: tuple[int, ...] = ()

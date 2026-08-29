@@ -31,6 +31,7 @@ class SiteEvaluation:
     verdict: SiteVerdict
     n_mismatches_count: int
     dg_hyb: Optional[float] = None
+    ddg: Optional[float] = None
     first_bad_pos: Optional[int] = None
     severity: Optional[str] = None
 
@@ -51,7 +52,7 @@ def _evaluation_rank(eval_obj: SiteEvaluation) -> Tuple[int, int, float]:
     Hiérarchie / Hierarchy:
     1. Verdict : PARFAIT (4) > TOLERABLE (3) > NON_VIABLE (2) > VETO_3P (1) > ABSENT (0)
     2. Moins de mésappariements / Fewer mismatches
-    3. Stabilité thermodynamique (dG plus négatif) / Thermodynamic stability (more negative dG)
+    3. Pénalité relative ddG minimale (ou dG le plus favorable)
     """
     verdict_scores = {
         SiteVerdict.PARFAIT: 4,
@@ -62,8 +63,9 @@ def _evaluation_rank(eval_obj: SiteEvaluation) -> Tuple[int, int, float]:
     }
     v_score = verdict_scores.get(eval_obj.verdict, 0)
     mm_score = -eval_obj.n_mismatches_count
-    dg_score = -eval_obj.dg_hyb if eval_obj.dg_hyb is not None else -999.0
-    return (v_score, mm_score, dg_score)
+    # ddg plus faible = meilleur score
+    score_ddg = -eval_obj.ddg if eval_obj.ddg is not None else (-eval_obj.dg_hyb if eval_obj.dg_hyb is not None else -999.0)
+    return (v_score, mm_score, score_ddg)
 
 
 class CoverageAnalyzer:
@@ -78,7 +80,8 @@ class CoverageAnalyzer:
         backend: ViennaSaltShiftBackend,
         enzyme: PolymeraseProfile,
         temp_celsius: float = 65.0,
-        dg_threshold: float = -6.0,
+        ddg_max: float = 3.0,
+        dg_threshold: Optional[float] = None,
         max_mismatches_count: int = 2
     ):
         self.primers = primers
@@ -87,6 +90,7 @@ class CoverageAnalyzer:
         self.backend = backend
         self.enzyme = enzyme
         self.temp_celsius = temp_celsius
+        self.ddg_max = ddg_max
         self.dg_threshold = dg_threshold
         self.max_mismatches_count = max_mismatches_count
 
@@ -107,7 +111,13 @@ class CoverageAnalyzer:
             self._perfect_dg_cache[seq] = dg_hyb
         return self._perfect_dg_cache[seq]
 
-    def evaluate_site(self, primer: PhysicalPrimer, site_seq: str, strand: str) -> SiteEvaluation:
+    def evaluate_site(
+        self,
+        primer: PhysicalPrimer,
+        site_seq: str,
+        strand: str,
+        strain_id: str = ""
+    ) -> SiteEvaluation:
         """Évalue thermodynamiquement un site d'hybridation avec résolution IUPAC.
         Thermodynamically evaluates a binding site with IUPAC base resolution.
 
@@ -117,6 +127,12 @@ class CoverageAnalyzer:
         - '-' : le complément inverse de l'amorce apparaît sur le brin sens (+).
           '-' : reverse complement of primer appears on sense (+) strand.
         """
+        if len(site_seq) != len(primer.binding_domain):
+            raise ValueError(
+                f"Longueur de site ({len(site_seq)} nt) incompatible avec le domaine de liaison "
+                f"de l'amorce {primer.name} ({len(primer.binding_domain)} nt) pour la souche '{strain_id}'."
+            )
+
         comp = {'A': 'T', 'T': 'A', 'C': 'G', 'G': 'C'}
         if strand == '+':
             bottom_under_top = "".join(comp.get(c, 'N') for c in site_seq)
@@ -151,39 +167,47 @@ class CoverageAnalyzer:
                     resolved_primer_chars.append('N')
 
         resolved_primer_seq = "".join(resolved_primer_chars)
+        dg_perfect_backend = self._get_perfect_dg_seq(resolved_primer_seq)
 
         # Calcul thermodynamique / Thermodynamic calculation
         if mismatch_count == 0:
-            dg_hyb = self._get_perfect_dg_seq(resolved_primer_seq)
+            dg_hyb = dg_perfect_backend
+            ddg = 0.0
         else:
-            dg_perfect_backend = self._get_perfect_dg_seq(resolved_primer_seq)
             perfect_bottom = "".join(comp.get(c, c) for c in resolved_primer_seq)
             _, _, dg_perfect_nn = nn_duplex_energy(resolved_primer_seq, perfect_bottom, self.temp_celsius)
             _, _, dg_mismatched_nn = nn_duplex_energy(resolved_primer_seq, bottom_under_top, self.temp_celsius)
             ddg_mismatch = dg_mismatched_nn - dg_perfect_nn
             dg_hyb = dg_perfect_backend + ddg_mismatch
+            ddg = max(0.0, dg_hyb - dg_perfect_backend)
 
         # Règle d'extension enzymatique en 3' / Enzymatic 3' extension rule
         extensible, first_bad_pos, severity = three_prime_extensible(
             resolved_primer_seq, bottom_under_top, self.enzyme
         )
 
+        # Règle de viabilité : critère relatif ddG <= ddG_max et filtre absolu optionnel
+        is_viable_energy = (ddg <= self.ddg_max)
+        if self.dg_threshold is not None and dg_hyb > self.dg_threshold:
+            is_viable_energy = False
+
         if mismatch_count == 0:
             verdict = SiteVerdict.PARFAIT
         elif not extensible:
             verdict = SiteVerdict.VETO_3P
-        elif dg_hyb > self.dg_threshold:
+        elif not is_viable_energy:
             verdict = SiteVerdict.NON_VIABLE
         else:
             verdict = SiteVerdict.TOLERABLE
 
         return SiteEvaluation(
-            strain_id="",
+            strain_id=strain_id,
             primer_name=primer.name,
             primer_role=primer.role,
             verdict=verdict,
             n_mismatches_count=mismatch_count,
             dg_hyb=dg_hyb,
+            ddg=ddg,
             first_bad_pos=first_bad_pos,
             severity=severity
         )
@@ -247,7 +271,7 @@ class CoverageAnalyzer:
                     matching_primers.append(self.primers_by_name[p_ident])
                 else:
                     for p in self.primers:
-                        if p.role.name == p_ident or p.role.value == p_ident or p.name == p_ident:
+                        if p.role.name == p_ident or p.role.value == p_ident or p.name == p_ident or (p.parent_name and p.parent_name == p_ident):
                             matching_primers.append(p)
 
                 if not matching_primers:
@@ -256,14 +280,22 @@ class CoverageAnalyzer:
                 csv_mm = int(r["n_mismatches"]) if "n_mismatches" in r and r["n_mismatches"] != "" else 0
 
                 for primer in matching_primers:
-                    if "site_seq" in r and r["site_seq"]:
-                        site_seq = r["site_seq"]
-                    else:
-                        pos = int(r.get("position", 0))
-                        site_seq = genome[pos : pos + len(primer.binding_domain)]
+                    req_len = len(primer.binding_domain)
+                    site_seq = r.get("site_seq", "")
+                    if len(site_seq) != req_len:
+                        # Ceinture et bretelles : tentative de ré-extraction par coordonnées
+                        pos_str = r.get("position", "")
+                        if pos_str != "":
+                            pos = int(pos_str)
+                            if 0 <= pos <= len(genome) - req_len:
+                                site_seq = genome[pos : pos + req_len]
+                        if len(site_seq) != req_len:
+                            raise ValueError(
+                                f"Longueur de site ({len(site_seq)} nt) incompatible avec l'amorce "
+                                f"{primer.name} ({req_len} nt) pour la souche '{s_id}'."
+                            )
 
-                    eval_obj = self.evaluate_site(primer, site_seq, r["strand"])
-                    eval_obj.strain_id = s_id
+                    eval_obj = self.evaluate_site(primer, site_seq, r["strand"], strain_id=s_id)
 
                     role_key = primer.role.value
                     if role_key not in role_evaluations:
@@ -273,12 +305,13 @@ class CoverageAnalyzer:
             # Sélectionner la meilleure variante pour chaque rôle
             # Select the best variant for each role
             best_evaluations: Dict[str, SiteEvaluation] = {}
-            best_csv_mms: Dict[str, int] = {}
+            min_csv_mms: Dict[str, int] = {}
 
             for role_key, ev_list in role_evaluations.items():
-                best_ev, best_mm = max(ev_list, key=lambda pair: _evaluation_rank(pair[0]))
+                best_ev, _ = max(ev_list, key=lambda pair: _evaluation_rank(pair[0]))
                 best_evaluations[role_key] = best_ev
-                best_csv_mms[role_key] = best_mm
+                # Règle par comptage indépendante : minimum des mésappariements sur toutes les lignes
+                min_csv_mms[role_key] = min(mm for _, mm in ev_list)
 
             # Déterminer la viabilité d'amplification
             # Determine amplification viability
@@ -302,21 +335,22 @@ class CoverageAnalyzer:
                         primer_role=role,
                         verdict=SiteVerdict.ABSENT,
                         n_mismatches_count=99,
-                        dg_hyb=None
+                        dg_hyb=None,
+                        ddg=None
                     )
                     continue
 
                 ev = best_evaluations[role_key]
-                csv_mm = best_csv_mms.get(role_key, ev.n_mismatches_count)
+                role_min_mm = min_csv_mms.get(role_key, ev.n_mismatches_count)
 
-                # Règle thermodynamique / Thermodynamic rule
+                # Règle thermodynamique (indépendante)
                 if ev.verdict in (SiteVerdict.VETO_3P, SiteVerdict.ABSENT, SiteVerdict.NON_VIABLE):
                     is_amp_thermo = False
                     if not limiting:
                         limiting = role_key
 
-                # Règle par comptage / Counting rule
-                if csv_mm > self.max_mismatches_count:
+                # Règle par comptage (indépendante)
+                if role_min_mm > self.max_mismatches_count:
                     is_amp_count = False
 
             strain_verdicts.append(StrainVerdict(
