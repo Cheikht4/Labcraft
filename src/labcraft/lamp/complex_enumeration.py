@@ -67,14 +67,23 @@ def enumerate_complexes(
         targets_dict = {"": target_seq.strip()}
 
     # 1. Identifier les sites cibles sur chaque cible
-    # 1. Identify target sites across all targets
-    target_sites: List[Dict[str, Any]] = []
+    # 1. Identifier les sites cibles sur chaque cible par LOCUS physique unique
+    # 1. Identify target sites across all targets by unique physical LOCUS
+    target_sites_map: Dict[Tuple[str, int, str], Dict[str, Any]] = {}
 
     for t_id, raw_seq in targets_dict.items():
         clean_target = re.sub(r'[^A-Za-z]', '', raw_seq.upper())
         target_rc = _revcomp(clean_target)
+        
+        # Suivi des parents appariés pour les avertissements
+        # Track matched parent primers for warnings
+        parent_matched: Dict[str, bool] = {
+            p.name.split('#')[0] if '#' in p.name else p.name: False 
+            for p in primers
+        }
 
         for p in primers:
+            parent_name = p.name.split('#')[0] if '#' in p.name else p.name
             match_start = _find_iupac_substring(p.binding_domain, clean_target)
             strand = "+"
             if match_start == -1:
@@ -82,6 +91,7 @@ def enumerate_complexes(
                 strand = "-"
 
             if match_start != -1:
+                parent_matched[parent_name] = True
                 match_len = len(p.binding_domain)
                 if strand == "+":
                     start, end = match_start, match_start + match_len
@@ -89,32 +99,44 @@ def enumerate_complexes(
                     start = len(clean_target) - (match_start + match_len)
                     end = len(clean_target) - match_start
 
-                if is_multi_target and t_id:
-                    site_name = f"{p.name}@{t_id}_site"
+                locus_key = (t_id, start, strand)
+                if locus_key not in target_sites_map:
+                    if is_multi_target and t_id:
+                        site_name = f"{parent_name}@{t_id}_site"
+                    else:
+                        site_name = f"{parent_name}_site"
+
+                    target_sites_map[locus_key] = {
+                        "name": site_name,
+                        "target_id": t_id,
+                        "target_seq": clean_target,
+                        "parent_name": parent_name,
+                        "role": p.role,
+                        "start": start,
+                        "end": end,
+                        "strand": strand,
+                        "binding_primers": [p]
+                    }
                 else:
-                    site_name = f"{p.name}_site"
+                    # Locus partagé par plusieurs variantes d'amorce
+                    # Locus shared by multiple primer variants
+                    target_sites_map[locus_key]["binding_primers"].append(p)
 
-                target_sites.append({
-                    "name": site_name,
-                    "target_id": t_id,
-                    "target_seq": clean_target,
-                    "primer_name": p.name,
-                    "start": start,
-                    "end": end,
-                    "strand": strand
-                })
-            else:
-                if not is_multi_target:
-                    warnings.warn(f"Le domaine de liaison de {p.name} n'est pas trouvé sur la cible.")
+        if not is_multi_target:
+            for par_name, matched in parent_matched.items():
+                if not matched:
+                    warnings.warn(f"Le domaine de liaison de {par_name} n'est pas trouvé sur la cible.")
 
-        # Détection de chevauchement stérique par cible
-        sites_for_t = [s for s in target_sites if s.get("target_id") == t_id]
+        # Détection de chevauchement stérique par cible entre loci distincts
+        sites_for_t = [s for s in target_sites_map.values() if s.get("target_id") == t_id]
         for i, s1 in enumerate(sites_for_t):
             for j, s2 in enumerate(sites_for_t):
                 if i < j and s1["strand"] == s2["strand"]:
                     overlap = max(0, min(s1["end"], s2["end"]) - max(s1["start"], s2["start"]))
                     if overlap > 0:
                         warnings.warn(f"Compétition stérique sur cible '{t_id}' : {s1['name']} et {s2['name']} se chevauchent de {overlap} bases.")
+
+    target_sites = list(target_sites_map.values())
 
     # Espèces de base = amorces + sites cibles
     n_primers = len(primers)
@@ -126,7 +148,6 @@ def enumerate_complexes(
     concentrations = np.zeros(n_strands)
     for i, p in enumerate(primers):
         if isinstance(profile, dict):
-            # Prendre le premier profil disponible pour l'amorce
             p_prof = next(iter(profile.values())) if profile else LAMP_DEFAULT_PROFILE
         else:
             p_prof = profile
@@ -188,74 +209,22 @@ def enumerate_complexes(
                 cname = f"{p1.name}_{p2.name}" if i != j else f"{p1.name}_homo"
                 complexes.append(ComplexInfo(cname, stoich, dg))
 
-    # --- 4. Complexes amorce-cible ---
+    # --- 4. Complexes amorce-cible (par locus) ---
     unfolding_penalties: Dict[str, Any] = {}
 
     for site_idx_rel, site_info in enumerate(target_sites):
-        p_name = site_info["primer_name"]
-        idx_p = next(i for i, p in enumerate(primers) if p.name == p_name)
-        p = primers[idx_p]
-
         site_idx = n_primers + site_idx_rel
         site_name = site_info["name"]
         t_seq = site_info["target_seq"]
         t_id = site_info.get("target_id", "")
-
-        offset = p.sequence.find(p.binding_domain)
-        bd_lna = tuple(pos - offset for pos in p.lna_positions if offset <= pos < offset + len(p.binding_domain)) if offset != -1 else ()
-
         s0 = site_info["start"]
         e0 = site_info["end"]
         extracted_target = t_seq[s0:e0].upper()
+        role = site_info.get("role")
+        parent_name = site_info.get("parent_name")
 
-        if len(extracted_target) != len(p.binding_domain):
-            warnings.warn(f"Longueur inattendue pour le site {site_name} (site={len(extracted_target)}, amorce={len(p.binding_domain)}). Fallback sur match parfait.")
-            res_hyb = backend.calc_duplex(
-                p.binding_domain, _revcomp(p.binding_domain),
-                temp_celsius=temp_celsius,
-                lna_positions_a=bd_lna,
-                lna_positions_b=(),
-                **backend_kwargs
-            )
-            dg_hyb = res_hyb.dg_kcal
-            extensible = True
-            n_mismatches = 0
-        else:
-            if site_info["strand"] == "+":
-                bottom_under_top = "".join({'A': 'T', 'T': 'A', 'C': 'G', 'G': 'C'}.get(c, c) for c in extracted_target)
-            else:
-                bottom_under_top = extracted_target[::-1]
-
-            from labcraft.lamp.domains import IUPAC_MATCHABLE
-            resolved_bottom = []
-            for b_prim, b_targ in zip(p.binding_domain, bottom_under_top):
-                comp = {'A': 'T', 'T': 'A', 'C': 'G', 'G': 'C'}
-                set_p = IUPAC_MATCHABLE.get(b_prim, set())
-                set_t_comp = set(comp.get(base, base) for base in IUPAC_MATCHABLE.get(b_targ, set([b_targ])))
-                if set_p and set_t_comp and set_p.intersection(set_t_comp):
-                    shared = list(set_p.intersection(set_t_comp))[0]
-                    resolved_bottom.append(comp[shared])
-                else:
-                    resolved_bottom.append(b_targ)
-            bottom_under_top = "".join(resolved_bottom)
-
-            from labcraft.thermo.mismatch import calculate_hybridization_dg, three_prime_extensible
-            dg_hyb, ddg_mismatch = calculate_hybridization_dg(
-                p.binding_domain, bottom_under_top, temp_celsius, backend, bd_lna=bd_lna, **backend_kwargs
-            )
-
-            comp = {'A': 'T', 'T': 'A', 'C': 'G', 'G': 'C'}
-            n_mismatches = sum(1 for a, b in zip(p.binding_domain, bottom_under_top) if comp.get(a, '') != b)
-
-            from labcraft.diagnostics.enzyme import get_enzyme
-            enzyme = backend_kwargs.get("enzyme", get_enzyme("Bst2.0"))
-            extensible, first_bad_pos, severity = three_prime_extensible(p.binding_domain, bottom_under_top, enzyme)
-
-            site_info["mismatches"] = n_mismatches
-            site_info["extensible"] = extensible
-
-        # Accessibilité
-        if p.role in (PrimerRole.LF, PrimerRole.LB):
+        # Accessibilité (unfolding penalty calculée une seule fois par locus physique)
+        if role in (PrimerRole.LF, PrimerRole.LB):
             dg_unfold = 0.0
         else:
             W = unfolding_window
@@ -272,26 +241,78 @@ def enumerate_complexes(
 
         pen_data = {
             "dg_unfold": dg_unfold,
-            "mismatches": site_info.get("mismatches", 0),
-            "extensible": site_info.get("extensible", True)
+            "mismatches": 0,
+            "extensible": True,
+            "n_variants": len(site_info["binding_primers"]),
+            "variants": [p.name for p in site_info["binding_primers"]]
         }
 
         if is_multi_target and t_id:
             if t_id not in unfolding_penalties:
                 unfolding_penalties[t_id] = {}
             unfolding_penalties[t_id][site_name] = pen_data
-            # Alias sans @t_id pour compatibilité
-            unfolding_penalties[t_id][f"{p.name}_site"] = pen_data
+            unfolding_penalties[t_id][f"{parent_name}_site"] = pen_data
         else:
             unfolding_penalties[site_name] = pen_data
 
-        dg_eff = dg_hyb + dg_unfold
+        for p in site_info["binding_primers"]:
+            idx_p = next(i for i, prim in enumerate(primers) if prim.name == p.name)
+            offset = p.sequence.find(p.binding_domain)
+            bd_lna = tuple(pos - offset for pos in p.lna_positions if offset <= pos < offset + len(p.binding_domain)) if offset != -1 else ()
 
-        if extensible and dg_eff < 0:
-            stoich = [0] * n_strands
-            stoich[idx_p] = 1
-            stoich[site_idx] = 1
-            complexes.append(ComplexInfo(f"{p.name}_on_{site_name}", stoich, dg_eff))
+            if len(extracted_target) != len(p.binding_domain):
+                warnings.warn(f"Longueur inattendue pour le site {site_name} (site={len(extracted_target)}, amorce={len(p.binding_domain)}). Fallback sur match parfait.")
+                res_hyb = backend.calc_duplex(
+                    p.binding_domain, _revcomp(p.binding_domain),
+                    temp_celsius=temp_celsius,
+                    lna_positions_a=bd_lna,
+                    lna_positions_b=(),
+                    **backend_kwargs
+                )
+                dg_hyb = res_hyb.dg_kcal
+                extensible = True
+                n_mismatches = 0
+            else:
+                if site_info["strand"] == "+":
+                    bottom_under_top = "".join({'A': 'T', 'T': 'A', 'C': 'G', 'G': 'C'}.get(c, c) for c in extracted_target)
+                else:
+                    bottom_under_top = extracted_target[::-1]
+
+                from labcraft.lamp.domains import IUPAC_MATCHABLE
+                resolved_bottom = []
+                for b_prim, b_targ in zip(p.binding_domain, bottom_under_top):
+                    comp = {'A': 'T', 'T': 'A', 'C': 'G', 'G': 'C'}
+                    set_p = IUPAC_MATCHABLE.get(b_prim, set())
+                    set_t_comp = set(comp.get(base, base) for base in IUPAC_MATCHABLE.get(b_targ, set([b_targ])))
+                    if set_p and set_t_comp and set_p.intersection(set_t_comp):
+                        shared = list(set_p.intersection(set_t_comp))[0]
+                        resolved_bottom.append(comp[shared])
+                    else:
+                        resolved_bottom.append(b_targ)
+                bottom_under_top = "".join(resolved_bottom)
+
+                from labcraft.thermo.mismatch import calculate_hybridization_dg, three_prime_extensible
+                dg_hyb, ddg_mismatch = calculate_hybridization_dg(
+                    p.binding_domain, bottom_under_top, temp_celsius, backend, bd_lna=bd_lna, **backend_kwargs
+                )
+
+                from labcraft.diagnostics.enzyme import get_enzyme
+                enzyme = backend_kwargs.get("enzyme", get_enzyme("Bst2.0"))
+                extensible, first_bad_pos, severity = three_prime_extensible(p.binding_domain, bottom_under_top, enzyme)
+
+                comp = {'A': 'T', 'T': 'A', 'C': 'G', 'G': 'C'}
+                n_mismatches = sum(1 for a, b in zip(p.binding_domain, bottom_under_top) if comp.get(a, '') != b)
+                pen_data["mismatches"] = n_mismatches
+                pen_data["extensible"] = extensible
+
+            dg_eff = dg_hyb + dg_unfold
+
+            if extensible and dg_eff < 0:
+                stoich = [0] * n_strands
+                stoich[idx_p] = 1
+                stoich[site_idx] = 1
+                cname = f"{p.name}_on_{site_name}"
+                complexes.append(ComplexInfo(cname, stoich, dg_eff))
 
     stoich_matrix = np.array([c.stoichiometry for c in complexes], dtype=np.float64)
     dg_vector = np.array([c.delta_g for c in complexes], dtype=np.float64)

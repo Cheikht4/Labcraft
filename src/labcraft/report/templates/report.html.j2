@@ -703,6 +703,10 @@
                             {% if not extensible %}
                                 <span class="badge badge-danger" title="Extension bloquée par mésappariement 3'">3' Bloqué</span>
                             {% endif %}
+                            {% set n_vars = info.n_variants if (info is mapping and 'n_variants' in info) else 1 %}
+                            {% if n_vars > 1 %}
+                                <span class="badge" style="background: #17a2b8; color: #fff; font-size: 10px; padding: 2px 5px; border-radius: 3px;" title="{{ n_vars }} variantes d'amorce se fixent sur ce locus">{{ n_vars }} var. productives</span>
+                            {% endif %}
                         </td>
                         {% if site_parent in metadata.loop_primer_parents %}
                             <td style="color: var(--color-muted); font-style: italic;">n/a, brin simple (boucle)</td>
@@ -744,14 +748,10 @@
                     <div class="heatmap-cell heatmap-header" title="{{ p }}">P{{ loop.index }}</div>
                     {% endfor %}
                     
-                    <!-- Lignes -->
                     {% for p1 in p_names %}
-                    {% set i = loop.index %}
-                    <div class="heatmap-cell heatmap-row-header" title="{{ p1 }}">P{{ i }}</div>
+                    <div class="heatmap-cell heatmap-row-header" title="{{ p1 }}">P{{ loop.index }}</div>
                     {% for p2 in p_names %}
                         {% set dg = metadata.interaction_matrix[p1][p2] %}
-                        <!-- Calcul simple d'opacité pour la heatmap (palette bleue: séquentielle accessible) -->
-                        <!-- Si dg > 0 (pas d'interaction), blanc. Sinon de 0 à -15 kcal/mol -->
                         {% set intensity = 0 %}
                         {% if dg < 0 %}
                             {% set intensity = (dg / -15.0) %}
@@ -766,7 +766,7 @@
             </div>
             
             <!-- Légende des amorces -->
-            <div style="background: #fff; border: 1px solid var(--color-border); border-radius: 4px; padding: 10px; font-size: 12px; max-height: 400px; overflow-y: auto;">
+            <div class="target-box" style="margin: 0; min-width: 250px; flex: 1;">
                 <strong style="display:block; margin-bottom: 5px;">Légende (Amorces)</strong>
                 <table style="margin: 0; width: auto;">
                     <tbody>
@@ -786,17 +786,30 @@
         <h2>Fiches d'Artefacts Détaillées</h2>
         
         {% if metadata.mispriming_risks %}
-        <h3>Mésamorçage Inter-Cible (Multiplexe) - CRITIQUE</h3>
-        <p style="font-size: 13px; color: var(--color-failure); font-weight: bold;">
-            ⚠️ Les amorces suivantes s'apparient sur le génome d'une AUTRE cible du multiplexe avec une extrémité 3' extensible et un ΔG sous le seuil de l'enzyme ({{ "%.2f"|format(metadata.dimer_dg_threshold) }} kcal/mol).
+        <h3>Mésamorçage Inter-Cible (Multiplexe) - Risques Prioritaires</h3>
+        <p style="font-size: 13px; color: var(--color-muted);">
+            Signalement basé sur l'énergie d'hybridation intermoléculaire et l'extensibilité 3' par la polymérase. Un site est retenu si son ΔG s'approche à moins de 4,0 kcal/mol du duplexe parfait de l'amorce sur son site légitime (affinité relative significative).
         </p>
-        {% for risk in metadata.mispriming_risks %}
+        {% if metadata.mispriming_risks|length > 20 %}
+        <p style="font-size: 12px; color: var(--color-warning-text); font-weight: bold;">
+            ⚠️ Affichage des 20 événements les plus sévères (sur un total de {{ metadata.mispriming_risks|length }} détectés).
+        </p>
+        {% endif %}
+        {% for risk in metadata.mispriming_risks[:20] %}
         <div class="risk-card risk-critical">
             <div class="risk-header">
                 <span>{{ risk.primer_name }} sur la cible {{ risk.target_id }}</span>
                 <span class="risk-badge badge-critical">MÉSAMORÇAGE INTER-CIBLE</span>
             </div>
-            <p><strong>ΔG MFE :</strong> {{ "%.2f"|format(risk.delta_g) }} kcal/mol</p>
+            <div class="artefact-stats" style="margin-bottom: 10px;">
+                <div><strong>ΔG Hybridation :</strong> {{ "%.2f"|format(risk.delta_g) }} kcal/mol</div>
+                {% if risk.delta_delta_g is not none %}
+                <div><strong>ΔΔG (vs légitime) :</strong> +{{ "%.2f"|format(risk.delta_delta_g) }} kcal/mol</div>
+                {% endif %}
+                {% if risk.affinity_ratio is not none %}
+                <div><strong>Affinité relative :</strong> {{ "%.2f"|format(risk.affinity_ratio * 100) }} %</div>
+                {% endif %}
+            </div>
             <div class="dimer-viz">
                 <div class="alignment-row">
                     <span class="alignment-label">Séquence du site (5'->3')</span>

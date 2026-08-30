@@ -30,17 +30,13 @@ def test_mispriming_perfect_match(backend, enzyme):
     assert risks[0].target_id == "YFV"
 
 def test_mispriming_internal_mismatch(backend, enzyme):
-    # L'extrémité 3' (disons les 3 derniers nt) est parfaite.
-    # On introduit un mismatch à la position 5 (en partant du 3').
-    seq = "ATCGATCGATCGATCG"
+    # L'extrémité 3' (5 derniers nt) est parfaite.
+    # On introduit un mismatch interne à la position 7 (en partant du 3').
+    seq = "ATCGTTAGCCACAGTA"
     p = PhysicalPrimer.from_simple("F3_X", seq, PrimerRole.F3)
-    # revcomp: CGATCGATCGATCGAT
-    # 3' end de p = TCG. Son revcomp = CGA.
-    # Position 5 du 3' = C (index -5 de seq, seq[-5] = G, revcomp = C).
-    # On change ce C en A dans la cible pour faire un mismatch
     rc_seq = _revcomp(seq)
-    # L'index de seq[-5] dans rc_seq est 4 (0-indexed).
-    target_rc = rc_seq[:4] + "A" + rc_seq[5:]
+    # L'index du 7ème nucléotide depuis le 3' dans rc_seq est 6 (0-indexed).
+    target_rc = rc_seq[:6] + ("A" if rc_seq[6] != "A" else "C") + rc_seq[7:]
     
     target_seq = "NNNN" + target_rc + "NNNN"
     
@@ -51,19 +47,19 @@ def test_mispriming_internal_mismatch(backend, enzyme):
         [p], primer_to_panel, targets, backend, enzyme, temp_celsius=65.0
     )
     
-    # Doit être détecté car l'ancrage est sur les 3 derniers, et le mismatch n'est pas dans le veto 3' terminal (pos 1-2).
+    # Doit être détecté car l'ancrage 3' est conservé et le mismatch interne est toléré
     assert len(risks) > 0
 
 def test_mispriming_terminal_mismatch(backend, enzyme):
     # L'extrémité 3' (position 1 terminale) a un mismatch.
-    # L'ancrage (K_LEN=3) sur l'extrémité 3' EXACTE ne trouvera pas la cible.
+    # L'ancrage sur l'extrémité 3' ne trouvera pas la cible.
     # Ce cas n'est PAS remonté (veto/ancrage).
-    seq = "ATCGATCGATCGATCG"
+    seq = "ATCGTTAGCCACAGTA"
     p = PhysicalPrimer.from_simple("F3_X", seq, PrimerRole.F3)
     
-    # 3' terminal est G. Dans le revcomp, c'est le 1er nt (C).
     rc_seq = _revcomp(seq)
-    target_rc = "A" + rc_seq[1:]
+    # Remplacer le premier nucléotide de rc_seq (complémentaire du 3' terminal de seq)
+    target_rc = ("A" if rc_seq[0] != "A" else "C") + rc_seq[1:]
     
     target_seq = "NNNN" + target_rc + "NNNN"
     

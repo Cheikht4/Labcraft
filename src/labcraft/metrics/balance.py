@@ -43,6 +43,9 @@ def calculate_multiplex_balance(
         initiation_occs = {}
         panel_free_fracs = []
         
+        # Identifier tous les parents d'initiation du panel
+        # Identify all initiation parent primers of the panel
+        panel_parents = set()
         for p_name, p_panel in primer_to_panel.items():
             if p_panel == panel:
                 free_val = free_fractions.get(p_name, 0.0)
@@ -51,25 +54,12 @@ def calculate_multiplex_balance(
                 panel_free_fracs.append(free_val)
                 
                 parent_name = p_name.split('#')[0] if '#' in p_name else p_name
+                panel_parents.add(parent_name)
                 
-                if parent_name not in loop_primer_parents:
-                    site_name = f"{parent_name}_site"
-                    occ = None
-                    if target_occs_for_panel is not None:
-                        occ = target_occs_for_panel.get(site_name)
-                        if occ is None:
-                            for k, v in target_occs_for_panel.items():
-                                if k == site_name or k.startswith(f"{parent_name}@") or k.startswith(f"{parent_name}_"):
-                                    occ = v
-                                    break
-
-                    if occ is not None and parent_name not in initiation_occs:
-                        initiation_occs[parent_name] = occ
-                    
         mean_free = float(np.mean(panel_free_fracs)) if panel_free_fracs else 0.0
 
-        if target_occs_for_panel is None or not initiation_occs:
-            # Panel ou cible non analysé
+        if target_occs_for_panel is None:
+            # Cible non incluse dans l'équilibre / Target not included in equilibrium
             panel_summaries[panel] = {
                 "mean_occupation": None,
                 "min_occupation": None,
@@ -77,10 +67,30 @@ def calculate_multiplex_balance(
                 "mean_free": mean_free
             }
         else:
-            mean_occ = float(np.mean(list(initiation_occs.values())))
-            min_occ = float(min(initiation_occs.values()))
-            limiting_primer = min(initiation_occs, key=initiation_occs.get)
-            
+            for parent_name in sorted(panel_parents):
+                if parent_name not in loop_primer_parents:
+                    site_name = f"{parent_name}_site"
+                    occ = target_occs_for_panel.get(site_name)
+                    if occ is None:
+                        # Recherche avec préfixe / suffixe @t_id
+                        for k, v in target_occs_for_panel.items():
+                            if k == site_name or k.startswith(f"{parent_name}@") or k.startswith(f"{parent_name}_") or k.startswith(f"{parent_name}#"):
+                                occ = v
+                                break
+                    if occ is None:
+                        # Si le site est absent de la cible, occupation réelle = 0.0 (inoccupé)
+                        occ = 0.0
+                    initiation_occs[parent_name] = occ
+
+            if not initiation_occs:
+                mean_occ = 0.0
+                min_occ = 0.0
+                limiting_primer = "Aucune amorce d'initiation"
+            else:
+                mean_occ = float(np.mean(list(initiation_occs.values())))
+                min_occ = float(min(initiation_occs.values()))
+                limiting_primer = min(initiation_occs, key=initiation_occs.get)
+
             panel_summaries[panel] = {
                 "mean_occupation": mean_occ,
                 "min_occupation": min_occ,

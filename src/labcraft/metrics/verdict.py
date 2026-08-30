@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import List, Dict, Optional
+import numpy as np
 from labcraft.metrics.fractions import PrimerFractions
 from labcraft.metrics.risk import RiskItem
 
@@ -38,16 +39,19 @@ def generate_verdict(
     issues = []
     
     if target_occupations:
-        # Mode avec cible(s)
+        # Mode avec cible(s) : évaluation par amorce parente / locus
+        # Mode with target(s): evaluation per parent primer / locus
         for target_id, occupations in target_occupations.items():
-            for primer_name, f in fractions.items():
-                # Résoudre le parent pour le lookup du site cible
-                # Resolve parent for target site lookup
+            # Regrouper les fractions par amorce parente
+            parent_to_variants: Dict[str, List[str]] = {}
+            for primer_name in fractions.keys():
                 parent_name = primer_name.split('#')[0] if '#' in primer_name else primer_name
-                
+                parent_to_variants.setdefault(parent_name, []).append(primer_name)
+
+            for parent_name, var_names in parent_to_variants.items():
                 # Filtrer selon le panel d'appartenance si disponible
                 if primer_to_panel is not None:
-                    p_panel = primer_to_panel.get(primer_name) or primer_to_panel.get(parent_name)
+                    p_panel = primer_to_panel.get(parent_name) or primer_to_panel.get(var_names[0])
                     if p_panel:
                         target_clean = target_id.replace("Synth", "")
                         panel_clean = p_panel.replace("Synth", "")
@@ -68,26 +72,38 @@ def generate_verdict(
                             break
                 if occ is None:
                     occ = 0.0
-                
+
+                # Représentant des fractions pour le parent (moyenne ou premier)
+                f_list = [fractions[v] for v in var_names if v in fractions]
+                mean_free = float(np.mean([f.free for f in f_list])) if f_list else 1.0
+                dom_complex = f_list[0].dominant_complex if f_list else ""
+                dom_frac_pct = float(np.mean([f.dominant_fraction for f in f_list])) * 100 if f_list else 0.0
+                mean_inter = float(np.mean([f.heterodimer_inter for f in f_list])) if f_list else 0.0
+                mean_intra = float(np.mean([f.heterodimer_intra for f in f_list])) if f_list else 0.0
+                mean_homo = float(np.mean([f.homodimer for f in f_list])) if f_list else 0.0
+
                 # Moins de 10% d'occupation = amorce d'initiation en difficulté
                 if occ < 0.1 and parent_name not in loop_primer_parents:
                     is_crit = occ < 0.01
-                    
+
                     # Déterminer la cause dominante
-                    if f.free < 0.1:
-                        dom_frac_pct = f.dominant_fraction * 100
-                        if f.heterodimer_inter > f.homodimer and f.heterodimer_inter > f.heterodimer_intra:
-                            cause = f"Hybridation croisée inter-jeux séquestrant {primer_name} à {dom_frac_pct:.1f}% dans {f.dominant_complex}."
+                    if mean_free < 0.1:
+                        if mean_inter > mean_homo and mean_inter > mean_intra:
+                            cause = f"Hybridation croisée inter-jeux séquestrant {parent_name} à {dom_frac_pct:.1f}% dans {dom_complex}."
                         else:
-                            cause = f"Séquestration de {primer_name} à {dom_frac_pct:.1f}% dans {f.dominant_complex}."
+                            cause = f"Séquestration de {parent_name} à {dom_frac_pct:.1f}% dans {dom_complex}."
                     else:
-                        if site_name not in occupations and not any(k.startswith(f"{parent_name}@") or k.startswith(f"{parent_name}_") for k in occupations):
+                        has_site = (site_name in occupations or any(k.startswith(f"{parent_name}@") or k.startswith(f"{parent_name}_") for k in occupations))
+                        if not has_site or occ == 0.0:
                             cause = "Site absent de la cible ou amorce non appariée."
                         else:
-                            cause = f"Inaccessibilité du site cible pour {primer_name} (barrière d'ouverture structurale ou thermodynamique défavorable)."
-                        
+                            if len(var_names) > 1:
+                                cause = f"Inaccessibilité du site cible ou dilution dégénérée ({len(var_names)} variantes au panel, conc. utile fractionnée)."
+                            else:
+                                cause = f"Inaccessibilité du site cible pour {parent_name} (barrière d'ouverture structurale ou thermodynamique défavorable)."
+
                     issues.append(PrimerIssue(
-                        primer_name=primer_name,
+                        primer_name=parent_name,
                         target_site=target_id,
                         occupation=occ,
                         cause=cause,
