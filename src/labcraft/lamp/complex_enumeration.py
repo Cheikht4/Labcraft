@@ -1,6 +1,9 @@
 """Exhaustive complex enumeration / Énumération exhaustive des complexes.
 
-Génère toutes les interactions bimoléculaires pour un panel de primers.
+Génère toutes les interactions bimoléculaires pour un panel de primers (monomères,
+dimères, et complexes amorce-cible résolus conjointement ou séparément).
+Generates all bimolecular interactions for a primer panel (monomers, dimers, and
+primer-target complexes resolved jointly or separately).
 """
 from __future__ import annotations
 
@@ -9,7 +12,7 @@ import warnings
 import numpy as np
 
 from dataclasses import dataclass
-from typing import Sequence, List, Tuple, Dict
+from typing import Sequence, List, Tuple, Dict, Optional, Union
 from labcraft.lamp.domains import PhysicalPrimer, PrimerRole, _find_iupac_substring
 from labcraft.lamp.stoichiometry import ConcentrationProfile, LAMP_DEFAULT_PROFILE
 from labcraft.target.unfolding import calc_unfolding_penalty
@@ -25,28 +28,24 @@ class ComplexInfo:
 
 def enumerate_complexes(
     primers: List[PhysicalPrimer],
-    target_seq: str,
-    backend: DuplexEnergyBackend,
-    profile: ConcentrationProfile = LAMP_DEFAULT_PROFILE,
+    target_seq: Optional[Union[str, Dict[str, str]]] = None,
+    backend: DuplexEnergyBackend = None,
+    profile: Union[ConcentrationProfile, Dict[str, ConcentrationProfile]] = LAMP_DEFAULT_PROFILE,
     temp_celsius: float = 65.0,
     mon_molar: float | None = None,
     buffer: dict | None = None,
     unfolding_window: int = 150
-) -> Tuple[EquilibriumProblem, List[str], List[str], Dict[str, float]]:
+) -> Tuple[EquilibriumProblem, List[str], List[str], Dict[str, Any]]:
     """Énumère toutes les espèces et génère le problème d'équilibre.
-    
-    1. Espèces de base = chaque amorce + sites cibles identifiés.
-    2. Monomères libres (structurés en épingle).
-    3. Dimères d'amorces (oligo entier vs oligo entier).
-    4. Complexes amorce-cible (domaine de liaison vs cible).
-    
+
+    Supporte une cible unique (chaîne) ou un dictionnaire multi-cibles ({t_id: t_seq})
+    résolu conjointement dans le même système d'équilibre couplé.
+    Supports a single target (str) or a multi-target dict ({t_id: t_seq})
+    resolved jointly within the same coupled equilibrium system.
+
     Returns:
         (EquilibriumProblem, noms_des_especes, noms_des_complexes, unfolding_penalties)
     """
-    # 1. Identifier les sites cibles (et gérer les chevauchements)
-    target_sites = []
-    primer_to_site = {}
-    
     backend_kwargs = {}
     if buffer:
         backend_kwargs = {
@@ -57,108 +56,132 @@ def enumerate_complexes(
             'dntp_mm': buffer.get('dntp_mM', 0.0)
         }
 
-    if target_seq:
-        target_seq_upper = target_seq.upper()
-        target_rc = _revcomp(target_seq_upper)
-        
+    # Normalisation du dictionnaire des cibles
+    # Normalization of targets dict
+    targets_dict: Dict[str, str] = {}
+    is_multi_target = False
+    if isinstance(target_seq, dict):
+        targets_dict = {k: v for k, v in target_seq.items() if v}
+        is_multi_target = len(targets_dict) > 1
+    elif isinstance(target_seq, str) and target_seq.strip():
+        targets_dict = {"": target_seq.strip()}
+
+    # 1. Identifier les sites cibles sur chaque cible
+    # 1. Identify target sites across all targets
+    target_sites: List[Dict[str, Any]] = []
+
+    for t_id, raw_seq in targets_dict.items():
+        clean_target = re.sub(r'[^A-Za-z]', '', raw_seq.upper())
+        target_rc = _revcomp(clean_target)
+
         for p in primers:
-            match_start = _find_iupac_substring(p.binding_domain, target_seq_upper)
+            match_start = _find_iupac_substring(p.binding_domain, clean_target)
             strand = "+"
             if match_start == -1:
-                # Chercher sur le brin - (donc dans target_rc, mais il faut remaper les indices)
                 match_start = _find_iupac_substring(p.binding_domain, target_rc)
                 strand = "-"
-                
+
             if match_start != -1:
                 match_len = len(p.binding_domain)
                 if strand == "+":
                     start, end = match_start, match_start + match_len
                 else:
-                    # Si match sur le RC, l'indice 0 du RC est len - 1 du +.
-                    # rc_start .. rc_end (exclusif) correspond à len - rc_end .. len - rc_start
-                    start = len(target_seq) - (match_start + match_len)
-                    end = len(target_seq) - match_start
-                    
-                site_name = f"{p.name}_site"
+                    start = len(clean_target) - (match_start + match_len)
+                    end = len(clean_target) - match_start
+
+                if is_multi_target and t_id:
+                    site_name = f"{p.name}@{t_id}_site"
+                else:
+                    site_name = f"{p.name}_site"
+
                 target_sites.append({
                     "name": site_name,
+                    "target_id": t_id,
+                    "target_seq": clean_target,
+                    "primer_name": p.name,
                     "start": start,
                     "end": end,
                     "strand": strand
                 })
-                primer_to_site[p.name] = site_name
             else:
-                warnings.warn(f"Le domaine de liaison de {p.name} n'est pas trouvé sur la cible.")
+                if not is_multi_target:
+                    warnings.warn(f"Le domaine de liaison de {p.name} n'est pas trouvé sur la cible.")
 
-        # Détection de chevauchement stérique (Avertissement)
-        for i, s1 in enumerate(target_sites):
-            for j, s2 in enumerate(target_sites):
+        # Détection de chevauchement stérique par cible
+        sites_for_t = [s for s in target_sites if s.get("target_id") == t_id]
+        for i, s1 in enumerate(sites_for_t):
+            for j, s2 in enumerate(sites_for_t):
                 if i < j and s1["strand"] == s2["strand"]:
                     overlap = max(0, min(s1["end"], s2["end"]) - max(s1["start"], s2["start"]))
                     if overlap > 0:
-                        warnings.warn(f"Compétition stérique : {s1['name']} et {s2['name']} se chevauchent de {overlap} bases.")
-                    
+                        warnings.warn(f"Compétition stérique sur cible '{t_id}' : {s1['name']} et {s2['name']} se chevauchent de {overlap} bases.")
+
     # Espèces de base = amorces + sites cibles
     n_primers = len(primers)
     n_sites = len(target_sites)
     n_strands = n_primers + n_sites
-    
+
     strand_names = [p.name for p in primers] + [s["name"] for s in target_sites]
-    
+
     concentrations = np.zeros(n_strands)
     for i, p in enumerate(primers):
-        concentrations[i] = p.nominal_concentration if p.nominal_concentration is not None else profile.get_concentration(p.role)
-    for i in range(n_sites):
-        concentrations[n_primers + i] = profile.target
-        
-    complexes = []
-    
+        if isinstance(profile, dict):
+            # Prendre le premier profil disponible pour l'amorce
+            p_prof = next(iter(profile.values())) if profile else LAMP_DEFAULT_PROFILE
+        else:
+            p_prof = profile
+        concentrations[i] = p.nominal_concentration if p.nominal_concentration is not None else p_prof.get_concentration(p.role)
+
+    for i, s in enumerate(target_sites):
+        t_id = s.get("target_id", "")
+        if isinstance(profile, dict) and t_id in profile:
+            t_conc = profile[t_id].target
+        elif isinstance(profile, ConcentrationProfile):
+            t_conc = profile.target
+        else:
+            t_conc = LAMP_DEFAULT_PROFILE.target
+        concentrations[n_primers + i] = t_conc
+
+    complexes: List[ComplexInfo] = []
+
     # --- 2. Monomères libres ---
-    # Pour l'instant, on suppose que le backend peut calculer l'épingle d'un monomère,
-    # mais ViennaRNA est meilleur pour ça. 
-    # Pour respecter la matrice : l'énergie du monomère libre est souvent mise à 0 (état de référence).
-    # On va donc déclarer les monomères à 0.0 kcal/mol.
-    # Si on calcule une épingle forte, on met un delta_G d'épingle < 0.
-    # Mais le solveur Jalon 1 suppose que les composants de base sont les monomères déroulés (0.0).
     for i, p in enumerate(primers):
         stoich = [0] * n_strands
         stoich[i] = 1
-        # L'énergie de la forme libre est prise comme référence 0
-        # (les dimères seront calculés en relatif)
         complexes.append(ComplexInfo(f"{p.name}_free", stoich, 0.0))
-        
+
     for i, s in enumerate(target_sites):
         stoich = [0] * n_strands
         stoich[n_primers + i] = 1
         complexes.append(ComplexInfo(f"{s['name']}_free", stoich, 0.0))
-        
+
     # --- 3. Dimères d'amorces (Oligo entier vs Oligo entier) ---
     for i, p1 in enumerate(primers):
         for j, p2 in enumerate(primers):
-            if j < i: continue # On ne compte qu'une fois la paire
-            
+            if j < i:
+                continue
+
             try:
-                if i != j:
+                if i == j:
+                    res = backend.calc_homodimer(
+                        p1.sequence,
+                        temp_celsius=temp_celsius,
+                        lna_positions=p1.lna_positions,
+                        **backend_kwargs
+                    )
+                else:
                     res = backend.calc_heterodimer(
-                        p1.sequence, p2.sequence, 
-                        temp_celsius=temp_celsius, 
+                        p1.sequence, p2.sequence,
+                        temp_celsius=temp_celsius,
                         lna_positions_a=p1.lna_positions,
                         lna_positions_b=p2.lna_positions,
                         **backend_kwargs
                     )
-                else:
-                    res = backend.calc_homodimer(
-                        p1.sequence, 
-                        temp_celsius=temp_celsius, 
-                        lna_positions=p1.lna_positions,
-                        **backend_kwargs
-                    )
                 dg = res.dg_kcal
-            except ValueError as e:
-                import logging
-                logging.warning(f"Error calculating dimer {p1.name} - {p2.name}: {e}")
-                dg = 1.0 # Ignorer ce complexe
-            if dg < 0: # Ne retenir que les interactions stabilisantes
+            except Exception:
+                dg = 1.0
+
+            if dg < 0:
                 stoich = [0] * n_strands
                 stoich[i] += 1
                 stoich[j] += 1
@@ -166,121 +189,114 @@ def enumerate_complexes(
                 complexes.append(ComplexInfo(cname, stoich, dg))
 
     # --- 4. Complexes amorce-cible ---
-    unfolding_penalties = {}
-    
-    if target_seq:
-        for idx_p, p in enumerate(primers):
-            site_name = primer_to_site.get(p.name)
-            if not site_name:
-                continue
-                
-            site_idx = n_primers + next(k for k, s in enumerate(target_sites) if s["name"] == site_name)
-            site_info = next(s for s in target_sites if s["name"] == site_name)
-            
-            # Extract lna_positions for the binding domain only
-            offset = p.sequence.find(p.binding_domain)
-            bd_lna = tuple(pos - offset for pos in p.lna_positions if offset <= pos < offset + len(p.binding_domain)) if offset != -1 else ()
-            
-            # Extraire la séquence RÉELLE du génome
-            s0 = site_info["start"]
-            e0 = site_info["end"]
-            extracted_target = target_seq[s0:e0].upper()
-            
-            # Gestion des longueurs (fallback sur comportement précédent si longueur inattendue)
-            if len(extracted_target) != len(p.binding_domain):
-                warnings.warn(f"Longueur inattendue pour le site {site_name} (site={len(extracted_target)}, amorce={len(p.binding_domain)}). Fallback sur match parfait.")
-                res_hyb = backend.calc_duplex(
-                    p.binding_domain, _revcomp(p.binding_domain), 
-                    temp_celsius=temp_celsius, 
-                    lna_positions_a=bd_lna,
-                    lna_positions_b=(),
-                    **backend_kwargs
-                )
-                dg_hyb = res_hyb.dg_kcal
-                extensible = True
-                n_mismatches = 0
-            else:
-                # Orientation sous l'amorce (antiparallèle, gauche à droite = 5'->3' pour l'amorce, 3'->5' pour le template)
-                if site_info["strand"] == "+":
-                    # L'amorce s'hybride au brin -. La séquence du brin - sous l'amorce (lue 3'->5') est le complément exact de la cible extraite.
-                    bottom_under_top = "".join({'A':'T','T':'A','C':'G','G':'C'}.get(c, c) for c in extracted_target)
-                else:
-                    # L'amorce s'hybride au brin +. Le brin + sous l'amorce (lu 3'->5') est l'inverse exact de la cible extraite.
-                    bottom_under_top = extracted_target[::-1]
-                
-                # Résolution des IUPAC
-                from labcraft.lamp.domains import IUPAC_MATCHABLE
-                resolved_bottom = []
-                for b_prim, b_targ in zip(p.binding_domain, bottom_under_top):
-                    comp = {'A': 'T', 'T': 'A', 'C': 'G', 'G': 'C'}
-                    set_p = IUPAC_MATCHABLE.get(b_prim, set())
-                    # b_targ is on the template strand
-                    set_t_comp = set(comp.get(base, base) for base in IUPAC_MATCHABLE.get(b_targ, set([b_targ])))
-                    if set_p and set_t_comp and set_p.intersection(set_t_comp):
-                        shared = list(set_p.intersection(set_t_comp))[0]
-                        resolved_bottom.append(comp[shared])
-                    else:
-                        resolved_bottom.append(b_targ)
-                bottom_under_top = "".join(resolved_bottom)
-                
-                # Comptage exact des mésappariements et énergie
-                from labcraft.thermo.mismatch import calculate_hybridization_dg
-                dg_hyb, ddg_mismatch = calculate_hybridization_dg(
-                    p.binding_domain, bottom_under_top, temp_celsius, backend, bd_lna=bd_lna, **backend_kwargs
-                )
-                
-                comp = {'A': 'T', 'T': 'A', 'C': 'G', 'G': 'C'}
-                n_mismatches = sum(1 for a, b in zip(p.binding_domain, bottom_under_top) if comp.get(a, '') != b)
+    unfolding_penalties: Dict[str, Any] = {}
 
-                # Évaluation de l'extensibilité 3'
-                from labcraft.diagnostics.enzyme import get_enzyme
-                from labcraft.thermo.mismatch import three_prime_extensible
-                # Fallback to Bst2.0 if not provided
-                enzyme = backend_kwargs.get("enzyme", get_enzyme("Bst2.0"))
-                extensible, first_bad_pos, severity = three_prime_extensible(p.binding_domain, bottom_under_top, enzyme)
-                
-                site_info["mismatches"] = n_mismatches
-                site_info["extensible"] = extensible
-            
-            # Le calcul de l'accessibilité
-            if p.role in (PrimerRole.LF, PrimerRole.LB):
-                dg_unfold = 0.0
+    for site_idx_rel, site_info in enumerate(target_sites):
+        p_name = site_info["primer_name"]
+        idx_p = next(i for i, p in enumerate(primers) if p.name == p_name)
+        p = primers[idx_p]
+
+        site_idx = n_primers + site_idx_rel
+        site_name = site_info["name"]
+        t_seq = site_info["target_seq"]
+        t_id = site_info.get("target_id", "")
+
+        offset = p.sequence.find(p.binding_domain)
+        bd_lna = tuple(pos - offset for pos in p.lna_positions if offset <= pos < offset + len(p.binding_domain)) if offset != -1 else ()
+
+        s0 = site_info["start"]
+        e0 = site_info["end"]
+        extracted_target = t_seq[s0:e0].upper()
+
+        if len(extracted_target) != len(p.binding_domain):
+            warnings.warn(f"Longueur inattendue pour le site {site_name} (site={len(extracted_target)}, amorce={len(p.binding_domain)}). Fallback sur match parfait.")
+            res_hyb = backend.calc_duplex(
+                p.binding_domain, _revcomp(p.binding_domain),
+                temp_celsius=temp_celsius,
+                lna_positions_a=bd_lna,
+                lna_positions_b=(),
+                **backend_kwargs
+            )
+            dg_hyb = res_hyb.dg_kcal
+            extensible = True
+            n_mismatches = 0
+        else:
+            if site_info["strand"] == "+":
+                bottom_under_top = "".join({'A': 'T', 'T': 'A', 'C': 'G', 'G': 'C'}.get(c, c) for c in extracted_target)
             else:
-                W = unfolding_window
-                s0 = site_info["start"]
-                e0 = site_info["end"]
-                win_start = max(0, s0 - W)
-                win_end = min(len(target_seq), e0 + W)
-                target_window = target_seq[win_start:win_end]
-                local_start = s0 - win_start
-                local_end = e0 - win_start
-    
-                dg_unfold = calc_unfolding_penalty(
-                    target_window, local_start, local_end, 
-                    temp_celsius=temp_celsius, mon_molar=mon_molar
-                )
-                
-            unfolding_penalties[site_name] = {
-                "dg_unfold": dg_unfold,
-                "mismatches": site_info.get("mismatches", 0),
-                "extensible": site_info.get("extensible", True)
-            }
-            
-            # Couplage
-            dg_eff = dg_hyb + dg_unfold
-            
-            # Application du veto ARMS 3'
-            # Si le 3' n'est pas extensible, le complexe ne peut pas initier l'amplification.
-            if extensible and dg_eff < 0:
-                stoich = [0] * n_strands
-                stoich[idx_p] = 1
-                stoich[site_idx] = 1
-                complexes.append(ComplexInfo(f"{p.name}_on_{site_name}", stoich, dg_eff))
+                bottom_under_top = extracted_target[::-1]
+
+            from labcraft.lamp.domains import IUPAC_MATCHABLE
+            resolved_bottom = []
+            for b_prim, b_targ in zip(p.binding_domain, bottom_under_top):
+                comp = {'A': 'T', 'T': 'A', 'C': 'G', 'G': 'C'}
+                set_p = IUPAC_MATCHABLE.get(b_prim, set())
+                set_t_comp = set(comp.get(base, base) for base in IUPAC_MATCHABLE.get(b_targ, set([b_targ])))
+                if set_p and set_t_comp and set_p.intersection(set_t_comp):
+                    shared = list(set_p.intersection(set_t_comp))[0]
+                    resolved_bottom.append(comp[shared])
+                else:
+                    resolved_bottom.append(b_targ)
+            bottom_under_top = "".join(resolved_bottom)
+
+            from labcraft.thermo.mismatch import calculate_hybridization_dg, three_prime_extensible
+            dg_hyb, ddg_mismatch = calculate_hybridization_dg(
+                p.binding_domain, bottom_under_top, temp_celsius, backend, bd_lna=bd_lna, **backend_kwargs
+            )
+
+            comp = {'A': 'T', 'T': 'A', 'C': 'G', 'G': 'C'}
+            n_mismatches = sum(1 for a, b in zip(p.binding_domain, bottom_under_top) if comp.get(a, '') != b)
+
+            from labcraft.diagnostics.enzyme import get_enzyme
+            enzyme = backend_kwargs.get("enzyme", get_enzyme("Bst2.0"))
+            extensible, first_bad_pos, severity = three_prime_extensible(p.binding_domain, bottom_under_top, enzyme)
+
+            site_info["mismatches"] = n_mismatches
+            site_info["extensible"] = extensible
+
+        # Accessibilité
+        if p.role in (PrimerRole.LF, PrimerRole.LB):
+            dg_unfold = 0.0
+        else:
+            W = unfolding_window
+            win_start = max(0, s0 - W)
+            win_end = min(len(t_seq), e0 + W)
+            target_window = t_seq[win_start:win_end]
+            local_start = s0 - win_start
+            local_end = e0 - win_start
+
+            dg_unfold = calc_unfolding_penalty(
+                target_window, local_start, local_end,
+                temp_celsius=temp_celsius, mon_molar=mon_molar
+            )
+
+        pen_data = {
+            "dg_unfold": dg_unfold,
+            "mismatches": site_info.get("mismatches", 0),
+            "extensible": site_info.get("extensible", True)
+        }
+
+        if is_multi_target and t_id:
+            if t_id not in unfolding_penalties:
+                unfolding_penalties[t_id] = {}
+            unfolding_penalties[t_id][site_name] = pen_data
+            # Alias sans @t_id pour compatibilité
+            unfolding_penalties[t_id][f"{p.name}_site"] = pen_data
+        else:
+            unfolding_penalties[site_name] = pen_data
+
+        dg_eff = dg_hyb + dg_unfold
+
+        if extensible and dg_eff < 0:
+            stoich = [0] * n_strands
+            stoich[idx_p] = 1
+            stoich[site_idx] = 1
+            complexes.append(ComplexInfo(f"{p.name}_on_{site_name}", stoich, dg_eff))
 
     stoich_matrix = np.array([c.stoichiometry for c in complexes], dtype=np.float64)
     dg_vector = np.array([c.delta_g for c in complexes], dtype=np.float64)
     complex_names = [c.name for c in complexes]
-    
+
     prob = EquilibriumProblem(
         n_strands=n_strands,
         n_complexes=len(complexes),
@@ -290,6 +306,7 @@ def enumerate_complexes(
         temperature_kelvin=273.15 + temp_celsius
     )
     return prob, strand_names, complex_names, unfolding_penalties
+
 
 def _revcomp(seq: str) -> str:
     complement = {'A': 'T', 'T': 'A', 'C': 'G', 'G': 'C'}

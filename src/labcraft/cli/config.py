@@ -101,7 +101,8 @@ from labcraft.buffer.monovalent import get_total_monovalent
 
 def build_engine_from_config(
     config: PanelConfig, 
-    targets: Dict[str, str]
+    targets: Dict[str, str],
+    max_variants: int = 64
 ) -> Tuple[List[PhysicalPrimer], Dict[str, str], DuplexEnergyBackend, Dict[str, Any], float, PolymeraseProfile, float, Dict[str, ConcentrationProfile]]:
     """Construit les structures internes à partir d'une configuration.
     
@@ -187,7 +188,7 @@ def build_engine_from_config(
             
             from labcraft.lamp.domains import expand_degenerate
             from labcraft.thermo.lna import parse_lna_sequence
-            variants = expand_degenerate(seq)
+            variants = expand_degenerate(seq, max_variants=max_variants)
             variant_conc = total_conc / len(variants)
             
             # Enregistrer le nom parent dans primer_to_panel (pour les cas sans dégénérescence)
@@ -288,5 +289,14 @@ def build_engine_from_config(
             'dntp_mm': 0.0
         }
         # mon_molar reste None pour ne pas perturber calc_unfolding_penalty (qui utilise 1M par défaut)
+        
+    if len(primers) > 40:
+        import warnings
+        total_interactions = len(primers) * (len(primers) + 1) // 2
+        warnings.warn(
+            f"Le panel contient {len(primers)} espèces d'amorces après développement des dégénérescences. "
+            f"Le calcul des dimères et de l'équilibre impliquera un coût combinatoire élevé ({total_interactions} interactions bimoléculaires).",
+            UserWarning
+        )
         
     return primers, primer_to_panel, backend, backend_kwargs, mon_molar, enzyme, temp_celsius, profiles

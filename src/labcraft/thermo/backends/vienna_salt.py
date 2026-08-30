@@ -136,6 +136,7 @@ class ViennaSaltShiftBackend(DuplexEnergyBackend):
         self.vienna = ViennaRNABackend()
         self.salt_model = salt_model
         self.default_ct_molar = default_ct_molar
+        self._cache: Dict[Tuple, DuplexResult] = {}
         
     def _apply_shift(self, res: DuplexResult, seq: str, ct_molar: float, kwargs: dict, lna_positions: tuple[int, ...] = ()) -> DuplexResult:
         if not res.structure or '(' not in res.structure:
@@ -198,6 +199,9 @@ class ViennaSaltShiftBackend(DuplexEnergyBackend):
         )
 
     def calc_heterodimer(self, seq1: str, seq2: str, *, temp_celsius: float = 65.0, **kwargs) -> DuplexResult:
+        cache_key = ("hetero", seq1, seq2, temp_celsius, tuple(sorted((k, tuple(v) if isinstance(v, (list, tuple)) else v) for k, v in kwargs.items())))
+        if cache_key in self._cache:
+            return self._cache[cache_key]
         res = self.vienna.calc_heterodimer(seq1, seq2, temp_celsius=temp_celsius, **kwargs)
         ct = kwargs.get('ct_molar', self.default_ct_molar)
         if ct is None: ct = self.default_ct_molar
@@ -205,22 +209,34 @@ class ViennaSaltShiftBackend(DuplexEnergyBackend):
         lna_pos_b = kwargs.get('lna_positions_b', ())
         # Remap lna_positions on concatenated sequence 'seq1seq2' (without &)
         mapped_lna = list(lna_pos_a) + [pos + len(seq1) for pos in lna_pos_b]
-        return self._apply_shift(res, f"{seq1}&{seq2}", ct, kwargs, tuple(mapped_lna))
+        shifted = self._apply_shift(res, f"{seq1}&{seq2}", ct, kwargs, tuple(mapped_lna))
+        self._cache[cache_key] = shifted
+        return shifted
         
     def calc_homodimer(self, seq: str, *, temp_celsius: float = 65.0, **kwargs) -> DuplexResult:
+        cache_key = ("homo", seq, temp_celsius, tuple(sorted((k, tuple(v) if isinstance(v, (list, tuple)) else v) for k, v in kwargs.items())))
+        if cache_key in self._cache:
+            return self._cache[cache_key]
         res = self.vienna.calc_homodimer(seq, temp_celsius=temp_celsius, **kwargs)
         ct = kwargs.get('ct_molar', self.default_ct_molar)
         if ct is None: ct = self.default_ct_molar
         lna_pos = kwargs.get('lna_positions', ())
         mapped_lna = list(lna_pos) + [pos + len(seq) for pos in lna_pos]
-        return self._apply_shift(res, f"{seq}&{seq}", ct, kwargs, tuple(mapped_lna))
+        shifted = self._apply_shift(res, f"{seq}&{seq}", ct, kwargs, tuple(mapped_lna))
+        self._cache[cache_key] = shifted
+        return shifted
         
     def calc_hairpin(self, seq: str, *, temp_celsius: float = 65.0, **kwargs) -> DuplexResult:
+        cache_key = ("hairpin", seq, temp_celsius, tuple(sorted((k, tuple(v) if isinstance(v, (list, tuple)) else v) for k, v in kwargs.items())))
+        if cache_key in self._cache:
+            return self._cache[cache_key]
         res = self.vienna.calc_hairpin(seq, temp_celsius=temp_celsius, **kwargs)
         ct = kwargs.get('ct_molar', self.default_ct_molar)
         if ct is None: ct = self.default_ct_molar
         lna_pos = kwargs.get('lna_positions', ())
-        return self._apply_shift(res, seq, ct, kwargs, tuple(lna_pos))
+        shifted = self._apply_shift(res, seq, ct, kwargs, tuple(lna_pos))
+        self._cache[cache_key] = shifted
+        return shifted
         
     def calc_duplex(self, seq1: str, seq2: str, *, temp_celsius: float = 65.0, **kwargs) -> DuplexResult:
         return self.calc_heterodimer(seq1, seq2, temp_celsius=temp_celsius, **kwargs)

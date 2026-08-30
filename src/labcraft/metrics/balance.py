@@ -1,3 +1,5 @@
+"""Multiplex balance metrics / Métriques d'équilibre et de balance multiplexe.
+"""
 from typing import Dict, Tuple, List, Optional
 import numpy as np
 
@@ -14,12 +16,11 @@ def calculate_multiplex_balance(
     
     Returns:
         panel_summaries: Dict avec pour chaque panel:
-            - mean_occupation: occupation moyenne d'initiation
-            - min_occupation: occupation minimale
+            - mean_occupation: occupation moyenne d'initiation (ou None si non analysé)
+            - min_occupation: occupation minimale (ou None si non analysé)
             - limiting_primer: nom de l'amorce limitante
             - mean_free: fraction libre moyenne des amorces du panel
-        cv: Coefficient de variation inter-panels (std/mean), ou None si < 2 panels.
-            Proche de 0 = panels équilibrés ; croissant = déséquilibre.
+        cv: Coefficient de variation inter-panels (std/mean), ou None si < 2 panels ou cibles non analysées.
     """
     if loop_primer_parents is None:
         loop_primer_parents = set()
@@ -29,61 +30,70 @@ def calculate_multiplex_balance(
     panel_summaries = {}
     panel_means = []
     
-    for panel in panels:
-        # Extraire les amorces d'initiation de ce panel et leurs occupations
-        # On peut trouver l'occupation via target_occupations[panel][site_name]
+    for panel in sorted(panels):
+        # Vérifier si la cible/panel a été analysée dans target_occupations
+        target_occs_for_panel = target_occupations.get(panel)
+        # Si panel porte 'SynthA' ou 'A'
+        if target_occs_for_panel is None:
+            for t_k, t_v in target_occupations.items():
+                if t_k == panel or t_k.replace("Synth", "") == panel.replace("Synth", ""):
+                    target_occs_for_panel = t_v
+                    break
+
         initiation_occs = {}
         panel_free_fracs = []
         
         for p_name, p_panel in primer_to_panel.items():
             if p_panel == panel:
-                # Résoudre le parent pour le lookup des fractions libres
-                # Resolve parent for free fractions lookup
                 free_val = free_fractions.get(p_name, 0.0)
                 if free_val == 0.0 and '#' in p_name:
                     free_val = free_fractions.get(p_name.split('#')[0], 0.0)
                 panel_free_fracs.append(free_val)
                 
-                # Résoudre le parent pour le lookup du site cible
                 parent_name = p_name.split('#')[0] if '#' in p_name else p_name
                 
-                # Vérifier si c'est une amorce d'initiation
                 if parent_name not in loop_primer_parents:
-                    # Résoudre le parent pour le lookup du site cible
-                    # Resolve parent for target site lookup
-                    parent_name = p_name.split('#')[0] if '#' in p_name else p_name
                     site_name = f"{parent_name}_site"
-                    occ = target_occupations.get(panel, {}).get(site_name, 0.0)
-                    # Éviter les doublons : on ne garde qu'une entrée par parent
-                    # Avoid duplicates: keep only one entry per parent
-                    if parent_name not in initiation_occs:
+                    occ = None
+                    if target_occs_for_panel is not None:
+                        occ = target_occs_for_panel.get(site_name)
+                        if occ is None:
+                            for k, v in target_occs_for_panel.items():
+                                if k == site_name or k.startswith(f"{parent_name}@") or k.startswith(f"{parent_name}_"):
+                                    occ = v
+                                    break
+
+                    if occ is not None and parent_name not in initiation_occs:
                         initiation_occs[parent_name] = occ
                     
-        if initiation_occs:
-            mean_occ = np.mean(list(initiation_occs.values()))
-            min_occ = min(initiation_occs.values())
-            limiting_primer = min(initiation_occs, key=initiation_occs.get)
+        mean_free = float(np.mean(panel_free_fracs)) if panel_free_fracs else 0.0
+
+        if target_occs_for_panel is None or not initiation_occs:
+            # Panel ou cible non analysé
+            panel_summaries[panel] = {
+                "mean_occupation": None,
+                "min_occupation": None,
+                "limiting_primer": "Non analysé",
+                "mean_free": mean_free
+            }
         else:
-            mean_occ = 0.0
-            min_occ = 0.0
-            limiting_primer = "N/A"
+            mean_occ = float(np.mean(list(initiation_occs.values())))
+            min_occ = float(min(initiation_occs.values()))
+            limiting_primer = min(initiation_occs, key=initiation_occs.get)
             
-        mean_free = np.mean(panel_free_fracs) if panel_free_fracs else 0.0
-        
-        panel_summaries[panel] = {
-            "mean_occupation": mean_occ,
-            "min_occupation": min_occ,
-            "limiting_primer": limiting_primer,
-            "mean_free": mean_free
-        }
-        
-        panel_means.append(mean_occ)
+            panel_summaries[panel] = {
+                "mean_occupation": mean_occ,
+                "min_occupation": min_occ,
+                "limiting_primer": limiting_primer,
+                "mean_free": mean_free
+            }
+            panel_means.append(mean_occ)
         
     cv = None
-    if len(panel_means) > 1:
-        mean_all = np.mean(panel_means)
+    if len(panel_means) == len(panels) and len(panel_means) > 1:
+        mean_all = float(np.mean(panel_means))
         if mean_all > 0:
-            std_all = np.std(panel_means)
+            std_all = float(np.std(panel_means))
             cv = std_all / mean_all
         else:
             cv = 0.0

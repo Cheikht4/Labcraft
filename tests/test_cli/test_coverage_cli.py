@@ -381,9 +381,9 @@ def test_veto_3p_reachable_single_command(tmp_path: Path):
     from labcraft.cli.parsers import read_multi_fasta
     ref_seq = read_multi_fasta(str(genome_path))[0][1]
     
-    # F3 se situe en pos 5473 sur M93130.1: CTCGTGTAGGAATGGGAG (18 nt)
-    # Mutons la base terminale en 3' (position 5473 + 17 = 5490) de G vers T
-    f3_pos = 5473
+    # F3 se situe en pos 5420 sur M93130.1: CTCGTGTAGGAATGGGAG (18 nt)
+    # Mutons la base terminale en 3' (position 5420 + 17 = 5437) de G vers T
+    f3_pos = 5420
     f3_term_pos = f3_pos + 17
     assert ref_seq[f3_term_pos] == 'G'
     mutated_seq = ref_seq[:f3_term_pos] + 'T' + ref_seq[f3_term_pos + 1:]
@@ -424,8 +424,8 @@ def test_absent_site_when_heavily_mutated(tmp_path: Path):
     from labcraft.cli.parsers import read_multi_fasta
     ref_seq = read_multi_fasta(str(genome_path))[0][1]
     
-    # Mutons 4 bases dans le site F3 (pos 5473)
-    f3_pos = 5473
+    # Mutons 4 bases dans le site F3 (pos 5420)
+    f3_pos = 5420
     mutated_chars = list(ref_seq)
     mutated_chars[f3_pos] = 'A' if ref_seq[f3_pos] != 'A' else 'T'
     mutated_chars[f3_pos + 1] = 'A' if ref_seq[f3_pos + 1] != 'A' else 'T'
@@ -463,10 +463,10 @@ def test_loop_primer_3prime_mutation_remains_amplifiable(tmp_path: Path):
     from labcraft.cli.parsers import read_multi_fasta
     ref_seq = read_multi_fasta(str(genome_path))[0][1]
     
-    # LF est sur brin - en pos 5589 (18 nt). Mutons sa base terminale 3'
+    # LF est sur brin - en pos 5536 (18 nt). Mutons sa base terminale 3'
     # LF primer = TGAATTCCAYGAGCGTTC
     # Sur génome (brin +), le 3' terminal de LF correspond au complément inverse de la base 5' du site ou 3' du primer
-    lf_pos = 5589
+    lf_pos = 5536
     mutated_chars = list(ref_seq)
     mutated_chars[lf_pos] = 'A' if ref_seq[lf_pos] != 'A' else 'T'
     

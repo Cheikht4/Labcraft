@@ -19,6 +19,10 @@ class RiskItem:
     arrow_metrics: dict = field(default_factory=dict)
     is_blocked_veto: bool = False
 
+    @property
+    def is_amplifiable(self) -> bool:
+        return self.severity >= 10.0
+
 def evaluate_risks(
     complex_names: List[str],  
     concentrations: List[float], 

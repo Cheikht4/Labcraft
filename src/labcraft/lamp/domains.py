@@ -37,7 +37,7 @@ IUPAC_EXPANSION = {
     'H': ['A', 'C', 'T'], 'V': ['A', 'C', 'G'], 'N': ['A', 'C', 'G', 'T']
 }
 
-def expand_degenerate(seq: str, max_variants: int = 16) -> list[str]:
+def expand_degenerate(seq: str, max_variants: int = 64) -> list[str]:
     """
     Développe une séquence avec des codes IUPAC dégénérés en toutes ses séquences concrètes.
     Lève une ValueError si le nombre de variants dépasse max_variants.
@@ -50,7 +50,12 @@ def expand_degenerate(seq: str, max_variants: int = 16) -> list[str]:
     
     total_variants = math.prod(len(opts) for opts in options)
     if total_variants > max_variants:
-        raise ValueError(f"La séquence {seq} générerait {total_variants} variants (limite: {max_variants}).")
+        deg_pos = sum(1 for opts in options if len(opts) > 1)
+        raise ValueError(
+            f"L'amorce (séquence {seq}) possède {deg_pos} positions dégénérées et générerait "
+            f"{total_variants} variants (limite configurée: {max_variants}). "
+            f"Augmentez la limite avec l'option --max-variants."
+        )
         
     return ["".join(p) for p in itertools.product(*options)]
 

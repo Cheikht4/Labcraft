@@ -45,12 +45,14 @@ def read_multi_fasta(filepath: str) -> List[Tuple[str, str]]:
         if line.startswith(">"):
             save_current()
             # Check for one-line format: >Header Sequence
-            parts = line[1:].split(None, 1)
+            parts = line[1:].strip().split(None, 1)
             current_header = parts[0]
             current_seq_parts = []
             if len(parts) > 1:
-                # Sequence is on the same line
-                current_seq_parts.append(parts[1])
+                # Sequence is on the same line only if it is a single valid IUPAC token without spaces
+                rest = parts[1].strip()
+                if " " not in rest and "\t" not in rest and re.match(r'^[A-Za-z]+$', rest) and len(rest) > 3 and set(rest.upper()).issubset(set("ACGTURYMKSWBDHVN")):
+                    current_seq_parts.append(rest)
         else:
             if current_header is None:
                 # If no header yet, maybe it's just raw sequence or a bad file
