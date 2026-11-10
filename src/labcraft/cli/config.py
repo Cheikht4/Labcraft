@@ -9,8 +9,8 @@ class BufferConfig(BaseModel):
     na_mM: float = 50.0
     k_mM: float = 0.0
     tris_mM: float = 0.0
-    mg_mM: float = 0.0
-    dntp_mM: float = 0.0
+    mg_mM: float = 8.0
+    dntp_mM: float = 1.4
     
     model_config = {"extra": "forbid"}
 
@@ -95,7 +95,7 @@ from labcraft.lamp.stoichiometry import ConcentrationProfile, target_copies_to_m
 from labcraft.thermo.backends.vienna import ViennaRNABackend
 from labcraft.diagnostics.enzyme import get_enzyme, PolymeraseProfile
 from labcraft.thermo.backends.base import DuplexEnergyBackend
-from labcraft.thermo.salt import UnifiedSaltModel, SaltCorrectedBackend, sodium_equivalent_for_folding
+from labcraft.thermo.salt import UnifiedSaltModel, sodium_equivalent_for_folding
 from labcraft.thermo.backends.vienna_salt import ViennaSaltShiftBackend
 from labcraft.buffer.monovalent import get_total_monovalent
 
@@ -105,20 +105,21 @@ def build_engine_from_config(
     max_variants: int = 64
 ) -> Tuple[List[PhysicalPrimer], Dict[str, str], DuplexEnergyBackend, Dict[str, Any], float, PolymeraseProfile, float, Dict[str, ConcentrationProfile]]:
     """Construit les structures internes à partir d'une configuration.
+    Builds internal engine components from a configuration.
     
     Returns:
-        primers: Liste d'amorces physiques.
-        primer_to_panel: Dictionnaire associant chaque nom d'amorce à l'ID de sa cible.
-        backend: Backend thermodynamique (avec ou sans sel).
-        backend_kwargs: Dictionnaire des paramètres de sel (na_mm, mg_mm, etc.) si applicable.
-        mon_molar: Molarité des monovalents si applicable.
-        enzyme: Profil de la polymérase.
-        temp_celsius: Température de l'expérience.
-        profiles: Dictionnaire des profils de concentration par cible.
+        primers: Liste d'amorces physiques / List of physical primers.
+        primer_to_target: Dictionnaire associant chaque nom d'amorce et de variant à l'ID de sa cible / Mapping from primer and variant name to target ID.
+        backend: Backend thermodynamique (avec ou sans sel) / Thermodynamic backend (with or without salt).
+        backend_kwargs: Dictionnaire des paramètres de sel (na_mm, mg_mm, etc.) si applicable / Salt parameter kwargs if applicable.
+        mon_molar: Molarité des monovalents si applicable / Monovalent molarity if applicable.
+        enzyme: Profil de la polymérase / Polymerase profile.
+        temp_celsius: Température de l'expérience / Experiment temperature.
+        profiles: Dictionnaire des profils de concentration par cible / Concentration profiles per target.
     """
     temp_celsius = config.experiment.temperature_C
     
-    # 1. Tampon Salin
+    # 1. Tampon Salin / Salt Buffer
     buffer_conf = config.experiment.buffer
     backend_kwargs = {}
     if buffer_conf:
@@ -141,12 +142,12 @@ def build_engine_from_config(
     # 2. Enzyme
     enzyme = get_enzyme(config.experiment.enzyme)
     
-    # 3. Amorces et profils de concentration
+    # 3. Amorces et profils de concentration / Primers and concentration profiles
     primers = []
-    primer_to_panel = {}
+    primer_to_target = {}
     profiles = {}
     
-    # Création du dictionnaire de copies par cible
+    # Création du dictionnaire de copies par cible / Target copies dictionary
     target_copies = {t.id: t.copies_per_uL for t in config.targets}
     
     for pset in config.primer_sets:
@@ -158,28 +159,28 @@ def build_engine_from_config(
         target_molar = target_copies_to_molar(copies_uL)
         
         # On garde une trace des concentrations pour le profile de cette cible
+        # Track concentrations for this target's profile
         conc_map = {}
         
         for role_name, p_data in p_dict.items():
-            name = f"{role_name}_{panel_id.replace('Synth', '')}"
+            name = f"{role_name}_{panel_id}"
             seq = p_data.seq
-            primer_to_panel[name] = panel_id
+            primer_to_target[name] = t_id
             
             try:
                 role_enum = PrimerRole[role_name.upper()]
             except KeyError:
                 role_enum = PrimerRole.F3
                 
-            
-            
             # Détermination de la concentration nominale totale de l'amorce
+            # Determine nominal total concentration of the primer
             total_conc = p_data.conc_uM * 1e-6 if p_data.conc_uM is not None else (
                 1.6e-6 if role_name.upper() in ("FIP", "BIP") else
                 0.2e-6 if role_name.upper() in ("F3", "B3", "PROBE") else
                 0.8e-6
             )
             
-            # Gestion du blocage 3'
+            # Gestion du blocage 3' / Handle 3' blocking
             is_blocked = p_data.blocked_3prime
             if p_data.mod_3prime and p_data.mod_3prime.upper() in ['BHQ', 'TAMRA', 'QUENCHER', 'DSPACER', 'C3', 'INVDT', 'PHOS', 'DDC']:
                 is_blocked = True
@@ -191,22 +192,17 @@ def build_engine_from_config(
             variants = expand_degenerate(seq, max_variants=max_variants)
             variant_conc = total_conc / len(variants)
             
-            # Enregistrer le nom parent dans primer_to_panel (pour les cas sans dégénérescence)
-            # Register parent name in primer_to_panel (for non-degenerate cases)
-            primer_to_panel[name] = panel_id
-            
-            # Parse la séquence parente pour localiser les sous-domaines par position
-            # Parse the parent sequence to locate sub-domains by position
-            parent_bare, _ = parse_lna_sequence(seq)
+            # Enregistrer le nom parent dans primer_to_target
+            # Register parent name in primer_to_target
+            primer_to_target[name] = t_id
             
             for v_idx, variant_seq in enumerate(variants):
                 bare_seq, lna_pos = parse_lna_sequence(variant_seq)
                 v_name = f"{name}#{v_idx+1}" if len(variants) > 1 else name
                 
-                # Enregistrer chaque variant dans primer_to_panel
-                # Register each variant in primer_to_panel
-                if len(variants) > 1:
-                    primer_to_panel[v_name] = panel_id
+                # Enregistrer chaque variant dans primer_to_target
+                # Register each variant in primer_to_target
+                primer_to_target[v_name] = t_id
                 
                 if role_name.upper() in ("FIP", "BIP") and isinstance(p_data.domains, PrimerDomains):
                     d = p_data.domains
@@ -299,4 +295,4 @@ def build_engine_from_config(
             UserWarning
         )
         
-    return primers, primer_to_panel, backend, backend_kwargs, mon_molar, enzyme, temp_celsius, profiles
+    return primers, primer_to_target, backend, backend_kwargs, mon_molar, enzyme, temp_celsius, profiles
