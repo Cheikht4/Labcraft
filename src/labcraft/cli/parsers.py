@@ -4,7 +4,6 @@ from typing import List, Tuple, Dict, Optional
 from collections import defaultdict
 
 from labcraft.cli.config import PrimerConfig, PrimerSetConfig, PrimerDomains
-from labcraft.lamp.domains import PrimerRole
 from labcraft.lamp.domains import _find_iupac_substring
 
 class ParseError(Exception):
@@ -273,7 +272,7 @@ def parse_primer_file(
     return config_sets
 
 
-from labcraft.cli.config import PanelConfig, ExperimentConfig, BufferConfig, TargetConfig
+from labcraft.cli.config import PanelConfig, BufferConfig, TargetConfig
 import yaml
 
 def build_config_from_cli(
@@ -314,6 +313,10 @@ def build_config_from_cli(
         if tris is not None: config.experiment.buffer.tris_mM = tris
         if mg is not None: config.experiment.buffer.mg_mM = mg
         if dntp is not None: config.experiment.buffer.dntp_mM = dntp
+    elif not config.experiment.buffer:
+        # Aligner analyze sur les mêmes conditions par défaut que coverage (50 mM Na, 8 mM Mg, 1,4 mM dNTP)
+        # Align analyze with the same default buffer conditions as coverage (50 mM Na, 8 mM Mg, 1.4 mM dNTP)
+        config.experiment.buffer = BufferConfig(na_mM=50.0, mg_mM=8.0, dntp_mM=1.4)
 
     # 3. Handle Targets
     target_list = []

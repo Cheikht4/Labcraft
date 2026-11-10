@@ -62,6 +62,19 @@ BST_3_0 = PolymeraseProfile(
     dimer_dg_threshold=-1.5
 )
 
+# GspSSD (polymérase des kits Optigene, ex: ISO-004) :
+# Non calibré expérimentalement ; aucune valeur propre de seuil 3' ou de fenêtre ARMS n'est publiée dans la littérature.
+# Reprend à l'identique les paramètres de Bst 2.0 sans inventer de seuil propre.
+# GspSSD (polymerase used in Optigene kits, e.g. ISO-004):
+# Not experimentally calibrated; no published specific 3' threshold or ARMS window values exist in the literature.
+# Reuses Bst 2.0 parameters identically without inventing a custom threshold.
+GSPSSD = PolymeraseProfile(
+    name="GspSSD",
+    strand_displacement=True,
+    warm_start=False,
+    dimer_dg_threshold=-2.0
+)
+
 ENZYME_REGISTRY = {
     "bst": BST,
     "bst2.0": BST_2_0,
@@ -73,6 +86,9 @@ ENZYME_REGISTRY = {
     "warmstart": BST_2_0_WARM_START,
     "bst3.0": BST_3_0,
     "bst 3.0": BST_3_0,
+    "gspssd": GSPSSD,
+    "gspssd2.0": GSPSSD,
+    "iso004": GSPSSD,
     "taq": TAQ
 }
 

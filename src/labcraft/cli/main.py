@@ -1,5 +1,4 @@
 import typer
-import yaml
 import hashlib
 import time
 import importlib.metadata
@@ -9,12 +8,12 @@ from labcraft.lamp.domains import PrimerRole
 from labcraft.lamp.complex_enumeration import enumerate_complexes
 from labcraft.solver.dual import solve_dual
 from labcraft.metrics.fractions import compute_fractions
-from labcraft.diagnostics.amplifiable_dimer import is_amplifiable_dimer, evaluate_pair_amplifiable
+from labcraft.diagnostics.amplifiable_dimer import evaluate_pair_amplifiable
 from labcraft.diagnostics.probe_tm import check_probes_tm
 from labcraft.metrics.risk import evaluate_risks
 from labcraft.metrics.verdict import generate_verdict
 from labcraft.report.renderer import render_report
-from labcraft.cli.config import PanelConfig, build_engine_from_config
+from labcraft.cli.config import build_engine_from_config
 from pydantic import ValidationError
 
 from labcraft.cli.parsers import build_config_from_cli, read_multi_fasta, ParseError
@@ -47,6 +46,10 @@ def analyze(
     conc_loop: Optional[float] = typer.Option(None, "--conc-loop", help="Loop primer concentration in uM."),
     copies: Optional[float] = typer.Option(None, "--copies", help="Target copies per uL."),
     max_variants: int = typer.Option(64, "--max-variants", help="Maximum variants allowed per degenerate primer (default: 64)."),
+    errors: int = typer.Option(2, "--errors", help="Max errors for candidate site seeding outside 3' zone."),
+    strict_3prime: int = typer.Option(3, "--strict-3prime", help="Length of strict 3' zone for candidate site seeding."),
+    strict_3prime_tolerate: int = typer.Option(2, "--strict-3prime-tolerate", help="Number of tolerated substitutions in strict 3' zone for seeding."),
+    dimer_conc_max: float = typer.Option(2.5, "--dimer-conc-max", help="Seuil maximal de concentration totale de dimères amplifiables en nM déclenchant FAILURE (calibré provisoirement sur 4 cas de vérité terrain)."),
     separate_targets: bool = typer.Option(False, "--separate-targets", "--per-target", help="Solve targets independently instead of joint multi-target equilibrium."),
     force_joint: bool = typer.Option(False, "--force-joint", help="Force joint analysis of multiple panels for the same target.")
 ):
@@ -56,7 +59,14 @@ def analyze(
     if not config and not primers:
         typer.echo("Erreur: Vous devez spécifier au moins un fichier de configuration YAML (-c) ou un fichier d'amorces (-p).")
         raise typer.Exit(code=1)
-        
+
+    # Vérification de l'existence des fichiers en amont (avant hash_file)
+    # Check file existence upfront (before hash_file)
+    for fpath in (config, primers, targets):
+        if fpath and not os.path.isfile(fpath):
+            typer.echo(f"Erreur de fichier introuvable : {fpath}")
+            raise typer.Exit(code=1)
+
     typer.echo("Loading configuration...")
     start_time = time.time()
     
@@ -78,13 +88,13 @@ def analyze(
         )
     except FileNotFoundError as e:
         typer.echo(f"Erreur de fichier introuvable : {e.filename}")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from e
     except ParseError as e:
         typer.echo(f"Erreur de lecture de fichier :\n{e}")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from e
     except ValidationError as e:
         typer.echo(f"Erreur de validation de la configuration :\n{e}")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from e
 
     # 1. Parse Targets
     targets_dict = {}
@@ -100,7 +110,7 @@ def analyze(
                     targets_dict[t_id] = seq
         except Exception as e:
             typer.echo(f"Erreur lors de la lecture du fichier cible {t.sequence_file}:\n{e}")
-            raise typer.Exit(code=1)
+            raise typer.Exit(code=1) from e
         
     if not targets_dict:
         targets_dict = {"Compétition Sans Cible": ""}
@@ -133,7 +143,18 @@ def analyze(
             current_output = output
             
         # 2. & 3. Build Internal Engine Components
-        primers, primer_to_panel, backend, backend_kwargs, mon_molar, enzyme, temp_celsius, profiles = build_engine_from_config(current_config, targets_dict, max_variants=max_variants)
+        # Construire les composants internes et la table primer_to_target
+        primers, primer_to_target, backend, backend_kwargs, mon_molar, enzyme, temp_celsius, profiles = build_engine_from_config(current_config, targets_dict, max_variants=max_variants)
+        primer_to_panel = primer_to_target
+
+        buf_cfg = current_config.experiment.buffer
+        if buf_cfg:
+            typer.echo(
+                f"Conditions utilisées : T={temp_celsius:.1f} °C, Enzyme={enzyme.name}, "
+                f"Na={buf_cfg.na_mM} mM, Mg={buf_cfg.mg_mM} mM, dNTP={buf_cfg.dntp_mM} mM"
+            )
+        else:
+            typer.echo(f"Conditions utilisées : T={temp_celsius:.1f} °C, Enzyme={enzyme.name}, Référence (1.0 M Na+, 0 mM Mg2+)")
         
         if not primers:
             typer.echo("Erreur : Le panel d'amorces est vide. Veuillez définir au moins un jeu d'amorces (primer_sets).")
@@ -161,7 +182,18 @@ def analyze(
                 typer.echo(f"Building joint complex network and solving coupled thermodynamic equilibrium for {len(targets_dict)} targets ({', '.join(targets_dict.keys())})...")
                 
                 prob, strands, complexes, unfolding_penalties = enumerate_complexes(
-                    primers, targets_dict if has_true_target else None, backend, profile=profiles, temp_celsius=temp_celsius, mon_molar=mon_molar, buffer=config_obj.experiment.buffer.model_dump() if config_obj.experiment.buffer else None
+                    primers,
+                    targets_dict if has_true_target else None,
+                    backend,
+                    profile=profiles,
+                    temp_celsius=temp_celsius,
+                    mon_molar=mon_molar,
+                    buffer=config_obj.experiment.buffer.model_dump() if config_obj.experiment.buffer else None,
+                    enzyme=enzyme,
+                    max_errors=errors,
+                    strict_3prime_len=strict_3prime,
+                    strict_3prime_tolerate=strict_3prime_tolerate,
+                    primer_to_target=primer_to_target
                 )
                 
                 res = solve_dual(prob)
@@ -172,8 +204,7 @@ def analyze(
                 concs = []
                 dimer_details = []
                 
-                for i, c_name in enumerate(complexes):
-                    stoich = prob.stoichiometry[i]
+                for i, _c_name in enumerate(complexes):
                     conc = res.concentrations[i]
                     concs.append(conc)
                     
@@ -189,12 +220,12 @@ def analyze(
                             if len(p_counts) == 1:
                                 k = list(p_counts.keys())[0]
                                 p_a = primers[k]
-                                is_amp, dg_3p, details = evaluate_pair_amplifiable(p_a, p_a, backend, enzyme, temp_celsius, **backend_kwargs)
+                                is_amp, _dg_3p, details = evaluate_pair_amplifiable(p_a, p_a, backend, enzyme, temp_celsius, **backend_kwargs)
                             elif len(p_counts) == 2:
                                 k1, k2 = list(p_counts.keys())
                                 p_a = primers[k1]
                                 p_b = primers[k2]
-                                is_amp, dg_3p, details = evaluate_pair_amplifiable(p_a, p_b, backend, enzyme, temp_celsius, **backend_kwargs)
+                                is_amp, _dg_3p, details = evaluate_pair_amplifiable(p_a, p_b, backend, enzyme, temp_celsius, **backend_kwargs)
                                 
                             from labcraft.report.alignment import dotbracket_to_alignment, get_alignment_columns
                             if details and 'alignment' not in details:
@@ -215,7 +246,7 @@ def analyze(
                     amplifiable_flags.append(is_amp)
                     dimer_details.append(details)
                     
-                risks = evaluate_risks(complexes, concs, amplifiable_flags, is_warm_start=False, dimer_details=dimer_details)
+                risks = evaluate_risks(complexes, concs, amplifiable_flags, is_warm_start=enzyme.warm_start, dimer_details=dimer_details)
                 fractions = compute_fractions(strands, complexes, prob.stoichiometry, res.free_concentrations, prob.delta_g, temp_celsius, primer_to_panel)
                 
                 all_risks = risks
@@ -253,7 +284,18 @@ def analyze(
                         profile = next(iter(profiles.values()))
                         
                     prob, strands, complexes, unfolding_penalties = enumerate_complexes(
-                        primers, t_seq if t_seq else None, backend, profile=profile, temp_celsius=temp_celsius, mon_molar=mon_molar, buffer=config_obj.experiment.buffer.model_dump() if config_obj.experiment.buffer else None
+                        primers,
+                        t_seq if t_seq else None,
+                        backend,
+                        profile=profile,
+                        temp_celsius=temp_celsius,
+                        mon_molar=mon_molar,
+                        buffer=config_obj.experiment.buffer.model_dump() if config_obj.experiment.buffer else None,
+                        enzyme=enzyme,
+                        max_errors=errors,
+                        strict_3prime_len=strict_3prime,
+                        strict_3prime_tolerate=strict_3prime_tolerate,
+                        primer_to_target=primer_to_target
                     )
                     
                     res = solve_dual(prob)
@@ -264,8 +306,7 @@ def analyze(
                     concs = []
                     dimer_details = []
                     
-                    for i, c_name in enumerate(complexes):
-                        stoich = prob.stoichiometry[i]
+                    for i, _c_name in enumerate(complexes):
                         conc = res.concentrations[i]
                         concs.append(conc)
                         
@@ -281,12 +322,12 @@ def analyze(
                                 if len(p_counts) == 1:
                                     k = list(p_counts.keys())[0]
                                     p_a = primers[k]
-                                    is_amp, dg_3p, details = evaluate_pair_amplifiable(p_a, p_a, backend, enzyme, temp_celsius, **backend_kwargs)
+                                    is_amp, _dg_3p, details = evaluate_pair_amplifiable(p_a, p_a, backend, enzyme, temp_celsius, **backend_kwargs)
                                 elif len(p_counts) == 2:
                                     k1, k2 = list(p_counts.keys())
                                     p_a = primers[k1]
                                     p_b = primers[k2]
-                                    is_amp, dg_3p, details = evaluate_pair_amplifiable(p_a, p_b, backend, enzyme, temp_celsius, **backend_kwargs)
+                                    is_amp, _dg_3p, details = evaluate_pair_amplifiable(p_a, p_b, backend, enzyme, temp_celsius, **backend_kwargs)
                                     
                                 from labcraft.report.alignment import dotbracket_to_alignment, get_alignment_columns
                                 if details and 'alignment' not in details:
@@ -307,7 +348,7 @@ def analyze(
                         amplifiable_flags.append(is_amp)
                         dimer_details.append(details)
                         
-                    risks = evaluate_risks(complexes, concs, amplifiable_flags, is_warm_start=False, dimer_details=dimer_details)
+                    risks = evaluate_risks(complexes, concs, amplifiable_flags, is_warm_start=enzyme.warm_start, dimer_details=dimer_details)
                     fractions = compute_fractions(strands, complexes, prob.stoichiometry, res.free_concentrations, prob.delta_g, temp_celsius, primer_to_panel)
                     
                     for r in risks:
@@ -362,7 +403,7 @@ def analyze(
     
         loop_primer_parents = {get_parent(p.name) for p in primers if p.role in (PrimerRole.LF, PrimerRole.LB)}
         
-        verdict = generate_verdict(all_fractions, target_occupations, all_risks, loop_primer_parents=loop_primer_parents, primer_to_panel=primer_to_panel)
+        verdict = generate_verdict(all_fractions, target_occupations, all_risks, loop_primer_parents=loop_primer_parents, primer_to_panel=primer_to_target, primer_to_target=primer_to_target, unfolding_penalties=all_unfolding_penalties, dimer_conc_max_nm=dimer_conc_max)
         
         # Recommandations
         from labcraft.optimize.recommendations import generate_recommendations
@@ -388,14 +429,15 @@ def analyze(
                 prob_template=prob,
                 species_names=strands,
                 primers=primers,
-                target_dict=targets,
+                target_dict=targets_dict,
                 primer_to_panel=primer_to_panel,
                 original_free_fractions=free_fractions,
                 original_target_occupations={},
                 complex_names=complexes,
                 temp_celsius=temp_celsius,
                 backend=backend,
-                enzyme=enzyme
+                enzyme=enzyme,
+                **backend_kwargs
             )
         
         
@@ -405,13 +447,20 @@ def analyze(
         
         panel_summaries, balance_cv = {}, None
         if target_occupations:
-            panel_summaries, balance_cv = calculate_multiplex_balance(primer_to_panel, target_occupations, free_fractions, loop_primer_parents=loop_primer_parents)
+            panel_summaries, balance_cv = calculate_multiplex_balance(primer_to_target, target_occupations, free_fractions, loop_primer_parents=loop_primer_parents, primer_to_target=primer_to_target)
         
         mispriming_risks = []
-        if config_obj.targets and len(config_obj.targets) > 1:
-            target_dict = targets_dict  # targets est le dictionnaire {t.id: t.sequence} déjà chargé
+        if has_true_target and targets_dict:
             mispriming_risks = detect_inter_target_mispriming(
-                primers, primer_to_panel, target_dict, backend, enzyme, temp_celsius, **backend_kwargs
+                primers,
+                primer_to_target,
+                targets_dict,
+                backend,
+                enzyme,
+                temp_celsius,
+                primer_to_target=primer_to_target,
+                legitimate_loci=all_unfolding_penalties,
+                **backend_kwargs
             )
         
         
@@ -465,6 +514,7 @@ def coverage(
     output: str = typer.Option("coverage_report.html", "-o", "--output", help="Output HTML report path."),
     panel: Optional[str] = typer.Option(None, "--panel", help="Panel name to analyze if multiple panels are present in primers file."),
     temperature: float = typer.Option(65.0, "--temperature", help="Experiment temperature in Celsius."),
+    enzyme: Optional[str] = typer.Option(None, "--enzyme", help="Enzyme name (e.g. bst2.0)."),
     na: float = typer.Option(50.0, "--na", help="Na+ concentration in mM."),
     mg: float = typer.Option(8.0, "--mg", help="Mg2+ concentration in mM."),
     dntp: float = typer.Option(1.4, "--dntp", help="dNTP concentration in mM."),
@@ -486,26 +536,44 @@ def coverage(
     from labcraft.target.seeding import find_candidate_sites
     from labcraft.report.coverage_report import render_coverage_report
 
-    print("Lecture des entrées...")
-    fasta_list = read_multi_fasta(fasta)
-    fasta_dict = {name: seq for name, seq in fasta_list}
-    
-    first_strain_path = None
-    if fasta_list:
-        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".fasta") as tmp:
-            tmp.write(f">{fasta_list[0][0]}\n{fasta_list[0][1]}\n")
-            first_strain_path = tmp.name
+    # Vérification de l'existence des fichiers en amont en mode coverage
+    # Upfront file existence check in coverage mode
+    for fpath in (primers, fasta, sites):
+        if fpath and not os.path.isfile(fpath):
+            typer.echo(f"Erreur de fichier introuvable : {fpath}")
+            raise typer.Exit(code=1)
 
-    config_obj = build_config_from_cli(
-        config_path=None,
-        primers_path=primers,
-        targets_path=first_strain_path,
-        temperature=temperature,
-        na=na,
-        mg=mg,
-        dntp=dntp,
-        allow_unmatched_targets=True
-    )
+    try:
+        print("Lecture des entrées...")
+        fasta_list = read_multi_fasta(fasta)
+        fasta_dict = {name: seq for name, seq in fasta_list}
+        
+        first_strain_path = None
+        if fasta_list:
+            with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".fasta") as tmp:
+                tmp.write(f">{fasta_list[0][0]}\n{fasta_list[0][1]}\n")
+                first_strain_path = tmp.name
+
+        config_obj = build_config_from_cli(
+            config_path=None,
+            primers_path=primers,
+            targets_path=first_strain_path,
+            temperature=temperature,
+            enzyme=enzyme,
+            na=na,
+            mg=mg,
+            dntp=dntp,
+            allow_unmatched_targets=True
+        )
+    except FileNotFoundError as e:
+        typer.echo(f"Erreur de fichier introuvable : {e.filename}")
+        raise typer.Exit(code=1) from e
+    except ParseError as e:
+        typer.echo(f"Erreur de lecture de fichier :\n{e}")
+        raise typer.Exit(code=1) from e
+    except ValidationError as e:
+        typer.echo(f"Erreur de validation de la configuration :\n{e}")
+        raise typer.Exit(code=1) from e
     
     # Sélection du panel si plusieurs sont présents
     if panel:
@@ -522,7 +590,13 @@ def coverage(
     selected_panel_name = config_obj.primer_sets[0].panel_name if config_obj.primer_sets else "DefaultPanel"
 
     dummy_targets = {fasta_list[0][0]: fasta_list[0][1]} if fasta_list else {}
-    physical_primers, _, backend, _, _, enzyme, _, _ = build_engine_from_config(config_obj, dummy_targets)
+    physical_primers, _, backend, _, _, enzyme_obj, _, _ = build_engine_from_config(config_obj, dummy_targets)
+    buf_cfg = config_obj.experiment.buffer
+    if buf_cfg:
+        print(
+            f"Conditions utilisées : T={temperature:.1f} °C, Enzyme={enzyme_obj.name}, "
+            f"Na={buf_cfg.na_mM} mM, Mg={buf_cfg.mg_mM} mM, dNTP={buf_cfg.dntp_mM} mM"
+        )
     
     print(f"Chargement de {len(fasta_dict)} souches.")
     
@@ -557,7 +631,7 @@ def coverage(
         print(f"Sites candidats exportés dans : {export_sites}")
 
     analyzer = CoverageAnalyzer(
-        physical_primers, fasta_dict, backend, enzyme,
+        physical_primers, fasta_dict, backend, enzyme_obj,
         temp_celsius=temperature,
         ddg_max=ddg_max,
         dg_threshold=dg_threshold,
