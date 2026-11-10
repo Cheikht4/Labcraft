@@ -12,11 +12,14 @@ import warnings
 import numpy as np
 
 from dataclasses import dataclass
-from typing import Sequence, List, Tuple, Dict, Optional, Union
-from labcraft.lamp.domains import PhysicalPrimer, PrimerRole, _find_iupac_substring
+from typing import List, Tuple, Dict, Optional, Union, Any
+from labcraft.lamp.domains import PhysicalPrimer, PrimerRole, _find_iupac_substring, IUPAC_MATCHABLE
 from labcraft.lamp.stoichiometry import ConcentrationProfile, LAMP_DEFAULT_PROFILE
 from labcraft.target.unfolding import calc_unfolding_penalty
+from labcraft.target.seeding import find_candidate_sites
 from labcraft.thermo.backends.base import DuplexEnergyBackend
+from labcraft.thermo.mismatch import calculate_hybridization_dg, three_prime_extensible
+from labcraft.diagnostics.enzyme import PolymeraseProfile, get_enzyme
 from labcraft.solver.types import EquilibriumProblem
 
 @dataclass
@@ -34,7 +37,12 @@ def enumerate_complexes(
     temp_celsius: float = 65.0,
     mon_molar: float | None = None,
     buffer: dict | None = None,
-    unfolding_window: int = 150
+    unfolding_window: int = 150,
+    enzyme: Optional[PolymeraseProfile] = None,
+    max_errors: int = 2,
+    strict_3prime_len: int = 3,
+    strict_3prime_tolerate: int = 2,
+    primer_to_target: Optional[Dict[str, str]] = None
 ) -> Tuple[EquilibriumProblem, List[str], List[str], Dict[str, Any]]:
     """Énumère toutes les espèces et génère le problème d'équilibre.
 
@@ -46,14 +54,17 @@ def enumerate_complexes(
     Returns:
         (EquilibriumProblem, noms_des_especes, noms_des_complexes, unfolding_penalties)
     """
+    if enzyme is None:
+        enzyme = get_enzyme("Bst2.0")
+
     backend_kwargs = {}
     if buffer:
         backend_kwargs = {
-            'na_mm': buffer.get('na_mM', 50.0),
-            'k_mm': buffer.get('k_mM', 0.0),
-            'tris_mm': buffer.get('tris_mM', 0.0),
-            'mg_mm': buffer.get('mg_mM', 0.0),
-            'dntp_mm': buffer.get('dntp_mM', 0.0)
+            'na_mm': buffer.get('na_mM', buffer.get('na_mm', 50.0)),
+            'k_mm': buffer.get('k_mM', buffer.get('k_mm', 0.0)),
+            'tris_mm': buffer.get('tris_mM', buffer.get('tris_mm', 0.0)),
+            'mg_mm': buffer.get('mg_mM', buffer.get('mg_mm', 0.0)),
+            'dntp_mm': buffer.get('dntp_mM', buffer.get('dntp_mm', 0.0))
         }
 
     # Normalisation du dictionnaire des cibles
@@ -66,61 +77,210 @@ def enumerate_complexes(
     elif isinstance(target_seq, str) and target_seq.strip():
         targets_dict = {"": target_seq.strip()}
 
-    # 1. Identifier les sites cibles sur chaque cible
+    # Regrouper les amorces par amorce parente
+    # Group primers by parent primer
+    parent_to_primers: Dict[str, List[PhysicalPrimer]] = {}
+    for p in primers:
+        par = p.parent_name or (p.name.split('#')[0] if '#' in p.name else p.name)
+        parent_to_primers.setdefault(par, []).append(p)
+
     # 1. Identifier les sites cibles sur chaque cible par LOCUS physique unique
     # 1. Identify target sites across all targets by unique physical LOCUS
     target_sites_map: Dict[Tuple[str, int, str], Dict[str, Any]] = {}
+    comp = {'A': 'T', 'T': 'A', 'C': 'G', 'G': 'C'}
 
     for t_id, raw_seq in targets_dict.items():
         clean_target = re.sub(r'[^A-Za-z]', '', raw_seq.upper())
         target_rc = _revcomp(clean_target)
-        
-        # Suivi des parents appariés pour les avertissements
-        # Track matched parent primers for warnings
-        parent_matched: Dict[str, bool] = {
-            p.name.split('#')[0] if '#' in p.name else p.name: False 
-            for p in primers
-        }
 
-        for p in primers:
-            parent_name = p.name.split('#')[0] if '#' in p.name else p.name
-            match_start = _find_iupac_substring(p.binding_domain, clean_target)
-            strand = "+"
-            if match_start == -1:
-                match_start = _find_iupac_substring(p.binding_domain, target_rc)
-                strand = "-"
+        # Filtrer les parents pertinents pour cette cible si primer_to_target est fourni en multi-cible
+        # Filter relevant parents for this target if primer_to_target is provided in multi-target mode
+        eligible_parents = list(parent_to_primers.keys())
+        if is_multi_target and primer_to_target:
+            filtered = [
+                par for par in eligible_parents
+                if (primer_to_target.get(par) or primer_to_target.get(parent_to_primers[par][0].name)) == t_id
+            ]
+            if filtered:
+                eligible_parents = filtered
 
-            if match_start != -1:
-                parent_matched[parent_name] = True
-                match_len = len(p.binding_domain)
-                if strand == "+":
-                    start, end = match_start, match_start + match_len
-                else:
-                    start = len(clean_target) - (match_start + match_len)
-                    end = len(clean_target) - match_start
+        parent_matched: Dict[str, bool] = {par: False for par in eligible_parents}
 
-                locus_key = (t_id, start, strand)
-                if locus_key not in target_sites_map:
-                    if is_multi_target and t_id:
-                        site_name = f"{parent_name}@{t_id}_site"
+        # Criblage permissif via find_candidate_sites pour cette cible
+        # Permissive screening via find_candidate_sites for this target
+        primers_for_seeding = [
+            p for par in eligible_parents for p in parent_to_primers[par]
+        ]
+        candidate_records = find_candidate_sites(
+            {t_id: clean_target},
+            primers_for_seeding,
+            max_errors=max_errors,
+            strict_3prime_len=strict_3prime_len,
+            strict_3prime_tolerate=strict_3prime_tolerate
+        )
+        cands_by_parent: Dict[str, List[Dict[str, Any]]] = {}
+        for rec in candidate_records:
+            cands_by_parent.setdefault(rec["primer_name"], []).append(rec)
+
+        for par_name in eligible_parents:
+            p_variants = parent_to_primers[par_name]
+            # Collecter les loci candidats (start, end, strand)
+            # Collect candidate loci (start, end, strand)
+            candidate_loci_set: set[Tuple[int, int, str]] = set()
+
+            for rec in cands_by_parent.get(par_name, []):
+                s_pos = int(rec["position"])
+                s_strand = rec["strand"]
+                s_len = len(rec["site_seq"])
+                candidate_loci_set.add((s_pos, s_pos + s_len, s_strand))
+
+            # Fallback sur _find_iupac_substring pour les rôles non couverts par seeding (ex: PROBE)
+            # ou séquences courtes <= strict_3prime_len
+            # Fallback on _find_iupac_substring for roles not covered by seeding (e.g. PROBE)
+            # or short sequences <= strict_3prime_len
+            if not candidate_loci_set:
+                for p in p_variants:
+                    m_start = _find_iupac_substring(p.binding_domain, clean_target)
+                    m_strand = "+"
+                    if m_start == -1:
+                        m_start = _find_iupac_substring(p.binding_domain, target_rc)
+                        m_strand = "-"
+                    if m_start != -1:
+                        m_len = len(p.binding_domain)
+                        if m_strand == "+":
+                            s0, e0 = m_start, m_start + m_len
+                        else:
+                            s0 = len(clean_target) - (m_start + m_len)
+                            e0 = len(clean_target) - m_start
+                        candidate_loci_set.add((s0, e0, m_strand))
+
+            if not candidate_loci_set:
+                continue
+
+            # Évaluer chaque locus candidat pour retenir le meilleur site (extensible prioritaire, dG le plus favorable)
+            # Evaluate each candidate locus to select the best site (extensible first, most favorable dG)
+            best_locus_eval = None
+            best_locus_key = None
+
+            for (s0, e0, strand) in sorted(candidate_loci_set):
+                extracted_target = clean_target[s0:e0].upper()
+                has_n = 'N' in extracted_target
+                any_extensible = False
+                best_dg_hyb = float('inf')
+                min_mm = 999
+                best_bad_pos = None
+                best_severity = None
+                variant_evals = []
+
+                for p in p_variants:
+                    offset = p.sequence.find(p.binding_domain)
+                    bd_lna = tuple(pos - offset for pos in p.lna_positions if offset <= pos < offset + len(p.binding_domain)) if offset != -1 else ()
+
+                    if len(extracted_target) != len(p.binding_domain):
+                        res_hyb = backend.calc_duplex(
+                            p.binding_domain, _revcomp(p.binding_domain),
+                            temp_celsius=temp_celsius,
+                            lna_positions_a=bd_lna,
+                            lna_positions_b=(),
+                            **backend_kwargs
+                        )
+                        dg_hyb = res_hyb.dg_kcal
+                        ext = True
+                        bad_pos = None
+                        sev = None
+                        n_mm = 0
                     else:
-                        site_name = f"{parent_name}_site"
+                        if strand == "+":
+                            bot_raw = "".join(comp.get(c, c) for c in extracted_target)
+                        else:
+                            bot_raw = extracted_target[::-1]
 
+                        resolved_bottom = []
+                        for b_prim, b_targ in zip(p.binding_domain, bot_raw, strict=True):
+                            set_p = IUPAC_MATCHABLE.get(b_prim, set())
+                            set_t_comp = set(comp.get(base, base) for base in IUPAC_MATCHABLE.get(b_targ, set([b_targ])))
+                            if set_p and set_t_comp and set_p.intersection(set_t_comp):
+                                shared = sorted(set_p.intersection(set_t_comp))[0]
+                                resolved_bottom.append(comp[shared])
+                            else:
+                                resolved_bottom.append(b_targ)
+                        bottom_under_top = "".join(resolved_bottom)
+
+                        dg_hyb, _ = calculate_hybridization_dg(
+                            p.binding_domain, bottom_under_top, temp_celsius, backend, bd_lna=bd_lna, **backend_kwargs
+                        )
+                        ext, bad_pos, sev = three_prime_extensible(p.binding_domain, bottom_under_top, enzyme)
+                        n_mm = sum(1 for a, b in zip(p.binding_domain, bottom_under_top, strict=True) if comp.get(a, '') != b)
+
+                    variant_evals.append((p, dg_hyb, ext, n_mm, bad_pos, sev))
+                    if ext:
+                        any_extensible = True
+                        if dg_hyb < best_dg_hyb:
+                            best_dg_hyb = dg_hyb
+                        if n_mm < min_mm:
+                            min_mm = n_mm
+                    else:
+                        if not any_extensible:
+                            if dg_hyb < best_dg_hyb:
+                                best_dg_hyb = dg_hyb
+                            if n_mm < min_mm:
+                                min_mm = n_mm
+                            best_bad_pos = bad_pos
+                            best_severity = sev
+
+                # Clé de tri : extensible d'abord, puis moins de mésappariements, puis dG le plus négatif
+                # Sort key: extensible first, then fewer mismatches, then most negative dG
+                rank_key = (1 if any_extensible else 0, -min_mm, -best_dg_hyb)
+                if best_locus_key is None or rank_key > best_locus_key:
+                    best_locus_key = rank_key
+                    best_locus_eval = {
+                        "start": s0,
+                        "end": e0,
+                        "strand": strand,
+                        "any_extensible": any_extensible,
+                        "best_dg_hyb": best_dg_hyb,
+                        "min_mm": min_mm,
+                        "first_bad_pos": best_bad_pos,
+                        "severity": best_severity,
+                        "has_n": has_n,
+                        "variant_evals": variant_evals,
+                        "role": p_variants[0].role
+                    }
+
+            if best_locus_eval is not None:
+                parent_matched[par_name] = True
+                s0 = best_locus_eval["start"]
+                e0 = best_locus_eval["end"]
+                strand = best_locus_eval["strand"]
+                locus_key = (t_id, s0, strand)
+
+                if is_multi_target and t_id:
+                    site_name = f"{par_name}@{t_id}_site"
+                else:
+                    site_name = f"{par_name}_site"
+
+                if locus_key not in target_sites_map:
                     target_sites_map[locus_key] = {
                         "name": site_name,
                         "target_id": t_id,
                         "target_seq": clean_target,
-                        "parent_name": parent_name,
-                        "role": p.role,
-                        "start": start,
-                        "end": end,
+                        "parent_name": par_name,
+                        "role": best_locus_eval["role"],
+                        "start": s0,
+                        "end": e0,
                         "strand": strand,
-                        "binding_primers": [p]
+                        "binding_primers": list(p_variants),
+                        "variant_evals": list(best_locus_eval["variant_evals"]),
+                        "min_mm": best_locus_eval["min_mm"],
+                        "any_extensible": best_locus_eval["any_extensible"],
+                        "best_dg_hyb": best_locus_eval["best_dg_hyb"],
+                        "first_bad_pos": best_locus_eval["first_bad_pos"],
+                        "severity": best_locus_eval["severity"],
+                        "has_n": best_locus_eval["has_n"]
                     }
                 else:
-                    # Locus partagé par plusieurs variantes d'amorce
-                    # Locus shared by multiple primer variants
-                    target_sites_map[locus_key]["binding_primers"].append(p)
+                    target_sites_map[locus_key]["binding_primers"].extend(p_variants)
+                    target_sites_map[locus_key]["variant_evals"].extend(best_locus_eval["variant_evals"])
 
         if not is_multi_target:
             for par_name, matched in parent_matched.items():
@@ -239,12 +399,27 @@ def enumerate_complexes(
                 temp_celsius=temp_celsius, mon_molar=mon_molar
             )
 
+        productive_variants = [
+            p.name for (p, dg_hyb, ext, n_mm, bad_pos, sev) in site_info.get("variant_evals", [])
+            if ext and (dg_hyb + dg_unfold) < 0 and not site_info.get("has_n", False)
+        ]
+
         pen_data = {
             "dg_unfold": dg_unfold,
-            "mismatches": 0,
-            "extensible": True,
-            "n_variants": len(site_info["binding_primers"]),
-            "variants": [p.name for p in site_info["binding_primers"]]
+            "dg_hyb": site_info.get("best_dg_hyb"),
+            "mismatches": site_info.get("min_mm", 0),
+            "extensible": site_info.get("any_extensible", True) and not site_info.get("has_n", False),
+            "first_bad_pos": site_info.get("first_bad_pos"),
+            "severity": site_info.get("severity"),
+            "position": s0,
+            "start": s0,
+            "end": e0,
+            "strand": site_info.get("strand"),
+            "has_n": site_info.get("has_n", False),
+            "verdict": "indetermine" if site_info.get("has_n", False) else ("veto_3p" if not site_info.get("any_extensible", True) else ("parfait" if site_info.get("min_mm", 0) == 0 else "tolerable")),
+            "n_variants": len(productive_variants) if productive_variants else len(site_info["binding_primers"]),
+            "total_variants": len(site_info["binding_primers"]),
+            "variants": productive_variants if productive_variants else [p.name for p in site_info["binding_primers"]]
         }
 
         if is_multi_target and t_id:
@@ -255,59 +430,11 @@ def enumerate_complexes(
         else:
             unfolding_penalties[site_name] = pen_data
 
-        for p in site_info["binding_primers"]:
+        for (p, dg_hyb, extensible, _n_mismatches, _bad_pos, _sev) in site_info.get("variant_evals", []):
             idx_p = next(i for i, prim in enumerate(primers) if prim.name == p.name)
-            offset = p.sequence.find(p.binding_domain)
-            bd_lna = tuple(pos - offset for pos in p.lna_positions if offset <= pos < offset + len(p.binding_domain)) if offset != -1 else ()
-
-            if len(extracted_target) != len(p.binding_domain):
-                warnings.warn(f"Longueur inattendue pour le site {site_name} (site={len(extracted_target)}, amorce={len(p.binding_domain)}). Fallback sur match parfait.")
-                res_hyb = backend.calc_duplex(
-                    p.binding_domain, _revcomp(p.binding_domain),
-                    temp_celsius=temp_celsius,
-                    lna_positions_a=bd_lna,
-                    lna_positions_b=(),
-                    **backend_kwargs
-                )
-                dg_hyb = res_hyb.dg_kcal
-                extensible = True
-                n_mismatches = 0
-            else:
-                if site_info["strand"] == "+":
-                    bottom_under_top = "".join({'A': 'T', 'T': 'A', 'C': 'G', 'G': 'C'}.get(c, c) for c in extracted_target)
-                else:
-                    bottom_under_top = extracted_target[::-1]
-
-                from labcraft.lamp.domains import IUPAC_MATCHABLE
-                resolved_bottom = []
-                for b_prim, b_targ in zip(p.binding_domain, bottom_under_top):
-                    comp = {'A': 'T', 'T': 'A', 'C': 'G', 'G': 'C'}
-                    set_p = IUPAC_MATCHABLE.get(b_prim, set())
-                    set_t_comp = set(comp.get(base, base) for base in IUPAC_MATCHABLE.get(b_targ, set([b_targ])))
-                    if set_p and set_t_comp and set_p.intersection(set_t_comp):
-                        shared = list(set_p.intersection(set_t_comp))[0]
-                        resolved_bottom.append(comp[shared])
-                    else:
-                        resolved_bottom.append(b_targ)
-                bottom_under_top = "".join(resolved_bottom)
-
-                from labcraft.thermo.mismatch import calculate_hybridization_dg, three_prime_extensible
-                dg_hyb, ddg_mismatch = calculate_hybridization_dg(
-                    p.binding_domain, bottom_under_top, temp_celsius, backend, bd_lna=bd_lna, **backend_kwargs
-                )
-
-                from labcraft.diagnostics.enzyme import get_enzyme
-                enzyme = backend_kwargs.get("enzyme", get_enzyme("Bst2.0"))
-                extensible, first_bad_pos, severity = three_prime_extensible(p.binding_domain, bottom_under_top, enzyme)
-
-                comp = {'A': 'T', 'T': 'A', 'C': 'G', 'G': 'C'}
-                n_mismatches = sum(1 for a, b in zip(p.binding_domain, bottom_under_top) if comp.get(a, '') != b)
-                pen_data["mismatches"] = n_mismatches
-                pen_data["extensible"] = extensible
-
             dg_eff = dg_hyb + dg_unfold
 
-            if extensible and dg_eff < 0:
+            if extensible and not site_info.get("has_n", False) and dg_eff < 0:
                 stoich = [0] * n_strands
                 stoich[idx_p] = 1
                 stoich[site_idx] = 1

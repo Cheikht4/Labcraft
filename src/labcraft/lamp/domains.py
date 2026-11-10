@@ -4,7 +4,6 @@ Modélisation des amorces physiques et extraction de leurs domaines de liaison.
 """
 from __future__ import annotations
 
-import re
 import warnings
 from dataclasses import dataclass
 from enum import Enum
@@ -222,19 +221,26 @@ class PhysicalPrimer:
         min_domain_len = 12
         best_binding_len = 0
         
-        # Chercher le suffixe (binding domain)
+        # Chercher le suffixe (binding domain) exact d'abord
         for i in range(len(sequence) - min_domain_len, 0, -1):
             suffix = sequence[i:]
             if _match_iupac_substring(suffix, target_seq) or _match_iupac_substring(suffix, target_rc):
-                # On veut le suffixe maximum
                 if len(suffix) > best_binding_len:
                     best_binding_len = len(suffix)
+                    
+        # Si la recherche exacte échoue et qu'une cible est fournie, tenter un criblage tolérant (jusqu'à 2 erreurs)
+        # If exact search fails and target is provided, try tolerant screening (up to 2 errors)
+        if best_binding_len == 0 and target_seq:
+            from labcraft.target.seeding import primer_matches_sequence
+            for cand_len in range(min(25, len(sequence) - min_domain_len), min_domain_len - 1, -1):
+                suffix = sequence[-cand_len:]
+                if primer_matches_sequence(target_seq, suffix, max_errors=2, strict_3prime_len=3, strict_3prime_tolerate=2) is not None:
+                    best_binding_len = cand_len
+                    break
                     
         if best_binding_len == 0:
             if target_seq: # Only warn if we genuinely couldn't find it when target is provided
                 warnings.warn(f"Le domaine de liaison de {name} n'est pas trouvé sur la cible.", UserWarning)
-            # Reconstruct original sequence to pass to from_simple
-            # Wait, from_simple will parse again, so we should just construct it directly here
             return cls(
                 name=name, sequence=sequence, role=role,
                 binding_domain=sequence, tail_domain=None, linker=None,
@@ -243,7 +249,7 @@ class PhysicalPrimer:
                 lna_positions=tuple(lna_pos)
             )
             
-        # Chercher le préfixe (tail domain)
+        # Chercher le préfixe (tail domain) exact d'abord
         binding_idx = len(sequence) - best_binding_len
         best_tail_len = 0
         
@@ -251,6 +257,16 @@ class PhysicalPrimer:
             prefix = sequence[:i]
             if _match_iupac_substring(prefix, target_seq) or _match_iupac_substring(prefix, target_rc):
                 best_tail_len = i
+                
+        # Si la recherche exacte du domaine 5' échoue, tenter un criblage tolérant (jusqu'à 2 erreurs)
+        # If exact search for 5' domain fails, try tolerant screening (up to 2 errors)
+        if best_tail_len == 0 and target_seq:
+            from labcraft.target.seeding import primer_matches_sequence
+            for i in range(binding_idx, min_domain_len - 1, -1):
+                prefix = sequence[:i]
+                if primer_matches_sequence(target_seq, prefix, max_errors=2, strict_3prime_len=0) is not None:
+                    best_tail_len = i
+                    break
                 
         if best_tail_len == 0:
             if target_seq:

@@ -700,8 +700,10 @@
                             {% if mismatches > 0 %}
                                 <span class="badge badge-warning" title="{{ mismatches }} mésappariement(s)">{{ mismatches }} mismatches</span>
                             {% endif %}
-                            {% if not extensible %}
-                                <span class="badge badge-danger" title="Extension bloquée par mésappariement 3'">3' Bloqué</span>
+                            {% if info is mapping and info.verdict == 'indetermine' %}
+                                <span class="badge badge-warning" title="Site indéterminé contenant des bases N">Indéterminé (N)</span>
+                            {% elif not extensible %}
+                                <span class="badge badge-danger" title="Extension bloquée par mésappariement 3' (veto 3')">Veto 3' (3' Bloqué)</span>
                             {% endif %}
                             {% set n_vars = info.n_variants if (info is mapping and 'n_variants' in info) else 1 %}
                             {% if n_vars > 1 %}

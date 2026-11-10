@@ -308,3 +308,168 @@ def test_mispriming_relative_criterion_and_ranking():
         assert r.delta_delta_g is not None
         assert r.delta_delta_g <= 4.0, f"Le ddG ({r.delta_delta_g}) dépasse le seuil relatif de 4.0 kcal/mol"
         assert r.delta_g < 0.0
+
+
+def test_part_a_same_panel_different_fasta_headers_identical_diagnosis(tmp_path: Path):
+    """Partie A : Vérifie via CliRunner sur de vrais fichiers que le même panel
+    sur le même génome avec deux en-têtes FASTA différents (>M93130.1 vs >3)
+    produit un diagnostic par cible strictement identique."""
+    import re
+    fixture_dir = Path(__file__).resolve().parent.parent / "fixtures" / "real_primer_files"
+    p3_file = fixture_dir / "primer_dengue_3.txt"
+    d3_fasta = fixture_dir / "DEN3_M93130.fasta"
+
+    from labcraft.cli.parsers import read_multi_fasta
+    d3_seq = read_multi_fasta(str(d3_fasta))[0][1]
+
+    # Extraire uniquement le panel 3
+    p3_records = [
+        f">{h}\n{s}" for h, s in read_multi_fasta(str(p3_file)) if h.startswith("3_")
+    ]
+    primers_only_3 = tmp_path / "panel_3.txt"
+    primers_only_3.write_text("\n".join(p3_records) + "\n")
+
+    fasta_m93130 = tmp_path / "target_M93130.fasta"
+    fasta_m93130.write_text(f">M93130.1\n{d3_seq}\n")
+
+    fasta_3 = tmp_path / "target_3.fasta"
+    fasta_3.write_text(f">3\n{d3_seq}\n")
+
+    out_m93130 = tmp_path / "report_M93130.html"
+    out_3 = tmp_path / "report_3.html"
+
+    runner = CliRunner()
+    res1 = runner.invoke(app, [
+        "analyze", "-p", str(primers_only_3), "-t", str(fasta_m93130), "-o", str(out_m93130),
+        "--temperature", "63.0", "--na", "50.0", "--mg", "8.0", "--dntp", "1.4"
+    ])
+    res2 = runner.invoke(app, [
+        "analyze", "-p", str(primers_only_3), "-t", str(fasta_3), "-o", str(out_3),
+        "--temperature", "63.0", "--na", "50.0", "--mg", "8.0", "--dntp", "1.4"
+    ])
+
+    assert res1.exit_code == 0, f"Run 1 failed: {res1.stdout}"
+    assert res2.exit_code == 0, f"Run 2 failed: {res2.stdout}"
+
+    html1 = out_m93130.read_text()
+    html2 = out_3.read_text()
+
+    # Extraire la section Diagnostic par Cible de chacun des deux rapports
+    def extract_target_diag(html: str, target_label: str) -> str:
+        m = re.search(r'<h2>Diagnostic par Cible</h2>(.*?)<h2>', html, re.DOTALL)
+        assert m is not None, "Section Diagnostic par Cible introuvable"
+        block = m.group(1).replace(f"Cible : {target_label}", "Cible : TARGET_ID")
+        return block.strip()
+
+    diag1 = extract_target_diag(html1, "M93130.1")
+    diag2 = extract_target_diag(html2, "3")
+
+    assert diag1 == diag2, f"Le diagnostic diffère selon l'en-tête FASTA:\n--- >M93130.1 ---\n{diag1}\n--- >3 ---\n{diag2}"
+    assert "Toutes les cibles présentent une occupation favorable" not in diag1
+
+
+def test_part_b_tolerant_sites_in_analyze_and_coherence_with_coverage(tmp_path: Path):
+    """Partie B : Vérifie via CliRunner sur `labcraft analyze` et `labcraft coverage` que :
+    1. B3 (1 mésappariement) et LB (2 mésappariements) du panel 3 sont trouvés sur M93130.1 en mode analyse.
+    2. Pour chaque rôle (F3, B3, FIP, BIP, LF, LB), `analyze` et `coverage` donnent la même position,
+       le même brin et le même nombre de mésappariements.
+    3. Non-régression : les sites parfaits gardent leur ΔG au centième à 63 °C, 50 mM Na, 8 mM Mg, 1,4 mM dNTP :
+       F3 -6,94, B3 parfait -6,72, LF -7,08, LB parfait -6,51, FIP -8,25, BIP -6,15.
+    4. Un site frappé de veto 3' est signalé comme tel dans le rapport d'analyse et n'entre pas dans l'équilibre.
+    """
+    import json
+    from labcraft.cli.parsers import read_multi_fasta, build_config_from_cli
+    from labcraft.cli.config import build_engine_from_config
+    from labcraft.lamp.complex_enumeration import enumerate_complexes
+    from labcraft.lamp.coverage import CoverageAnalyzer
+
+    fixture_dir = Path(__file__).resolve().parent.parent / "fixtures" / "real_primer_files"
+    p3_file = fixture_dir / "primer_dengue_3.txt"
+    d3_fasta = fixture_dir / "DEN3_M93130.fasta"
+
+    d3_records = read_multi_fasta(str(d3_fasta))
+    d3_id, d3_seq = d3_records[0][0].split()[0], d3_records[0][1]
+
+    p3_records = [
+        f">{h}\n{s}" for h, s in read_multi_fasta(str(p3_file)) if h.startswith("3_")
+    ]
+    primers_only_3 = tmp_path / "panel_3.txt"
+    primers_only_3.write_text("\n".join(p3_records) + "\n")
+
+    out_analyze = tmp_path / "analyze_den3.html"
+    out_cov = tmp_path / "coverage_den3.html"
+
+    runner = CliRunner()
+    res_an = runner.invoke(app, [
+        "analyze", "-p", str(primers_only_3), "-t", str(d3_fasta), "-o", str(out_analyze),
+        "--temperature", "63.0", "--na", "50.0", "--mg", "8.0", "--dntp", "1.4"
+    ])
+    assert res_an.exit_code == 0, f"Analyze failed: {res_an.stdout}"
+
+    res_cov = runner.invoke(app, [
+        "coverage", "-p", str(primers_only_3), "-f", str(d3_fasta), "-o", str(out_cov),
+        "--temperature", "63.0", "--na", "50.0", "--mg", "8.0", "--dntp", "1.4"
+    ])
+    assert res_cov.exit_code == 0, f"Coverage failed: {res_cov.stdout}"
+
+    html_an = out_analyze.read_text()
+    # 1. B3_3_site (1 mismatch) et LB_3_site (2 mismatches) présents dans le rapport HTML d'analyse
+    assert "B3_3_site" in html_an
+    assert "LB_3_site" in html_an
+    assert "1 mismatches" in html_an
+    assert "2 mismatches" in html_an
+
+    # 2. Comparaison position, brin, nombre de mésappariements entre coverage (JSON) et analyze
+    cov_json = json.loads((tmp_path / "coverage_den3.json").read_text())
+    cov_evals = cov_json["strains"][0]["evals"]
+
+    cfg = build_config_from_cli(
+        config_path=None,
+        primers_path=str(primers_only_3),
+        targets_path=str(d3_fasta),
+        temperature=63.0, na=50.0, mg=8.0, dntp=1.4
+    )
+    primers, p2t, backend, b_kwargs, mon_molar, enzyme, temp, profiles = build_engine_from_config(cfg, {d3_id: d3_seq})
+    _, _, _, unf = enumerate_complexes(
+        primers, {d3_id: d3_seq}, backend, profile=profiles, temp_celsius=63.0,
+        mon_molar=mon_molar, buffer=cfg.experiment.buffer.model_dump(), enzyme=enzyme, primer_to_target=p2t
+    )
+
+    for role in ("F3", "B3", "FIP", "BIP", "LF", "LB"):
+        site_key = f"{role}_3_site"
+        assert site_key in unf, f"{site_key} manquant dans enumerate_complexes"
+        an_info = unf[site_key]
+        cv_info = cov_evals[role]
+        assert an_info["position"] == cv_info["position"], f"Position différente pour {role}"
+        assert an_info["strand"] == cv_info["strand"], f"Brin différent pour {role}"
+        assert an_info["mismatches"] == cv_info["mismatches"], f"Mismatches différents pour {role}"
+
+    # 3. Non-régression au centième sur les sites parfaits (à 63 °C, 50 mM Na, 8 mM Mg, 1,4 mM dNTP)
+    cov_analyzer = CoverageAnalyzer(primers, {d3_id: d3_seq}, backend, enzyme, temp_celsius=63.0)
+    expected_perfect_dg = {
+        "CTCGTGTAGGAATGGGAG": -6.94,      # F3 parfait
+        "CTGGCTTGAGACATCTTCT": -6.72,     # B3 parfait
+        "TGAATTCCACGAGCGTTC": -7.08,      # LF parfait
+        "AAGGTCATCCAACTTAGTAGGA": -6.51,  # LB parfait
+        "CTGAAGCCTTTCCCCAGA": -8.25,      # FIP parfait
+        "ACCACAAAGTCCCAATCA": -6.15,      # BIP parfait
+    }
+    for seq, expected_dg in expected_perfect_dg.items():
+        actual_dg = round(cov_analyzer._get_perfect_dg_seq(seq), 2)
+        assert actual_dg == expected_dg, f"Non-régression ΔG pour {seq}: attendu {expected_dg}, obtenu {actual_dg}"
+
+    # 4. Vérification via CLI qu'un site frappé de veto 3' est signalé dans le rapport d'analyse et a 0 % d'occupation
+    f3_pos = cov_evals["F3"]["position"]
+    mut_seq = d3_seq[:f3_pos + 17] + ("T" if d3_seq[f3_pos + 17] != "T" else "A") + d3_seq[f3_pos + 18:]
+    mut_fasta = tmp_path / "den3_f3_veto.fasta"
+    mut_fasta.write_text(f">DEN3_veto\n{mut_seq}\n")
+    out_veto = tmp_path / "analyze_veto.html"
+    res_veto = runner.invoke(app, [
+        "analyze", "-p", str(primers_only_3), "-t", str(mut_fasta), "-o", str(out_veto),
+        "--temperature", "63.0", "--na", "50.0", "--mg", "8.0", "--dntp", "1.4"
+    ])
+    assert res_veto.exit_code == 0
+    html_veto = out_veto.read_text()
+    assert "Veto" in html_veto or "3' Bloqué" in html_veto
+
+
