@@ -2,7 +2,7 @@
 
 Recommandations qualitatives (non-séquentielles) pour l'optimisation.
 """
-from typing import List, Dict, Any, Optional
+from typing import List, Optional
 from labcraft.metrics.verdict import PanelVerdict
 from labcraft.metrics.risk import RiskItem
 
@@ -29,7 +29,9 @@ def generate_recommendations(verdict: PanelVerdict, risks: Optional[List[RiskIte
     has_blocking = False
     
     if risks:
-        has_amplifiable = any(r.severity >= 10.0 and r.concentration > 1e-9 for r in risks)
+        # Dès qu'un dimère amplifiable est présent à concentration non nulle (> 1 pM), signaler les mitigations
+        # As soon as an amplifiable dimer is present at non-negligible concentration (> 1 pM), report mitigations
+        has_amplifiable = any(r.severity >= 10.0 and r.concentration > 1e-12 for r in risks)
         has_blocking = any(r.severity < 10.0 and r.concentration > 1e-9 for r in risks)
     
     # Fallback sur le verdict si les risques ne sont pas passés (rétrocompatibilité)
@@ -58,6 +60,15 @@ def generate_recommendations(verdict: PanelVerdict, risks: Optional[List[RiskIte
         )
         
     if not recs:
-        recs.append("Aucune recommandation non-séquentielle critique. Le panel semble sain.")
+        if verdict.status in ("WARNING", "FAILURE"):
+            # Un panel en WARNING ou FAILURE ne doit jamais être qualifié de sain
+            # A panel in WARNING or FAILURE must never be described as healthy
+            recs.append(
+                f"Diagnostic ({verdict.status}) : Aucune recommandation non-séquentielle sur les dimères, "
+                f"mais le panel présente des limitations sur cible ({verdict.global_cause}). "
+                "Consultez le diagnostic par cible et par amorce ci-dessus."
+            )
+        else:
+            recs.append("Aucune recommandation non-séquentielle critique. Le panel semble sain.")
         
     return recs

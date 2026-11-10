@@ -27,7 +27,7 @@ def evaluate_risks(
     complex_names: List[str],  
     concentrations: List[float], 
     amplifiable_flags: List[bool],
-    is_warm_start: bool = True,
+    is_warm_start: bool = False,
     dimer_details: Optional[List[dict]] = None
 ) -> List[RiskItem]:
     """
@@ -35,7 +35,7 @@ def evaluate_risks(
     """
     risks = []
     
-    for i, (c_name, conc, is_amp) in enumerate(zip(complex_names, concentrations, amplifiable_flags)):
+    for i, (c_name, conc, is_amp) in enumerate(zip(complex_names, concentrations, amplifiable_flags, strict=True)):
         if "_free" in c_name or "_on_" in c_name:
             continue # Pas de risque pour les espèces libres ou liées à la cible
             

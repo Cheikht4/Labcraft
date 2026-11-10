@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 import numpy as np
 from labcraft.metrics.fractions import PrimerFractions
 from labcraft.metrics.risk import RiskItem
@@ -27,15 +27,21 @@ def generate_verdict(
     target_occupations: Dict[str, Dict[str, float]],
     risks: List[RiskItem],
     loop_primer_parents: set[str] = None,
-    primer_to_panel: Optional[Dict[str, str]] = None
+    primer_to_panel: Optional[Dict[str, str]] = None,
+    primer_to_target: Optional[Dict[str, str]] = None,
+    unfolding_penalties: Optional[Dict[str, Any]] = None,
+    dimer_conc_max_nm: Optional[float] = None
 ) -> PanelVerdict:
     """
     Évalue le panel et identifie toutes les amorces en difficulté
     en nommant le mécanisme dominant réel pour chacune.
+    Evaluates the panel and identifies all struggling primers by naming
+    the dominant physical mechanism for each.
     """
     if loop_primer_parents is None:
         loop_primer_parents = set()
         
+    assoc_map = primer_to_target if primer_to_target is not None else primer_to_panel
     issues = []
     
     if target_occupations:
@@ -43,25 +49,29 @@ def generate_verdict(
         # Mode with target(s): evaluation per parent primer / locus
         for target_id, occupations in target_occupations.items():
             # Regrouper les fractions par amorce parente
+            # Group fractions by parent primer
             parent_to_variants: Dict[str, List[str]] = {}
             for primer_name in fractions.keys():
                 parent_name = primer_name.split('#')[0] if '#' in primer_name else primer_name
                 parent_to_variants.setdefault(parent_name, []).append(primer_name)
 
             for parent_name, var_names in parent_to_variants.items():
-                # Filtrer selon le panel d'appartenance si disponible
-                if primer_to_panel is not None:
-                    p_panel = primer_to_panel.get(parent_name) or primer_to_panel.get(var_names[0])
-                    if p_panel:
-                        target_clean = target_id.replace("Synth", "")
-                        panel_clean = p_panel.replace("Synth", "")
-                        if target_id != p_panel and target_clean != panel_clean:
-                            continue
+                # Filtrer selon la table d'association amorce -> cible
+                # Filter using the primer -> target association table
+                if assoc_map is not None:
+                    p_target = assoc_map.get(parent_name) or assoc_map.get(var_names[0])
+                    if p_target and p_target != target_id:
+                        continue
                 else:
-                    target_suffix = target_id.replace("Synth", "")
-                    if not (parent_name.endswith(f"_{target_suffix}") or f"_{target_suffix}_" in parent_name or parent_name.startswith(f"{target_suffix}_")):
-                        if len(target_occupations) > 1:
-                            continue
+                    # Fallback pour appel direct en test unitaire sans table d'association
+                    # Fallback for direct unit test call without association table
+                    site_name_check = f"{parent_name}_site"
+                    has_site_in_this_target = (
+                        site_name_check in occupations
+                        or any(k.startswith(f"{parent_name}@") or k.startswith(f"{parent_name}_") for k in occupations)
+                    )
+                    if not has_site_in_this_target and len(target_occupations) > 1:
+                        continue
 
                 site_name = f"{parent_name}_site"
                 occ = occupations.get(site_name)
@@ -84,10 +94,24 @@ def generate_verdict(
 
                 # Moins de 10% d'occupation = amorce d'initiation en difficulté
                 if occ < 0.1 and parent_name not in loop_primer_parents:
-                    is_crit = occ < 0.01
+                    # En LAMP sur génome complet, une occupation non nulle (ex. 0.1–5% sur F3/B3) suffit à amorcer
+                    # l'amplification exponentielle : seules l'absence totale (occ == 0.0) ou la séquestration critique
+                    # (mean_free < 0.05) constituent un échec bloquant (is_critical = True).
+                    # In LAMP on a full genome, a non-zero occupation (e.g. 0.1-5% on F3/B3) suffices to initiate
+                    # exponential amplification: only total absence (occ == 0.0) or critical sequestration
+                    # (mean_free < 0.05) constitutes a blocking failure (is_critical = True).
+                    is_crit = (occ == 0.0) or (mean_free < 0.05)
 
-                    # Déterminer la cause dominante
-                    if mean_free < 0.1:
+                    # Déterminer la cause dominante / Determine dominant cause
+                    pen_for_target = unfolding_penalties.get(target_id, {}) if isinstance(unfolding_penalties, dict) else {}
+                    site_pen = pen_for_target.get(site_name) or pen_for_target.get(f"{parent_name}@{target_id}_site")
+
+                    if isinstance(site_pen, dict) and site_pen.get("verdict") == "veto_3p":
+                        bad_pos = site_pen.get("first_bad_pos", 1)
+                        cause = f"Veto d'extension en 3' pour {parent_name} (mésappariement bloquant à pos -{bad_pos} du 3')."
+                    elif isinstance(site_pen, dict) and site_pen.get("verdict") == "indetermine":
+                        cause = f"Site indéterminé pour {parent_name} (présence de base(s) N dans le domaine de liaison)."
+                    elif mean_free < 0.1:
                         if mean_inter > mean_homo and mean_inter > mean_intra:
                             cause = f"Hybridation croisée inter-jeux séquestrant {parent_name} à {dom_frac_pct:.1f}% dans {dom_complex}."
                         else:
@@ -129,16 +153,28 @@ def generate_verdict(
                     is_critical=is_crit
                 ))
                 
-    # Évaluation globale
-    has_critical_dimers = any(r.is_amplifiable and r.severity >= 10.0 for r in risks)
+    # Évaluation globale / Global evaluation
+    # Concentration totale de dimères amplifiables en nM / Total amplifiable dimer concentration in nM
+    total_amp_dimer_conc_nm = sum(r.concentration for r in risks if r.is_amplifiable and r.severity >= 10.0) * 1e9
+    has_any_amp_dimers = any(r.is_amplifiable and r.severity >= 10.0 for r in risks)
+    if dimer_conc_max_nm is not None:
+        has_critical_dimers = total_amp_dimer_conc_nm >= dimer_conc_max_nm
+    else:
+        has_critical_dimers = has_any_amp_dimers
     has_critical_issues = any(i.is_critical for i in issues)
     
     if has_critical_dimers or has_critical_issues:
         status = "FAILURE"
         global_cause = "Présence de dimères d'amorces amplifiables majeurs ou séquestration critique interdisant l'amplification."
-    elif len(issues) > 0 or any(r.severity >= 5.0 for r in risks):
+    elif len(issues) > 0 or has_any_amp_dimers or any(r.severity >= 5.0 for r in risks):
         status = "WARNING"
-        global_cause = "Compétitions ou pertes d'accessibilité modérées identifiées."
+        if has_any_amp_dimers:
+            global_cause = (
+                f"Dimères amplifiables modérés ({total_amp_dimer_conc_nm:.2f} nM < seuil {dimer_conc_max_nm:.2f} nM) "
+                "ou pertes d'accessibilité modérées identifiées."
+            )
+        else:
+            global_cause = "Compétitions ou pertes d'accessibilité modérées identifiées."
     else:
         status = "OK"
         global_cause = "Aucun risque majeur d'interaction parasite identifié."
