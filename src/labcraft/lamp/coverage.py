@@ -4,7 +4,6 @@ Analyse thermodynamique de couverture multi-souches pour panels LAMP.
 
 from __future__ import annotations
 
-import csv
 import warnings
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
@@ -19,6 +18,7 @@ from labcraft.diagnostics.enzyme import PolymeraseProfile
 class SiteVerdict(Enum):
     PARFAIT = "parfait"
     TOLERABLE = "tolerable"
+    INDETERMINE = "indetermine"
     VETO_3P = "veto_3p"
     NON_VIABLE = "non_viable"
     ABSENT = "absent"
@@ -46,6 +46,7 @@ class StrainVerdict:
     is_amplifiable_thermo: bool
     is_amplifiable_count: bool
     limiting_primer_thermo: Optional[str] = None
+    is_indeterminate: bool = False
 
 
 def _evaluation_rank(eval_obj: SiteEvaluation) -> Tuple[int, int, float]:
@@ -53,13 +54,14 @@ def _evaluation_rank(eval_obj: SiteEvaluation) -> Tuple[int, int, float]:
     Computes quality rank of a site evaluation (higher = better).
 
     Hiérarchie / Hierarchy:
-    1. Verdict : PARFAIT (4) > TOLERABLE (3) > NON_VIABLE (2) > VETO_3P (1) > ABSENT (0)
+    1. Verdict : PARFAIT (5) > TOLERABLE (4) > INDETERMINE (3) > NON_VIABLE (2) > VETO_3P (1) > ABSENT (0)
     2. Moins de mésappariements / Fewer mismatches
     3. Pénalité relative ddG minimale (ou dG le plus favorable)
     """
     verdict_scores = {
-        SiteVerdict.PARFAIT: 4,
-        SiteVerdict.TOLERABLE: 3,
+        SiteVerdict.PARFAIT: 5,
+        SiteVerdict.TOLERABLE: 4,
+        SiteVerdict.INDETERMINE: 3,
         SiteVerdict.NON_VIABLE: 2,
         SiteVerdict.VETO_3P: 1,
         SiteVerdict.ABSENT: 0,
@@ -145,6 +147,23 @@ class CoverageAnalyzer:
                 f"de l'amorce {primer.name} ({len(primer.binding_domain)} nt) pour la souche '{strain_id}'."
             )
 
+        # Si le site contient au moins un N dans le domaine de liaison, le verdict est indetermine
+        # If the site contains at least one N in the binding domain, the verdict is indetermine
+        if 'N' in site_seq.upper():
+            return SiteEvaluation(
+                strain_id=strain_id,
+                primer_name=primer.name,
+                primer_role=primer.role,
+                verdict=SiteVerdict.INDETERMINE,
+                n_mismatches_count=site_seq.upper().count('N'),
+                dg_hyb=None,
+                ddg=None,
+                first_bad_pos=None,
+                severity=None,
+                position=position,
+                strand=strand
+            )
+
         comp = {'A': 'T', 'T': 'A', 'C': 'G', 'G': 'C'}
         if strand == '+':
             bottom_under_top = "".join(comp.get(c, 'N') for c in site_seq)
@@ -156,7 +175,7 @@ class CoverageAnalyzer:
         resolved_primer_chars = []
         mismatch_count = 0
 
-        for a, b in zip(primer.binding_domain, bottom_under_top):
+        for a, b in zip(primer.binding_domain, bottom_under_top, strict=True):
             a_set = IUPAC_MATCHABLE.get(a.upper())
             b_comp = comp.get(b.upper(), '')
             b_comp_set = IUPAC_MATCHABLE.get(b_comp)
@@ -329,6 +348,7 @@ class CoverageAnalyzer:
             # Determine amplification viability
             is_amp_thermo = True
             is_amp_count = True
+            is_indet = False
             limiting: Optional[str] = None
 
             # Vérifier toutes les amorces d'initiation
@@ -357,6 +377,10 @@ class CoverageAnalyzer:
                 ev = best_evaluations[role_key]
                 role_min_mm = min_csv_mms.get(role_key, ev.n_mismatches_count)
 
+                if ev.verdict == SiteVerdict.INDETERMINE:
+                    is_indet = True
+                    continue
+
                 # Règle thermodynamique (indépendante)
                 if ev.verdict in (SiteVerdict.VETO_3P, SiteVerdict.ABSENT, SiteVerdict.NON_VIABLE):
                     is_amp_thermo = False
@@ -367,12 +391,17 @@ class CoverageAnalyzer:
                 if role_min_mm > self.max_mismatches_count:
                     is_amp_count = False
 
+            if is_indet:
+                is_amp_thermo = False
+                is_amp_count = False
+
             strain_verdicts.append(StrainVerdict(
                 strain_id=s_id,
                 evaluations=best_evaluations,
                 is_amplifiable_thermo=is_amp_thermo,
                 is_amplifiable_count=is_amp_count,
-                limiting_primer_thermo=limiting
+                limiting_primer_thermo=limiting,
+                is_indeterminate=is_indet
             ))
 
         return strain_verdicts

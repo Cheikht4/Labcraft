@@ -1,7 +1,7 @@
 import json
 import math
 import os
-from typing import List, Dict, Optional
+from typing import List, Optional
 from jinja2 import Environment, FileSystemLoader
 
 from labcraft.lamp.coverage import StrainVerdict, SiteVerdict
@@ -23,15 +23,20 @@ def render_coverage_report(
             f.write("<html><body>No strains analyzed</body></html>")
         return
         
-    covered_thermo = sum(1 for v in verdicts if v.is_amplifiable_thermo)
-    covered_count = sum(1 for v in verdicts if v.is_amplifiable_count)
+    # Exclure les souches dont une amorce d'initiation est indéterminée du dénominateur de couverture
+    # Exclude strains with an indeterminate initiation primer from the coverage denominator
+    indeterminate_strains = sum(1 for v in verdicts if getattr(v, "is_indeterminate", False))
+    evaluable_strains = total_strains - indeterminate_strains
+
+    covered_thermo = sum(1 for v in verdicts if v.is_amplifiable_thermo and not getattr(v, "is_indeterminate", False))
+    covered_count = sum(1 for v in verdicts if v.is_amplifiable_count and not getattr(v, "is_indeterminate", False))
     
-    divergences = [v for v in verdicts if v.is_amplifiable_thermo != v.is_amplifiable_count]
+    divergences = [v for v in verdicts if not getattr(v, "is_indeterminate", False) and v.is_amplifiable_thermo != v.is_amplifiable_count]
     
     # Limiting primers thermo
     limiting_counts = {}
     for v in verdicts:
-        if not v.is_amplifiable_thermo and v.limiting_primer_thermo:
+        if not getattr(v, "is_indeterminate", False) and not v.is_amplifiable_thermo and v.limiting_primer_thermo:
             limiting_counts[v.limiting_primer_thermo] = limiting_counts.get(v.limiting_primer_thermo, 0) + 1
             
     sorted_limiting = sorted(limiting_counts.items(), key=lambda x: x[1], reverse=True)
@@ -52,12 +57,19 @@ def render_coverage_report(
     frac_ka = math.exp(-ddg_max / rt) * 100.0 if rt > 0 else 0.0
 
     # Prepare JSON output
+    thermo_rate = round(covered_thermo / evaluable_strains * 100, 1) if evaluable_strains > 0 else 0.0
+    count_rate = round(covered_count / evaluable_strains * 100, 1) if evaluable_strains > 0 else 0.0
+
     json_path = output_path.replace(".html", ".json")
     json_data = {
         "panel_name": panel_name,
         "total_strains": total_strains,
+        "evaluable_strains": evaluable_strains,
+        "indeterminate_strains": indeterminate_strains,
         "covered_thermo": covered_thermo,
         "covered_count": covered_count,
+        "thermo_rate": thermo_rate,
+        "count_rate": count_rate,
         "ddg_max": ddg_max,
         "dg_threshold": dg_threshold,
         "temperature_C": temperature_C,
@@ -69,6 +81,7 @@ def render_coverage_report(
             "strain_id": v.strain_id,
             "thermo": v.is_amplifiable_thermo,
             "count": v.is_amplifiable_count,
+            "indeterminate": getattr(v, "is_indeterminate", False),
             "evals": {}
         }
         for pname, ev in v.evaluations.items():
@@ -95,10 +108,12 @@ def render_coverage_report(
     html = template.render(
         panel_name=panel_name,
         total_strains=total_strains,
+        evaluable_strains=evaluable_strains,
+        indeterminate_strains=indeterminate_strains,
         covered_thermo=covered_thermo,
         covered_count=covered_count,
-        thermo_rate=round(covered_thermo / total_strains * 100, 1),
-        count_rate=round(covered_count / total_strains * 100, 1),
+        thermo_rate=thermo_rate,
+        count_rate=count_rate,
         divergences=divergences,
         worst_primer=worst_primer,
         sorted_primers=sorted_primers,

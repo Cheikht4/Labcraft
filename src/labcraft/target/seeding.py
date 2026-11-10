@@ -27,13 +27,13 @@ import regex
 
 from labcraft.lamp.domains import PhysicalPrimer, PrimerRole, _revcomp, IUPAC_MATCHABLE
 
-# Dictionnaire IUPAC vers classes d'expression régulière
-# IUPAC dictionary to regular expression classes
+# Dictionnaire IUPAC vers classes d'expression régulière (inclut N sur la cible pour ne pas rejeter les sites contenant des N)
+# IUPAC dictionary to regular expression classes (includes N on target so sites with N are not rejected as substitutions)
 IUPAC_DICT = {
-    'A': 'A', 'C': 'C', 'G': 'G', 'T': 'T', 'U': 'T',
-    'R': '[AG]', 'Y': '[CT]', 'S': '[GC]', 'W': '[AT]',
-    'K': '[GT]', 'M': '[AC]', 'B': '[CGT]', 'D': '[AGT]',
-    'H': '[ACT]', 'V': '[ACG]', 'N': '[ACGT]'
+    'A': '[AN]', 'C': '[CN]', 'G': '[GN]', 'T': '[TN]', 'U': '[TN]',
+    'R': '[AGN]', 'Y': '[CTN]', 'S': '[GCN]', 'W': '[ATN]',
+    'K': '[GTN]', 'M': '[ACN]', 'B': '[CGTN]', 'D': '[AGTN]',
+    'H': '[ACTN]', 'V': '[ACGN]', 'N': '[ACGTN]'
 }
 
 
@@ -143,7 +143,7 @@ def count_iupac_mismatches(primer_seq: str, site_seq: str, strand: str) -> int:
         bottom_under_top = site_seq[::-1]
 
     mismatches = 0
-    for a, b in zip(primer_seq, bottom_under_top):
+    for a, b in zip(primer_seq, bottom_under_top, strict=True):
         a_set = IUPAC_MATCHABLE.get(a.upper())
         b_comp = comp.get(b.upper(), '')
         b_comp_set = IUPAC_MATCHABLE.get(b_comp)
@@ -207,6 +207,10 @@ def find_candidate_sites(
             if match is not None:
                 start, end = match.start(), match.end()
                 site_seq = genome_upper[start:end]
+                # Rejeter les régions purement ou majoritairement composées de N (padding synthétique)
+                # Reject regions purely or mostly composed of N (synthetic padding)
+                if site_seq.count('N') > len(site_seq) // 2:
+                    continue
                 n_mm = count_iupac_mismatches(p_seq, site_seq, strand)
                 candidate_records.append({
                     "strain_id": strain_id,

@@ -502,3 +502,73 @@ def test_coverage_analyzer_warning_when_no_buffer():
     
     with pytest.warns(UserWarning, match="Aucun modèle de sel/tampon"):
         CoverageAnalyzer([p], {"S1": "GCCACCTTAAGCCACAGTA"}, ViennaRNABackend(), enzyme)
+
+
+def test_part_h_three_ns_in_f3_site_gives_indetermine_and_preserves_coverage_rate(tmp_path: Path):
+    """
+    Partie H : Vérifie qu'une souche contenant 3 N au milieu du site F3 donne le verdict
+    'indetermine' (et non 'absent'), ne fait pas baisser le taux de couverture, et
+    affiche le statut indéterminé en mode analyze.
+    Part H: Verify that a strain with 3 N bases in the middle of the F3 site gets the
+    'indetermine' verdict (not 'absent'), does not lower the coverage rate, and
+    displays the indeterminate status in analyze mode.
+    """
+    fixture_dir = Path(__file__).resolve().parent.parent / "fixtures" / "real_primer_files"
+    primers_path = fixture_dir / "primer_dengue_3.txt"
+    genome_path = fixture_dir / "DEN3_M93130.fasta"
+
+    from labcraft.cli.parsers import read_multi_fasta
+    ref_seq = read_multi_fasta(str(genome_path))[0][1]
+
+    # Site F3 sur M93130.1 en position 5420 (18 nt) ; on remplace 3 bases au milieu par NNN
+    # F3 site on M93130.1 at position 5420 (18 nt); replace 3 bases in the middle with NNN
+    f3_pos = 5420
+    seq_with_3n = ref_seq[:f3_pos + 7] + "NNN" + ref_seq[f3_pos + 10:]
+
+    fasta_2strains = tmp_path / "strains_with_3n.fasta"
+    fasta_2strains.write_text(f">M93130_ref\n{ref_seq}\n>M93130_F3_3N\n{seq_with_3n}\n")
+
+    out_cov_html = tmp_path / "coverage_3n.html"
+    runner = CliRunner()
+    res_cov = runner.invoke(app, [
+        "coverage",
+        "-p", str(primers_path),
+        "-f", str(fasta_2strains),
+        "--panel", "3",
+        "-o", str(out_cov_html),
+    ])
+    assert res_cov.exit_code == 0, f"Coverage CLI failed: {res_cov.stdout}"
+
+    cov_json = json.loads((tmp_path / "coverage_3n.json").read_text())
+    assert cov_json["total_strains"] == 2
+    assert cov_json["indeterminate_strains"] == 1
+    assert cov_json["evaluable_strains"] == 1
+    assert cov_json["covered_thermo"] == 1
+    assert cov_json["thermo_rate"] == 100.0
+
+    strains_by_id = {s["strain_id"]: s for s in cov_json["strains"]}
+    s_3n = strains_by_id["M93130_F3_3N"]
+    assert s_3n["indeterminate"] is True
+    assert s_3n["evals"]["F3"]["verdict"] == "indetermine"
+
+    # Vérification également en mode analyze sur la souche contenant 3 N (panel 3)
+    # Also verify in analyze mode on the strain containing 3 N (panel 3)
+    p3_records = [
+        f">{h}\n{s}" for h, s in read_multi_fasta(str(primers_path)) if h.startswith("3_")
+    ]
+    primers_only_3 = tmp_path / "panel_3.txt"
+    primers_only_3.write_text("\n".join(p3_records) + "\n")
+
+    fasta_1strain = tmp_path / "strain_3n_only.fasta"
+    fasta_1strain.write_text(f">M93130_F3_3N\n{seq_with_3n}\n")
+    out_ana_html = tmp_path / "analyze_3n.html"
+    res_ana = runner.invoke(app, [
+        "analyze",
+        "-p", str(primers_only_3),
+        "-t", str(fasta_1strain),
+        "-o", str(out_ana_html),
+    ])
+    assert res_ana.exit_code == 0, f"Analyze CLI failed: {res_ana.stdout}"
+    ana_html_text = out_ana_html.read_text()
+    assert "Indéterminé" in ana_html_text
+
