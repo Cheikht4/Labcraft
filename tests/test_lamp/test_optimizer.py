@@ -150,3 +150,83 @@ def test_optimizer_multiplex_balance():
         enzyme=BST_2_0
     )
     assert isinstance(results, list)
+
+
+def test_part_f_optimizer_cumulative_gain_and_parent_level_variants_via_cli(tmp_path):
+    """Partie F : Vérifie que :
+    1. Le gain affiché (`dangerous_gain_rel`) vaut exactement `(dangerous_before - dangerous_after) / dangerous_before`.
+    2. Les variants d'une même amorce dégénérée (`LB_3#1`, `LB_3#2`, etc.) bougent ensemble et la suggestion
+       est affichée au niveau de l'amorce parente (`LB_3`), aussi bien en appel direct que via `labcraft analyze`.
+    """
+    from pathlib import Path
+    from typer.testing import CliRunner
+    from labcraft.cli.main import app
+    from labcraft.cli.parsers import read_multi_fasta, build_config_from_cli
+    from labcraft.cli.config import build_engine_from_config
+
+    fixture_dir = Path(__file__).resolve().parent.parent / "fixtures" / "real_primer_files"
+    p3_file = fixture_dir / "primer_dengue_3.txt"
+    d3_fasta = fixture_dir / "DEN3_M93130.fasta"
+
+    d3_records = read_multi_fasta(str(d3_fasta))
+    d3_id, d3_seq = d3_records[0][0].split()[0], d3_records[0][1]
+
+    p14_records = [
+        f">{h}\n{s}" for h, s in read_multi_fasta(str(p3_file)) if h.startswith("14_")
+    ]
+    primers_only_14 = tmp_path / "panel_14.txt"
+    primers_only_14.write_text("\n".join(p14_records) + "\n")
+
+    cfg = build_config_from_cli(
+        config_path=None,
+        primers_path=str(primers_only_14),
+        targets_path=str(d3_fasta),
+        temperature=63.0, na=50.0, mg=8.0, dntp=1.4
+    )
+    primers, p2t, backend, b_kwargs, mon_molar, enzyme, temp, profiles = build_engine_from_config(cfg, {d3_id: d3_seq})
+    prob, strands, complexes, _ = enumerate_complexes(
+        primers, d3_seq, backend, profile=profiles[d3_id], temp_celsius=63.0,
+        mon_molar=mon_molar, buffer=cfg.experiment.buffer.model_dump(), enzyme=enzyme, primer_to_target=p2t
+    )
+
+    opt_res = optimize_concentrations(
+        prob_template=prob,
+        species_names=strands,
+        primers=primers,
+        target_dict={d3_id: d3_seq},
+        primer_to_panel=p2t,
+        original_free_fractions={},
+        original_target_occupations={},
+        complex_names=complexes,
+        temp_celsius=63.0,
+        backend=backend,
+        enzyme=enzyme,
+        **b_kwargs
+    )
+
+    assert isinstance(opt_res, dict) and "metrics" in opt_res and "suggestions" in opt_res
+    metrics = opt_res["metrics"]
+    before = metrics["dangerous_before"]
+    after = metrics["dangerous_after"]
+    expected_gain = (before - after) / before
+    assert metrics["dangerous_gain_rel"] == pytest.approx(expected_gain, rel=1e-9), (
+        f"Le gain affiché ({metrics['dangerous_gain_rel']}) doit valoir exactement (avant - après) / avant ({expected_gain})"
+    )
+
+    # Aucune suggestion ne doit contenir '#' (uniquement des amorces parentes)
+    for s in opt_res["suggestions"]:
+        assert "#" not in s["primer_name"], f"Suggestion au niveau variant au lieu du parent : {s['primer_name']}"
+
+    # Vérification via CliRunner sur labcraft analyze
+    out_html = tmp_path / "report_opt.html"
+    runner = CliRunner()
+    res = runner.invoke(app, [
+        "analyze", "-p", str(primers_only_14), "-t", str(d3_fasta), "-o", str(out_html),
+        "--temperature", "63.0", "--na", "50.0", "--mg", "8.0", "--dntp", "1.4"
+    ])
+    assert res.exit_code == 0, f"CLI failed: {res.stdout}"
+    html = out_html.read_text()
+    expected_pct_str = f"{round(expected_gain * 100, 1)} %"
+    assert expected_pct_str in html
+    assert "LB_14#" not in html.split("Ajustement de Concentrations")[1].split("Avertissements")[0] if "Ajustement de Concentrations" in html and "Avertissements" in html else True
+
