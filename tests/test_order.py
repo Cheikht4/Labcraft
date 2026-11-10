@@ -1,3 +1,7 @@
+# Note : Ce test à -6.27 kcal/mol est un test de non-régression numérique d'un dimère
+# (conditions standards 1 M Na+, sans correction saline) et ne valide pas la biologie.
+# Note: This test at -6.27 kcal/mol is a numerical non-regression test of a dimer
+# (standard 1 M Na+ conditions, without salt correction) and does not validate biology.
 def test_evaluate_pair_amplifiable_order():
     from labcraft.diagnostics.amplifiable_dimer import evaluate_pair_amplifiable
     from labcraft.thermo.backends.vienna import ViennaRNABackend

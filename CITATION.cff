@@ -1,0 +1,11 @@
+cff-version: 1.2.0
+message: "If you use LabCraft in your research, please cite it using the metadata below."
+title: "LabCraft: Thermodynamic Simulation Engine for Multiplex LAMP and PCR Primer Panel Design"
+version: 0.0.1
+date-released: 2026-11-08
+url: "https://github.com/Cheikht4/Labcraft"
+repository-code: "https://github.com/Cheikht4/Labcraft"
+license: MIT
+authors:
+  - family-names: "Diagne"
+    given-names: "Cheikh Talibouya"

@@ -175,8 +175,8 @@ class NativeBackend(DuplexEnergyBackend):
         complement = {'A': 'T', 'T': 'A', 'C': 'G', 'G': 'C'}
         try:
             comp_seq = "".join(complement[c] for c in reversed(seq1.upper()))
-        except KeyError:
-            raise ValueError("Invalid character in sequence for complementation.")
+        except KeyError as err:
+            raise ValueError("Invalid character in sequence for complementation.") from err
             
         if comp_seq != seq2.upper():
             raise NotImplementedError("NativeBackend only supports perfectly matched heterodimers.")

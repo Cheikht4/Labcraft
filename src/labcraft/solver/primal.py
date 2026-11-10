@@ -14,7 +14,6 @@ import logging
 
 import numpy as np
 import scipy.optimize
-from scipy.optimize import Bounds, LinearConstraint
 
 from .types import ConvergenceError, EquilibriumProblem, EquilibriumResult, SolverMethod
 

@@ -2,7 +2,7 @@
 
 Logique principale de l'optimiseur.
 """
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any
 
 from labcraft.optimize.mutations import enumerate_variants
 from labcraft.optimize.constraints import filter_no_new_artefacts, calc_intrinsic_3p_dg

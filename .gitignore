@@ -28,12 +28,15 @@ htmlcov/
 .DS_Store
 
 # Scratch and test files
+scratch/
 scratch_*.py
 test_tm.py
 test_flp_bip.py
 run_test.py
 verify_lna.py
 check_mini_conc.py
+examples/*.html
+validation/*.html
 
 # Downloaded HTML/CSV
 pmc.html

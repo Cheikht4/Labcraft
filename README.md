@@ -3,14 +3,14 @@
 
 LabCraft is an open-source thermodynamic simulation engine designed for multiplex primer panel design, supporting both LAMP (Loop-Mediated Isothermal Amplification) and PCR (Polymerase Chain Reaction) assays.
 
-![CI](https://img.shields.io/badge/CI-passing-success)
+[![CI](https://github.com/Cheikht4/Labcraft/actions/workflows/ci.yml/badge.svg)](https://github.com/Cheikht4/Labcraft/actions/workflows/ci.yml)
 ![PyPI](https://img.shields.io/badge/PyPI-v0.0.1-blue)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
 ## Features
-- Thermodynamic calculations for various duplexes
-- Advanced diagnostics and risk evaluation
-- Scalable pipeline for multiplex assay design
+- Thermodynamic calculations for various duplexes (ViennaRNA + Owczarzy salt corrections)
+- Coupled multi-target thermodynamic equilibrium and dimer/mispriming diagnostics
+- Multi-strain thermodynamic coverage evaluation (`labcraft coverage`)
 
 ## Installation
 Currently in pre-alpha. To install in development mode:
@@ -22,9 +22,28 @@ pip install -e .
 
 ## Usage
 
-You can launch an analysis using the command line interface:
+### 1. Analyse d'un panel via fichier YAML (`labcraft analyze -c`)
 ```bash
-labcraft examples/denv2_lopez.yaml -o report.html
+labcraft analyze -c examples/denv2_lopez.yaml -o report.html
+```
+
+### 2. Analyse directe depuis des fichiers d'amorces et de cibles (`labcraft analyze -p -t`)
+```bash
+labcraft analyze \
+  -p tests/fixtures/real_primer_files/primer_dengue_3.txt \
+  -t tests/fixtures/real_primer_files/DEN3_M93130.fasta \
+  --temperature 63.0 \
+  -o report_dengue3.html
+```
+
+### 3. Couverture thermodynamique multi-souches (`labcraft coverage`)
+```bash
+labcraft coverage \
+  -p tests/fixtures/real_primer_files/primer_dengue_3.txt \
+  -f tests/fixtures/real_primer_files/DEN3_M93130.fasta \
+  --panel 3 \
+  --temperature 63.0 \
+  -o coverage_dengue3.html
 ```
 
 You can also run validation scripts:
@@ -32,6 +51,7 @@ You can also run validation scripts:
 python validation/validate_parida.py
 python validation/validate_dengue.py
 ```
+*(Note: Cross-validation against external NUPACK multi-strand ensembles is planned as an optional future module.)*
 
 ### Configuration Schema (YAML)
 

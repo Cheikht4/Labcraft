@@ -7,7 +7,7 @@ import csv
 import os
 from typing import Tuple, Optional, Dict
 from labcraft.diagnostics.enzyme import PolymeraseProfile
-from labcraft.thermo.backends.native import _NN_PARAMS, _SEQ_TO_NN_KEY, _INIT_AT, _INIT_GC, _SYM
+from labcraft.thermo.backends.native import _NN_PARAMS, _SEQ_TO_NN_KEY, _INIT_AT, _INIT_GC
 
 # (dH, dS) par clé
 _MISMATCH_INTERNAL: Dict[str, Tuple[float, float]] = {}
@@ -195,15 +195,9 @@ def evaluate_primer_target_binding(
     temp_celsius: float = 65.0
 ) -> dict:
     """Évalue la liaison d'une amorce avec tolérance aux mésappariements."""
-    # target_region_5to3 est le brin cible. On doit le transformer en antiparallèle sous l'amorce.
-    # On calcule le reverse complément pour l'avoir en notation "under top".
+    # Le "bottom_under_top" est le brin cible inversé de gauche à droite.
+    # The "bottom_under_top" is the target strand reversed from left to right.
     complement = {'A': 'T', 'T': 'A', 'C': 'G', 'G': 'C'}
-    bottom = "".join(complement.get(b, 'N') for b in target_region_5to3[::-1])
-    # Sauf que "bottom under top" veut dire le brin tel quel, écrit antiparallèle,
-    # c'est-à-dire que target_region_5to3 (de 5' à 3') s'hybride à l'amorce. 
-    # Non, l'amorce (5'->3') s'hybride au brin cible (3'->5').
-    # Si target_region_5to3 est le brin cible lu 5'->3', sous l'amorce (5'->3'), il est à l'envers.
-    # Donc le "bottom_under_top" est juste le brin cible inversé de gauche à droite.
     bottom_under = target_region_5to3[::-1]
     
     n_mismatches = 0
@@ -215,7 +209,7 @@ def evaluate_primer_target_binding(
     _, _, dg_binding = nn_duplex_energy(primer_5to3, bottom_under, temp_celsius)
     
     # Veto 3'
-    extensible, bad_pos, severity = three_prime_extensible(primer_5to3, bottom_under, enzyme)
+    _, bad_pos, severity = three_prime_extensible(primer_5to3, bottom_under, enzyme)
     
     # Pour la couverture cible, tout mismatch dans la fenêtre pose problème (sévérité "weak" ou "block")
     # On considère que la variante n'est pas bien couverte.
@@ -253,7 +247,7 @@ def calculate_hybridization_dg(
         (dg_hyb_final, ddg_mismatch)
     """
     comp = {'A': 'T', 'T': 'A', 'C': 'G', 'G': 'C'}
-    n_mismatches = sum(1 for a, b in zip(primer_seq, bottom_under_top) if comp.get(a, '') != b)
+    n_mismatches = sum(1 for a, b in zip(primer_seq, bottom_under_top, strict=True) if comp.get(a, '') != b)
 
     def _revcomp(s):
         return "".join(comp.get(c, 'N') for c in reversed(s))

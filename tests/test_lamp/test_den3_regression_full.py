@@ -25,7 +25,7 @@ def _mock_calc_unfolding(window, local_start, local_end, temp_celsius, mon_molar
     return 0.0
 
 def test_non_regression_den3_full_genome():
-    fasta_path = os.path.join(os.path.dirname(__file__), '../../DEN3_M93130.fasta')
+    fasta_path = os.path.join(os.path.dirname(__file__), '../fixtures/real_primer_files/DEN3_M93130.fasta')
     with open(fasta_path, 'r') as f:
         target_seq = f.read().split('\n', 1)[1].replace('\n', '').upper()
         

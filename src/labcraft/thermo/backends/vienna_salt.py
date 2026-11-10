@@ -4,7 +4,7 @@ from labcraft.thermo.constants import R_GAS_KCAL_MOL_K
 Applique un décalage salin (ΔΔG) au ΔG natif de ViennaRNA en estimant
 l'enthalpie et l'entropie de la structure via le modèle du plus proche voisin.
 """
-from typing import Dict, Tuple, Optional
+from typing import Dict, Tuple
 import math
 from .base import DuplexEnergyBackend, DuplexResult
 from .vienna import ViennaRNABackend

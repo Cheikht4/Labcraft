@@ -53,7 +53,6 @@ def load_lna_params():
             base3 = row["base3_or_lna"].strip()
             dh = float(row["ddH_kcal"])
             ds = float(row["ddS_cal"])
-            dg = float(row["ddG37_kcal"])
             
             if half == "MXL":
                 _LNA_PARAMS_MXL[(base5, base3)] = (dh, ds)

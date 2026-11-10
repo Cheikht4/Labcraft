@@ -106,8 +106,8 @@ def solve_extended(
             
         try:
             delta_u = mpmath.lu_solve(neg_h, g_vec)
-        except ZeroDivisionError:
-            raise ConvergenceError("Singular Hessian in extended precision solver")
+        except ZeroDivisionError as err:
+            raise ConvergenceError("Singular Hessian in extended precision solver") from err
             
         for i in range(n_s):
             u[i] += delta_u[i, 0]

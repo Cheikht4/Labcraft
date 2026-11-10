@@ -22,7 +22,7 @@ def simulate_titration(
     primers: Sequence[PhysicalPrimer],
     backend: DuplexEnergyBackend,
     base_concentrations: dict[str, float],
-    dilutions: list[float] = [1.0, 0.5, 0.25, 0.125],
+    dilutions: list[float] | None = None,
     temp_celsius: float = 65.0
 ) -> TitrationResult:
     """
@@ -37,6 +37,8 @@ def simulate_titration(
     Returns:
         TitrationResult contenant les fractions libres
     """
+    if dilutions is None:
+        dilutions = [1.0, 0.5, 0.25, 0.125]
     # 1. Énumération une seule fois (calcul de tous les delta G)
     # On passe None comme cible pour forcer le mode "sans cible"
     from labcraft.lamp.stoichiometry import ConcentrationProfile
@@ -45,7 +47,7 @@ def simulate_titration(
     # On met tout à 1e-6 pour ne pas planter
     dummy_profile = ConcentrationProfile(target=0, fip_bip=1e-6, f3_b3=1e-6, lf_lb=1e-6)
     
-    prob_template, strands, complexes, _ = enumerate_complexes(
+    prob_template, _, complexes, _ = enumerate_complexes(
         primers, "", backend, profile=dummy_profile, temp_celsius=temp_celsius
     )
     
@@ -72,7 +74,7 @@ def simulate_titration(
         
         res = solve_dual(prob)
         
-        for i, p in enumerate(primers):
+        for i, _p in enumerate(primers):
             free = res.free_concentrations[i]
             tot = c_tot_dil[i]
             free_fractions[d_idx, i] = (free / tot) * 100.0 if tot > 0 else 0.0
@@ -95,7 +97,7 @@ def simulate_titration(
                 c_complexes_1x[c_name] = conc
                 
             # Pour chaque primer avec fraction libre < 20%, trouver son pire séquestrateur
-            for i, p in enumerate(primers):
+            for i, _p in enumerate(primers):
                 if free_fractions[d_idx, i] < 20.0:
                     worst_c = None
                     worst_val = -1

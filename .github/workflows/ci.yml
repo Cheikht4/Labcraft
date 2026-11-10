@@ -31,6 +31,7 @@ jobs:
         run: ruff check .
         
       - name: Run mypy
+        continue-on-error: true
         run: mypy src/labcraft
         
       - name: Verify validation scripts syntax

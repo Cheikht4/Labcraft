@@ -3,7 +3,6 @@
 Énumération des mutations pour l'optimisation des séquences.
 """
 from typing import List, Tuple
-import itertools
 
 def enumerate_variants(sequence: str, max_mutations: int = 2, window_3p: int = 6) -> List[Tuple[str, List[Tuple[int, str, str]]]]:
     """

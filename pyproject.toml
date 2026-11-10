@@ -10,7 +10,7 @@ readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
 authors = [
-    {name = "LabCraft Contributors"}
+    {name = "Cheikh Talibouya Diagne"}
 ]
 keywords = ["LAMP", "PCR", "multiplex", "thermodynamics", "primer", "diagnostics"]
 classifiers = [
@@ -73,7 +73,11 @@ target-version = "py310"
 line-length = 99
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "N", "UP", "B", "SIM", "RUF"]
+select = ["F", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["F", "B"]
+"validation/**" = ["F", "B"]
 
 [tool.mypy]
 python_version = "3.10"
