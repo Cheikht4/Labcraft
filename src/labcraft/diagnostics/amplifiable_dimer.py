@@ -1,7 +1,9 @@
-import RNA
-from typing import Tuple, List, Dict
+import math
+from typing import Tuple, Dict, Optional
 from labcraft.diagnostics.enzyme import PolymeraseProfile
 from labcraft.thermo.backends.base import DuplexEnergyBackend
+from labcraft.thermo.salt import sodium_equivalent_for_folding
+from labcraft.buffer.monovalent import get_total_monovalent
 
 def get_pairs(structure: str) -> Dict[int, int]:
     """Parse la structure dot-bracket et retourne un dictionnaire de paires."""
@@ -26,7 +28,12 @@ def is_amplifiable_dimer(
     temp_celsius: float = 65.0,
     blocked_a: bool = False,
     blocked_b: bool = False,
-    lna_positions: tuple[int, ...] = ()
+    lna_positions: tuple[int, ...] = (),
+    na_mm: Optional[float] = None,
+    k_mm: float = 0.0,
+    tris_mm: float = 0.0,
+    mg_mm: float = 0.0,
+    dntp_mm: float = 0.0
 ) -> Tuple[bool, float, str, bool]:
     """
     Détermine si un dimère (A + B) est amplifiable.
@@ -149,6 +156,21 @@ def is_amplifiable_dimer(
                     dh_total += _LNA_PARAMS_MXL[key_mxl][0]
                     ds_total += _LNA_PARAMS_MXL[key_mxl][1]
                 
+        # Correction saline sur le segment 3' court via l'équivalent sodium (inversion Owczarzy)
+        # et la correction entropique de SantaLucia 1998 : dS += 0.368 * (N - 1) * ln[Na_eq].
+        # Salt correction on the short 3' segment using sodium equivalent (Owczarzy inversion)
+        # and SantaLucia 1998 entropic correction: dS += 0.368 * (N - 1) * ln[Na_eq].
+        n_bp = len(segment_seq)
+        if n_bp > 1 and (na_mm is not None or k_mm > 0.0 or tris_mm > 0.0 or mg_mm > 0.0):
+            mon_molar = get_total_monovalent(
+                na_mm if na_mm is not None else 0.0, k_mm, tris_mm
+            ) / 1000.0
+            mg_molar = mg_mm / 1000.0
+            dntp_molar = (dntp_mm or 0.0) / 1000.0
+            na_eq = sodium_equivalent_for_folding(mon_molar, mg_molar, dntp_molar)
+            if na_eq > 0.0:
+                ds_total += 0.368 * (n_bp - 1) * math.log(na_eq)
+
         # dG = dH - T*dS
         temp_k = temp_celsius + 273.15
         local_dg = dh_total - temp_k * (ds_total / 1000.0)
@@ -241,14 +263,22 @@ def evaluate_pair_amplifiable(
     
     lna_a = p_a.lna_positions
     lna_b = p_b.lna_positions
-    
+
+    salt_kwargs = {
+        "na_mm": backend_kwargs.get("na_mm"),
+        "k_mm": backend_kwargs.get("k_mm", 0.0),
+        "tris_mm": backend_kwargs.get("tris_mm", 0.0),
+        "mg_mm": backend_kwargs.get("mg_mm", 0.0),
+        "dntp_mm": backend_kwargs.get("dntp_mm", 0.0),
+    }
+
     if seq_a == seq_b:
         # Homodimère: un seul ordre suffit car la concaténation est symétrique
         mapped_lna = tuple(list(lna_a) + [pos + len(seq_a) for pos in lna_a])
         backend_kwargs['lna_positions'] = lna_a
         res = backend.calc_homodimer(seq_a, temp_celsius=temp_celsius, **backend_kwargs)
         struct, mfe = res.structure.replace('&', ''), res.dg_kcal
-        is_amp, dg_3p, ext_strand, blocked_veto = is_amplifiable_dimer(seq_a, seq_a, struct, mfe, enzyme, temp_celsius, blocked_a, blocked_b, lna_positions=mapped_lna)
+        is_amp, dg_3p, ext_strand, blocked_veto = is_amplifiable_dimer(seq_a, seq_a, struct, mfe, enzyme, temp_celsius, blocked_a, blocked_b, lna_positions=mapped_lna, **salt_kwargs)
         details = {
             "seq_a": seq_a, "seq_b": seq_a, "structure": res.structure, 
             "delta_g": mfe, "delta_g_3p": dg_3p,
@@ -265,7 +295,7 @@ def evaluate_pair_amplifiable(
     res_ab = backend.calc_heterodimer(seq_a, seq_b, temp_celsius=temp_celsius, **backend_kwargs)
     struct_ab, mfe_ab = res_ab.structure.replace('&', ''), res_ab.dg_kcal
     mapped_lna_ab = tuple(list(lna_a) + [pos + len(seq_a) for pos in lna_b])
-    is_amp_ab, dg_3p_ab, ext_strand_ab, blocked_veto_ab = is_amplifiable_dimer(seq_a, seq_b, struct_ab, mfe_ab, enzyme, temp_celsius, blocked_a, blocked_b, lna_positions=mapped_lna_ab)
+    is_amp_ab, dg_3p_ab, ext_strand_ab, blocked_veto_ab = is_amplifiable_dimer(seq_a, seq_b, struct_ab, mfe_ab, enzyme, temp_celsius, blocked_a, blocked_b, lna_positions=mapped_lna_ab, **salt_kwargs)
     
     # Pour b&a, on intervertit les rôles a et b
     backend_kwargs['lna_positions_a'] = lna_b
@@ -273,7 +303,7 @@ def evaluate_pair_amplifiable(
     res_ba = backend.calc_heterodimer(seq_b, seq_a, temp_celsius=temp_celsius, **backend_kwargs)
     struct_ba, mfe_ba = res_ba.structure.replace('&', ''), res_ba.dg_kcal
     mapped_lna_ba = tuple(list(lna_b) + [pos + len(seq_b) for pos in lna_a])
-    is_amp_ba, dg_3p_ba, ext_strand_ba, blocked_veto_ba = is_amplifiable_dimer(seq_b, seq_a, struct_ba, mfe_ba, enzyme, temp_celsius, blocked_b, blocked_a, lna_positions=mapped_lna_ba)
+    is_amp_ba, dg_3p_ba, ext_strand_ba, blocked_veto_ba = is_amplifiable_dimer(seq_b, seq_a, struct_ba, mfe_ba, enzyme, temp_celsius, blocked_b, blocked_a, lna_positions=mapped_lna_ba, **salt_kwargs)
     
     is_amplifiable = is_amp_ab or is_amp_ba
     
