@@ -104,3 +104,49 @@ def test_mispriming_case_insensitivity(backend, enzyme):
     
     assert len(risks_upper) > 0
     assert len(risks_upper) == len(risks_lower)
+
+
+def test_part_e_self_target_mispriming_excludes_only_legitimate_locus_via_cli(tmp_path):
+    """Partie E : Vérifie via CliRunner sur `labcraft analyze` avec une seule cible où le site de F3
+    est recopié une seconde fois ailleurs que :
+    1. Le scan de mésamorçage est bien lancé même avec une seule cible.
+    2. Le second site copié est signalé comme mésamorçage, mais le site légitime ne l'est pas
+       (une seule alerte pour F3 et non deux).
+    """
+    from typer.testing import CliRunner
+    from labcraft.cli.main import app
+
+    f3_seq = "CTCGTGTAGGAATGGGAG"
+    b3_seq = "CTGGCTTGAGACATCTTCT"
+    # Cible unique contenant le site F3 légitime à l'indice 30, et une copie ectopique à l'indice 150
+    target_seq = (
+        "A" * 30
+        + f3_seq
+        + "C" * 50
+        + _revcomp(b3_seq)
+        + "T" * 33
+        + f3_seq
+        + "G" * 30
+    )
+
+    primers_file = tmp_path / "primers.txt"
+    primers_file.write_text(f">P_F3\n{f3_seq}\n>P_B3\n{b3_seq}\n")
+
+    target_file = tmp_path / "single_target.fasta"
+    target_file.write_text(f">SynthSingle\n{target_seq}\n")
+
+    out_html = tmp_path / "report_single.html"
+    runner = CliRunner()
+    res = runner.invoke(app, [
+        "analyze", "-p", str(primers_file), "-t", str(target_file), "-o", str(out_html),
+        "--temperature", "63.0", "--na", "50.0", "--mg", "8.0", "--dntp", "1.4"
+    ])
+    assert res.exit_code == 0, f"CLI failed: {res.stdout}"
+    html = out_html.read_text()
+
+    # Le mésamorçage doit être signalé dans le rapport HTML même avec une seule cible
+    assert "MÉSAMORÇAGE" in html
+    assert html.count("F3_P sur la cible SynthSingle") == 1, (
+        "Seul le second site copié doit être signalé, le site légitime doit être exclu !"
+    )
+

@@ -49,6 +49,8 @@ def detect_inter_target_mispriming(
     temp_celsius: float,
     k_len: int = 5,
     ddg_max: float = 4.0,
+    primer_to_target: Optional[Dict[str, str]] = None,
+    legitimate_loci: Optional[Dict[str, Any]] = None,
     **backend_kwargs
 ) -> List[MisprimingRisk]:
     """Détecte les risques réels d'amorçage croisé illégitime entre panels et cibles hétérologues.
@@ -103,14 +105,27 @@ def detect_inter_target_mispriming(
             dg_perfect = -15.0
 
         for t_id, (t_seq_sense, t_seq_rc) in cleaned_targets.items():
-            eligible_primers = [
-                p for p in p_list 
-                if (primer_to_panel.get(p.name) or primer_to_panel.get(p.name.split('#')[0])) != t_id
-            ]
+            eligible_primers = list(p_list)
             if not eligible_primers:
                 continue
 
+            t_len = len(t_seq_sense)
+            loci_for_target = (
+                legitimate_loci.get(t_id, {})
+                if isinstance(legitimate_loci, dict) and isinstance(legitimate_loci.get(t_id), dict)
+                else (legitimate_loci if isinstance(legitimate_loci, dict) else {})
+            )
+
             for strand_dir, s_seq in [('+', t_seq_sense), ('-', t_seq_rc)]:
+                # Attention à la convention de brin entre seeding/enumerate_complexes et k_mer :
+                # Dans seeding/enumerate_complexes :
+                # - brin '+' = l'amorce correspond au brin sens (+) de la cible -> elle s'hybride au brin antisens (-),
+                #   donc k_mer (_revcomp(p_3p)) apparaît sur t_seq_rc (strand_dir == '-').
+                # - brin '-' = le complément inverse de l'amorce apparaît sur le brin sens (+),
+                #   donc k_mer apparaît sur t_seq_sense (strand_dir == '+').
+                # Candidate genomic interval on clean_target [cand_start, cand_end) and seeding strand:
+                seeding_strand = '-' if strand_dir == '+' else '+'
+
                 idx = 0
                 while True:
                     idx = s_seq.find(k_mer, idx)
@@ -121,36 +136,68 @@ def detect_inter_target_mispriming(
                         idx += 1
                         continue
 
+                    if strand_dir == '+':
+                        cand_start = idx
+                        cand_end = idx + p_len
+                    else:
+                        cand_start = t_len - (idx + p_len)
+                        cand_end = t_len - idx
+
+                    # Filtrer les amorces pour lesquelles ce site chevauche le locus légitime retenu en Partie B
+                    # Filter out primers for which this site overlaps the legitimate locus retained in Part B
+                    non_legit_primers = []
+                    for p in eligible_primers:
+                        par_name = p.parent_name or (p.name.split('#')[0] if '#' in p.name else p.name)
+                        legit_info = (
+                            loci_for_target.get(f"{par_name}_site")
+                            or loci_for_target.get(f"{par_name}@{t_id}_site")
+                            or loci_for_target.get(par_name)
+                        )
+                        is_legit_overlap = False
+                        if isinstance(legit_info, dict) and "start" in legit_info and "end" in legit_info:
+                            l_start = int(legit_info["start"])
+                            l_end = int(legit_info["end"])
+                            l_strand = legit_info.get("strand")
+                            # Même brin (ou brin non précisé) et chevauchement des coordonnées
+                            if (l_strand is None or l_strand == seeding_strand):
+                                overlap = min(cand_end, l_end) - max(cand_start, l_start)
+                                if overlap > 0:
+                                    is_legit_overlap = True
+                        if not is_legit_overlap:
+                            non_legit_primers.append(p)
+
+                    if not non_legit_primers:
+                        idx += 1
+                        continue
+
                     # Séquence sous l'amorce sur la matrice (5'->3' sur le brin cible)
                     region = s_seq[idx:idx + p_len]
                     # Brin sous l'amorce orienté 3'->5' (antiparallèle sous p_seq)
                     bottom_under_top = region[::-1]
 
                     # 1. Vérification de l'extensibilité 3'
-                    extensible, first_bad_pos, severity = three_prime_extensible(p_seq, bottom_under_top, enzyme)
+                    extensible, _first_bad_pos, severity = three_prime_extensible(p_seq, bottom_under_top, enzyme)
                     if not extensible or severity == "block":
                         idx += 1
                         continue
 
                     # 2. Pré-filtrage rapide : taux d'appariement minimal (> 50% pour un risque réel)
-                    match_count = sum(1 for a, b in zip(reversed(p_seq), region) if comp.get(a, '') == b)
+                    match_count = sum(1 for a, b in zip(reversed(p_seq), region, strict=True) if comp.get(a, '') == b)
                     if match_count < 0.50 * p_len:
                         idx += 1
                         continue
 
                     # 3. Calcul de l'énergie d'hybridation intermoléculaire
                     try:
-                        dg_hyb, ddg = calculate_hybridization_dg(
+                        dg_hyb, _ddg = calculate_hybridization_dg(
                             p_seq, bottom_under_top, temp_celsius, backend, bd_lna=lna_pos, **backend_kwargs
                         )
                     except Exception:
                         dg_hyb = 0.0
-                        ddg = 99.0
 
                     # Un mésamorçage ne peut pas être plus stable qu'un match parfait
                     if dg_hyb < dg_perfect:
                         dg_hyb = dg_perfect
-                        ddg = 0.0
 
                     ddg_rel = max(0.0, dg_hyb - dg_perfect)
 
@@ -159,7 +206,7 @@ def detect_inter_target_mispriming(
                         aff_ratio = math.exp(-ddg_rel / rt) if rt > 0 else 0.0
                         struct = "(" * match_count + "." * (p_len - match_count)
 
-                        for p in eligible_primers:
+                        for p in non_legit_primers:
                             risks.append(MisprimingRisk(
                                 primer_name=p.name,
                                 target_id=t_id,
@@ -168,8 +215,8 @@ def detect_inter_target_mispriming(
                                 site_sequence=region,
                                 delta_delta_g=round(ddg_rel, 2),
                                 affinity_ratio=round(aff_ratio, 4),
-                                position=idx if strand_dir == '+' else len(s_seq) - (idx + p_len),
-                                strand=strand_dir
+                                position=cand_start,
+                                strand=seeding_strand
                             ))
 
                     idx += 1
