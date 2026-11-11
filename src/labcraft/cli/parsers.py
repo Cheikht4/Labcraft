@@ -171,7 +171,10 @@ def reconstruct_fip_bip(
             )
         else:
             import warnings
-            warnings.warn(f"L'orientation de {role_prefix}1 pour le panel '{panel_name}' n'a pas pu être vérifiée sur la cible (aucune correspondance). Convention standard (RC) appliquée.")
+            warnings.warn(
+                f"L'orientation de {role_prefix}1 pour le panel '{panel_name}' n'a pas pu être vérifiée sur la cible (aucune correspondance). Convention standard (RC) appliquée.",
+                stacklevel=2,
+            )
             p1c = reverse_complement(p1)
             return p1c + linker + p2, p1c
 
@@ -231,7 +234,10 @@ def parse_primer_file(
     for panel_name, versions in panels.items():
         if len(versions) > 1:
             import warnings
-            warnings.warn(f"Multiple versions detected for panel '{panel_name}'. They will be treated as separate alternative panels.")
+            warnings.warn(
+                f"Multiple versions detected for panel '{panel_name}'. They will be treated as separate alternative panels.",
+                stacklevel=2,
+            )
             
         # Match target
         target_name = None
@@ -249,13 +255,36 @@ def parse_primer_file(
                         target_name = t_name
                         break
                 if target_name is None:
+                    # Fallback par alignement de séquence des domaines d'initiation (F3, B3, F2, B2)
+                    # Sequence-alignment fallback using initiation domains (F3, B3, F2, B2)
+                    sample_roles = next(iter(versions.values()), {})
+                    probe_seqs = [
+                        sample_roles[r] for r in ("F3", "B3", "F2", "B2") if r in sample_roles
+                    ]
+                    best_t_name = None
+                    best_hits = 0
+                    for t_name, t_seq in targets:
+                        hits = sum(
+                            1 for s in probe_seqs
+                            if _find_iupac_substring(s, t_seq) >= 0
+                            or _find_iupac_substring(reverse_complement(s), t_seq) >= 0
+                        )
+                        if hits > best_hits:
+                            best_hits = hits
+                            best_t_name = t_name
+                    if best_hits >= 2:
+                        target_name = best_t_name
+                if target_name is None:
                     if allow_unmatched_targets:
                         target_name = targets[0][0] if targets else panel_name
                     else:
                         raise ParseError(f"Panel '{panel_name}' does not match any target name. Available targets: {', '.join(t_names)}. If there are multiple targets, the panel name must match the target name exactly or by inclusion.")
                 
+        matched_targets = [
+            (t_name, t_seq) for t_name, t_seq in targets if t_name == target_name
+        ] or targets
         for v_key, roles_dict in versions.items():
-            domains_map = reconstruct_fip_bip(panel_name, roles_dict, targets, linker)
+            domains_map = reconstruct_fip_bip(panel_name, roles_dict, matched_targets, linker)
             
             primer_configs = {}
             for role, seq in roles_dict.items():

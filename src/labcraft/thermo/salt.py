@@ -84,7 +84,7 @@ class UnifiedSaltModel(SaltModel):
         if mon_total == 0.0:
             # Magnésium pur
             if not (0.5e-3 <= mg_free <= 600e-3):
-                warnings.warn("Mg2+ concentration outside calibrated range (0.5 - 600 mM).", RuntimeWarning)
+                warnings.warn("Mg2+ concentration outside calibrated range (0.5 - 600 mM).", RuntimeWarning, stacklevel=2)
             
             ln_mg = math.log(mg_free)
             delta_inv_tm = (
@@ -99,7 +99,7 @@ class UnifiedSaltModel(SaltModel):
         if r_ratio < 0.22:
             # Monovalent dominant (Owczarzy 2004, Eq 22)
             if not (0.05 <= mon_total <= 1.1) or not (0.05 <= na_ref_molar <= 1.1):
-                warnings.warn("Monovalent concentration outside calibrated range (0.05 - 1.1 M).", RuntimeWarning)
+                warnings.warn("Monovalent concentration outside calibrated range (0.05 - 1.1 M).", RuntimeWarning, stacklevel=2)
                 
             ln_mon = math.log(mon_total)
             ln_ref = math.log(na_ref_molar)
@@ -127,7 +127,7 @@ class UnifiedSaltModel(SaltModel):
         else:
             # Magnésium dominant
             if not (0.5e-3 <= mg_free <= 600e-3):
-                warnings.warn("Mg2+ concentration outside calibrated range (0.5 - 600 mM).", RuntimeWarning)
+                warnings.warn("Mg2+ concentration outside calibrated range (0.5 - 600 mM).", RuntimeWarning, stacklevel=2)
             
             ln_mg = math.log(mg_free)
             delta_inv_tm = (

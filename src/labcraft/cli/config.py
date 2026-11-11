@@ -82,11 +82,12 @@ class PanelConfig(BaseModel):
                 warnings.warn(
                     f"Rapport Mg/dNTP faible ({mg:.1f} mM / {dntp:.1f} mM = {mg/dntp:.2f} < 3.0). "
                     "L'approximation de chélation par soustraction directe commence à se dégrader.",
-                    UserWarning
+                    UserWarning,
+                    stacklevel=2,
                 )
             elif mg <= dntp:
                 import warnings
-                warnings.warn("mg_mM is less than or equal to dntp_mM.", UserWarning)
+                warnings.warn("mg_mM is less than or equal to dntp_mM.", UserWarning, stacklevel=2)
         return self
 
 from typing import Tuple
@@ -292,7 +293,8 @@ def build_engine_from_config(
         warnings.warn(
             f"Le panel contient {len(primers)} espèces d'amorces après développement des dégénérescences. "
             f"Le calcul des dimères et de l'équilibre impliquera un coût combinatoire élevé ({total_interactions} interactions bimoléculaires).",
-            UserWarning
+            UserWarning,
+            stacklevel=2,
         )
         
     return primers, primer_to_target, backend, backend_kwargs, mon_molar, enzyme, temp_celsius, profiles

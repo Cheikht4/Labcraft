@@ -4,8 +4,6 @@
 Exécute le panel synthétique et démontre les trois artefacts.
 """
 import yaml
-import sys
-import os
 
 from labcraft.lamp.domains import PhysicalPrimer, PrimerRole
 from labcraft.lamp.stoichiometry import ConcentrationProfile, target_copies_to_molar

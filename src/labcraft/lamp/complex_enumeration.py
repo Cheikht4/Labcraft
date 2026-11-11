@@ -285,7 +285,10 @@ def enumerate_complexes(
         if not is_multi_target:
             for par_name, matched in parent_matched.items():
                 if not matched:
-                    warnings.warn(f"Le domaine de liaison de {par_name} n'est pas trouvé sur la cible.")
+                    warnings.warn(
+                        f"Le domaine de liaison de {par_name} n'est pas trouvé sur la cible.",
+                        stacklevel=2,
+                    )
 
         # Détection de chevauchement stérique par cible entre loci distincts
         sites_for_t = [s for s in target_sites_map.values() if s.get("target_id") == t_id]
@@ -294,7 +297,10 @@ def enumerate_complexes(
                 if i < j and s1["strand"] == s2["strand"]:
                     overlap = max(0, min(s1["end"], s2["end"]) - max(s1["start"], s2["start"]))
                     if overlap > 0:
-                        warnings.warn(f"Compétition stérique sur cible '{t_id}' : {s1['name']} et {s2['name']} se chevauchent de {overlap} bases.")
+                        warnings.warn(
+                            f"Compétition stérique sur cible '{t_id}' : {s1['name']} et {s2['name']} se chevauchent de {overlap} bases.",
+                            stacklevel=2,
+                        )
 
     target_sites = list(target_sites_map.values())
 

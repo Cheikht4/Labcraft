@@ -51,7 +51,7 @@ def estimate_helix_thermo(seq: str, structure: str, lna_positions: tuple[int, ..
                     ds_total += ds
                 except KeyError:
                     import warnings
-                    warnings.warn(f"Ignored unknown dinucleotide '{dinuc_top}' in sequence.")
+                    warnings.warn(f"Ignored unknown dinucleotide '{dinuc_top}' in sequence.", stacklevel=2)
                 
                 # LNA corrections for this step
                 if i in lna_positions:

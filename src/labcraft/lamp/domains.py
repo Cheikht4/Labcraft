@@ -206,7 +206,7 @@ class PhysicalPrimer:
             allow_mismatches: Si True, autorise l'alignement imparfait (non implémenté par défaut).
         """
         if allow_mismatches:
-            warnings.warn("L'alignement avec mismatches n'est pas supporté par défaut.", UserWarning)
+            warnings.warn("L'alignement avec mismatches n'est pas supporté par défaut.", UserWarning, stacklevel=2)
             
         from labcraft.thermo.lna import parse_lna_sequence
         bare_seq, lna_pos = parse_lna_sequence(sequence.upper())
@@ -240,7 +240,7 @@ class PhysicalPrimer:
                     
         if best_binding_len == 0:
             if target_seq: # Only warn if we genuinely couldn't find it when target is provided
-                warnings.warn(f"Le domaine de liaison de {name} n'est pas trouvé sur la cible.", UserWarning)
+                warnings.warn(f"Le domaine de liaison de {name} n'est pas trouvé sur la cible.", UserWarning, stacklevel=2)
             return cls(
                 name=name, sequence=sequence, role=role,
                 binding_domain=sequence, tail_domain=None, linker=None,
@@ -270,7 +270,7 @@ class PhysicalPrimer:
                 
         if best_tail_len == 0:
             if target_seq:
-                warnings.warn(f"Impossible d'autodétecter le domaine 5' pour {name}.", UserWarning)
+                warnings.warn(f"Impossible d'autodétecter le domaine 5' pour {name}.", UserWarning, stacklevel=2)
             # On fallback sur une séparation brutale (tout ce qui n'est pas binding est tail)
             tail = sequence[:binding_idx]
             binding = sequence[binding_idx:]
