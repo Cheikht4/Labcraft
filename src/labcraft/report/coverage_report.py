@@ -77,11 +77,12 @@ def render_coverage_report(
         "strains": []
     }
     for v in verdicts:
+        is_indet = getattr(v, "is_indeterminate", False)
         s_data = {
             "strain_id": v.strain_id,
-            "thermo": v.is_amplifiable_thermo,
+            "thermo": None if is_indet else v.is_amplifiable_thermo,
             "count": v.is_amplifiable_count,
-            "indeterminate": getattr(v, "is_indeterminate", False),
+            "indeterminate": is_indet,
             "evals": {}
         }
         for pname, ev in v.evaluations.items():

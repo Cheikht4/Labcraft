@@ -590,7 +590,7 @@ def coverage(
     selected_panel_name = config_obj.primer_sets[0].panel_name if config_obj.primer_sets else "DefaultPanel"
 
     dummy_targets = {fasta_list[0][0]: fasta_list[0][1]} if fasta_list else {}
-    physical_primers, _, backend, _, _, enzyme_obj, _, _ = build_engine_from_config(config_obj, dummy_targets)
+    physical_primers, _, backend, backend_kwargs, _, enzyme_obj, _, _ = build_engine_from_config(config_obj, dummy_targets)
     buf_cfg = config_obj.experiment.buffer
     if buf_cfg:
         print(
@@ -635,7 +635,8 @@ def coverage(
         temp_celsius=temperature,
         ddg_max=ddg_max,
         dg_threshold=dg_threshold,
-        max_mismatches_count=max_mismatches
+        max_mismatches_count=max_mismatches,
+        **backend_kwargs,
     )
     
     print("Analyse thermodynamique des souches...")

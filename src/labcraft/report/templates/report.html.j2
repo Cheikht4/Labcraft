@@ -788,7 +788,7 @@
         <h2>Fiches d'Artefacts Détaillées</h2>
         
         {% if metadata.mispriming_risks %}
-        <h3>Mésamorçage Inter-Cible (Multiplexe) - Risques Prioritaires</h3>
+        <h3>Mésamorçage hors site légitime - Risques Prioritaires</h3>
         <p style="font-size: 13px; color: var(--color-muted);">
             Signalement basé sur l'énergie d'hybridation intermoléculaire et l'extensibilité 3' par la polymérase. Un site est retenu si son ΔG s'approche à moins de 4,0 kcal/mol du duplexe parfait de l'amorce sur son site légitime (affinité relative significative).
         </p>
@@ -801,7 +801,7 @@
         <div class="risk-card risk-critical">
             <div class="risk-header">
                 <span>{{ risk.primer_name }} sur la cible {{ risk.target_id }}</span>
-                <span class="risk-badge badge-critical">MÉSAMORÇAGE INTER-CIBLE</span>
+                <span class="risk-badge badge-critical">MÉSAMORÇAGE HORS SITE LÉGITIME</span>
             </div>
             <div class="artefact-stats" style="margin-bottom: 10px;">
                 <div><strong>ΔG Hybridation :</strong> {{ "%.2f"|format(risk.delta_g) }} kcal/mol</div>

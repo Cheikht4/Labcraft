@@ -444,19 +444,59 @@ def test_part_b_tolerant_sites_in_analyze_and_coherence_with_coverage(tmp_path: 
         assert an_info["strand"] == cv_info["strand"], f"Brin différent pour {role}"
         assert an_info["mismatches"] == cv_info["mismatches"], f"Mismatches différents pour {role}"
 
-    # 3. Non-régression au centième sur les sites parfaits (à 63 °C, 50 mM Na, 8 mM Mg, 1,4 mM dNTP)
-    cov_analyzer = CoverageAnalyzer(primers, {d3_id: d3_seq}, backend, enzyme, temp_celsius=63.0)
-    expected_perfect_dg = {
-        "CTCGTGTAGGAATGGGAG": -6.94,      # F3 parfait
-        "CTGGCTTGAGACATCTTCT": -6.72,     # B3 parfait
-        "TGAATTCCACGAGCGTTC": -7.08,      # LF parfait
-        "AAGGTCATCCAACTTAGTAGGA": -6.51,  # LB parfait
-        "CTGAAGCCTTTCCCCAGA": -8.25,      # FIP parfait
-        "ACCACAAAGTCCCAATCA": -6.15,      # BIP parfait
+    # 3a. Non-régression au centième sur les sites parfaits à 63 °C, « 50 mM Na, 0 Mg »
+    # 3a. Non-regression to 0.01 kcal/mol on perfect sites at 63 °C, "50 mM Na, 0 Mg"
+    cov_analyzer_50na_0mg = CoverageAnalyzer(
+        primers, {d3_id: d3_seq}, backend, enzyme, temp_celsius=63.0,
+        na_mm=50.0, mg_mm=0.0, dntp_mm=0.0,
+    )
+    expected_perfect_dg_50na_0mg = {
+        "CTCGTGTAGGAATGGGAG": -6.94,      # F3 parfait (50 mM Na, 0 Mg)
+        "CTGGCTTGAGACATCTTCT": -6.72,     # B3 parfait (50 mM Na, 0 Mg)
+        "TGAATTCCACGAGCGTTC": -7.08,      # LF parfait (50 mM Na, 0 Mg)
+        "AAGGTCATCCAACTTAGTAGGA": -6.51,  # LB parfait (50 mM Na, 0 Mg)
+        "CTGAAGCCTTTCCCCAGA": -8.25,      # FIP parfait (50 mM Na, 0 Mg)
+        "ACCACAAAGTCCCAATCA": -6.15,      # BIP parfait (50 mM Na, 0 Mg)
     }
-    for seq, expected_dg in expected_perfect_dg.items():
-        actual_dg = round(cov_analyzer._get_perfect_dg_seq(seq), 2)
-        assert actual_dg == expected_dg, f"Non-régression ΔG pour {seq}: attendu {expected_dg}, obtenu {actual_dg}"
+    for seq, expected_dg in expected_perfect_dg_50na_0mg.items():
+        actual_dg = round(cov_analyzer_50na_0mg._get_perfect_dg_seq(seq), 2)
+        assert actual_dg == expected_dg, (
+            f"Non-régression ΔG (50 mM Na, 0 Mg) pour {seq}: attendu {expected_dg}, obtenu {actual_dg}"
+        )
+
+    # 3b. Non-régression au centième sur les sites parfaits à 63 °C, « 50 mM Na, 8 mM Mg, 1,4 mM dNTP »
+    # 3b. Non-regression to 0.01 kcal/mol on perfect sites at 63 °C, "50 mM Na, 8 mM Mg, 1.4 mM dNTP"
+    cov_analyzer_50na_8mg = CoverageAnalyzer(
+        primers, {d3_id: d3_seq}, backend, enzyme, temp_celsius=63.0,
+        **b_kwargs,
+    )
+    expected_perfect_dg_50na_8mg = {
+        "CTCGTGTAGGAATGGGAG": -10.65,      # F3 parfait (50 mM Na, 8 mM Mg, 1.4 mM dNTP)
+        "CTGGCTTGAGACATCTTCT": -11.00,     # B3 parfait (50 mM Na, 8 mM Mg, 1.4 mM dNTP)
+        "TGAATTCCACGAGCGTTC": -11.16,      # LF parfait (50 mM Na, 8 mM Mg, 1.4 mM dNTP)
+        "AAGGTCATCCAACTTAGTAGGA": -11.53,  # LB parfait (50 mM Na, 8 mM Mg, 1.4 mM dNTP)
+        "CTGAAGCCTTTCCCCAGA": -11.95,      # FIP parfait (50 mM Na, 8 mM Mg, 1.4 mM dNTP)
+        "ACCACAAAGTCCCAATCA": -10.32,      # BIP parfait (50 mM Na, 8 mM Mg, 1.4 mM dNTP)
+    }
+    for seq, expected_dg in expected_perfect_dg_50na_8mg.items():
+        actual_dg = round(cov_analyzer_50na_8mg._get_perfect_dg_seq(seq), 2)
+        assert actual_dg == expected_dg, (
+            f"Non-régression ΔG (50 mM Na, 8 mM Mg, 1.4 mM dNTP) pour {seq}: attendu {expected_dg}, obtenu {actual_dg}"
+        )
+
+    # Vérification des valeurs sur M93130.1 à 50 mM Na, 8 mM Mg, 1,4 mM dNTP dans le JSON de coverage
+    expected_m93130_dg_8mg = {
+        "F3": -10.65,
+        "B3": -9.66,
+        "FIP": -10.78,
+        "BIP": -10.32,
+        "LF": -10.05,
+        "LB": -8.09,
+    }
+    for role, exp_dg in expected_m93130_dg_8mg.items():
+        assert round(cov_evals[role]["dg"], 2) == exp_dg
+    assert cov_evals["B3"]["verdict"] == "tolerable"
+    assert round(cov_evals["B3"]["ddg"], 2) == 1.33
 
     # 4. Vérification via CLI qu'un site frappé de veto 3' est signalé dans le rapport d'analyse et a 0 % d'occupation
     f3_pos = cov_evals["F3"]["position"]

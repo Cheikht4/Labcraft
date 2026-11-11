@@ -11,7 +11,7 @@ from enum import Enum
 
 from labcraft.lamp.domains import PhysicalPrimer, PrimerRole, IUPAC_MATCHABLE
 from labcraft.thermo.backends.vienna_salt import ViennaSaltShiftBackend
-from labcraft.thermo.mismatch import calculate_hybridization_dg, three_prime_extensible, nn_duplex_energy
+from labcraft.thermo.mismatch import calculate_hybridization_dg, three_prime_extensible
 from labcraft.diagnostics.enzyme import PolymeraseProfile
 
 
@@ -87,14 +87,20 @@ class CoverageAnalyzer:
         temp_celsius: float = 65.0,
         ddg_max: float = 3.0,
         dg_threshold: Optional[float] = None,
-        max_mismatches_count: int = 2
+        max_mismatches_count: int = 2,
+        na_mm: float = 50.0,
+        k_mm: float = 0.0,
+        tris_mm: float = 0.0,
+        mg_mm: float = 0.0,
+        dntp_mm: float = 0.0,
     ):
         if not isinstance(backend, ViennaSaltShiftBackend):
             warnings.warn(
                 "Aucun modèle de sel/tampon (ViennaSaltShiftBackend) fourni à CoverageAnalyzer. "
                 "Repli sur les conditions de référence standard du backend (1 M NaCl / sans correction de sel LAMP). "
                 "Les énergies de duplexe peuvent différer de la force ionique réelle.",
-                UserWarning
+                UserWarning,
+                stacklevel=2,
             )
 
         self.primers = primers
@@ -106,6 +112,21 @@ class CoverageAnalyzer:
         self.ddg_max = ddg_max
         self.dg_threshold = dg_threshold
         self.max_mismatches_count = max_mismatches_count
+
+        # Paramètres ioniques du tampon transmis au backend thermodynamique
+        # Buffer ionic parameters forwarded to the thermodynamic backend
+        self.na_mm = na_mm
+        self.k_mm = k_mm
+        self.tris_mm = tris_mm
+        self.mg_mm = mg_mm
+        self.dntp_mm = dntp_mm
+        self.backend_kwargs = {
+            "na_mm": na_mm,
+            "k_mm": k_mm,
+            "tris_mm": tris_mm,
+            "mg_mm": mg_mm,
+            "dntp_mm": dntp_mm,
+        }
 
         # Cache pour l'énergie des duplexes parfaits
         # Cache for perfectly matched duplex energy
@@ -119,7 +140,8 @@ class CoverageAnalyzer:
             comp = {'A': 'T', 'T': 'A', 'C': 'G', 'G': 'C'}
             perfect_bottom = "".join(comp.get(c, 'N') for c in seq)
             dg_hyb, _ = calculate_hybridization_dg(
-                seq, perfect_bottom, self.temp_celsius, self.backend
+                seq, perfect_bottom, self.temp_celsius, self.backend,
+                **self.backend_kwargs,
             )
             self._perfect_dg_cache[seq] = dg_hyb
         return self._perfect_dg_cache[seq]
@@ -205,12 +227,11 @@ class CoverageAnalyzer:
             dg_hyb = dg_perfect_backend
             ddg = 0.0
         else:
-            perfect_bottom = "".join(comp.get(c, c) for c in resolved_primer_seq)
-            _, _, dg_perfect_nn = nn_duplex_energy(resolved_primer_seq, perfect_bottom, self.temp_celsius)
-            _, _, dg_mismatched_nn = nn_duplex_energy(resolved_primer_seq, bottom_under_top, self.temp_celsius)
-            ddg_mismatch = dg_mismatched_nn - dg_perfect_nn
-            dg_hyb = dg_perfect_backend + ddg_mismatch
-            ddg = max(0.0, dg_hyb - dg_perfect_backend)
+            dg_hyb, ddg_mismatch = calculate_hybridization_dg(
+                resolved_primer_seq, bottom_under_top, self.temp_celsius, self.backend,
+                **self.backend_kwargs,
+            )
+            ddg = max(0.0, ddg_mismatch)
 
         # Règle d'extension enzymatique en 3' / Enzymatic 3' extension rule
         extensible, first_bad_pos, severity = three_prime_extensible(

@@ -549,6 +549,7 @@ def test_part_h_three_ns_in_f3_site_gives_indetermine_and_preserves_coverage_rat
     strains_by_id = {s["strain_id"]: s for s in cov_json["strains"]}
     s_3n = strains_by_id["M93130_F3_3N"]
     assert s_3n["indeterminate"] is True
+    assert s_3n["thermo"] is None
     assert s_3n["evals"]["F3"]["verdict"] == "indetermine"
 
     # Vérification également en mode analyze sur la souche contenant 3 N (panel 3)
@@ -571,4 +572,58 @@ def test_part_h_three_ns_in_f3_site_gives_indetermine_and_preserves_coverage_rat
     assert res_ana.exit_code == 0, f"Analyze CLI failed: {res_ana.stdout}"
     ana_html_text = out_ana_html.read_text()
     assert "Indéterminé" in ana_html_text
+
+
+def test_coverage_mg_dependence_and_m93130_verdicts(tmp_path: Path):
+    """Vérifie que :
+    1. La couverture à 0, 8 et 20 mM de Mg donne des ΔG absolus strictement différents.
+    2. Les verdicts et ΔΔG de M93130.1 sont inchangés, avec B3 toujours tolérable à +1,33.
+    Verify that:
+    1. Coverage at 0, 8, and 20 mM Mg gives strictly different absolute dG values.
+    2. M93130.1 verdicts and ddG are unchanged, with B3 still tolerable at +1.33.
+    """
+    fixture_dir = Path(__file__).resolve().parent.parent / "fixtures" / "real_primer_files"
+    primers_path = fixture_dir / "primer_dengue_3.txt"
+    genome_path = fixture_dir / "DEN3_M93130.fasta"
+
+    runner = CliRunner()
+    evals_by_mg = {}
+    for mg_val in (0.0, 8.0, 20.0):
+        out_html = tmp_path / f"cov_mg_{int(mg_val)}.html"
+        dntp_val = "0.0" if mg_val == 0.0 else "1.4"
+        res = runner.invoke(app, [
+            "coverage",
+            "-p", str(primers_path),
+            "-f", str(genome_path),
+            "--panel", "3",
+            "-o", str(out_html),
+            "--temperature", "63.0",
+            "--na", "50.0",
+            "--mg", str(mg_val),
+            "--dntp", dntp_val,
+        ])
+        assert res.exit_code == 0, f"Coverage CLI failed for Mg={mg_val}: {res.stdout}"
+        data = json.loads((tmp_path / f"cov_mg_{int(mg_val)}.json").read_text())
+        evals_by_mg[mg_val] = data["strains"][0]["evals"]
+
+    for role in ("F3", "B3", "FIP", "BIP", "LF", "LB"):
+        dg_0 = round(evals_by_mg[0.0][role]["dg"], 2)
+        dg_8 = round(evals_by_mg[8.0][role]["dg"], 2)
+        dg_20 = round(evals_by_mg[20.0][role]["dg"], 2)
+        # Les ΔG absolus doivent être strictement différents et de plus en plus négatifs avec le Mg
+        # Absolute dG values must be strictly different and increasingly negative with Mg
+        assert dg_20 < dg_8 < dg_0, (
+            f"ΔG non strictement décroissants en Mg pour {role}: 0 mM={dg_0}, 8 mM={dg_8}, 20 mM={dg_20}"
+        )
+        # Les verdicts et ΔΔG de M93130.1 restent inchangés quelle que soit la concentration en Mg
+        # M93130.1 verdicts and ddG remain unchanged across Mg concentrations
+        assert evals_by_mg[0.0][role]["verdict"] == evals_by_mg[8.0][role]["verdict"] == evals_by_mg[20.0][role]["verdict"]
+        assert round(evals_by_mg[0.0][role]["ddg"], 2) == round(evals_by_mg[8.0][role]["ddg"], 2) == round(evals_by_mg[20.0][role]["ddg"], 2)
+
+    # B3 toujours tolérable à +1,33 kcal/mol
+    # B3 always tolerable at +1.33 kcal/mol
+    for mg_val in (0.0, 8.0, 20.0):
+        assert evals_by_mg[mg_val]["B3"]["verdict"] == "tolerable"
+        assert round(evals_by_mg[mg_val]["B3"]["ddg"], 2) == 1.33
+
 
