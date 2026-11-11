@@ -33,7 +33,7 @@ def test_multi_target_cli_two_targets_two_panels(tmp_path: Path):
     
     # Fichier multi-FASTA de cibles
     targets_fasta = tmp_path / "mini_cibles.fasta"
-    targets_fasta.write_text(f">CIBLE_A\n{target_a_seq}\n>CIBLE_B\n{target_b_seq}\n")
+    targets_fasta.write_text(f">CIBLE_A\n{target_a_seq}\n>CIBLE_B\n{target_b_seq}\n", encoding="utf-8")
     
     # Fichier d'amorces pour les deux panels
     primers_txt = tmp_path / "mini_amorces.txt"
@@ -46,7 +46,7 @@ def test_multi_target_cli_two_targets_two_panels(tmp_path: Path):
         f">CIBLE_B_B3   {site_b3_b}\n"
         f">CIBLE_B_FIP  GGGGGGGGGGGGGGGGGGGG{site_f2_b}\n"
         f">CIBLE_B_BIP  AAAAAAAAAAAAAAAAAAAA{site_b2_b}\n"
-    )
+    , encoding="utf-8")
     
     out_html = tmp_path / "multiplex_report.html"
     
@@ -64,7 +64,7 @@ def test_multi_target_cli_two_targets_two_panels(tmp_path: Path):
     assert result.exit_code == 0, f"CLI execution failed:\n{result.stdout}"
     assert out_html.exists()
     
-    html_content = out_html.read_text()
+    html_content = out_html.read_text(encoding="utf-8")
     
     # Vérification 1 : Les deux cibles doivent être mentionnées dans le rapport
     assert "CIBLE_A" in html_content
@@ -146,9 +146,9 @@ def test_real_two_panels_multiplex_performance(tmp_path: Path):
     from labcraft.cli.parsers import read_multi_fasta
     d3_seq = read_multi_fasta(str(d3_fasta))[0][1]
     
-    # 2 génomes flavivirus complets de 10.7 kb correspondant aux panels 3 et 14
+    # 2 génomes flavivirus complets de 10.7 kb correspondant aux panels 3 et 14 (tous deux dérivés de M93130.1)
     targets_fasta = tmp_path / "two_flavivirus_genomes.fasta"
-    targets_fasta.write_text(f">3\n{d3_seq}\n>14\n{d3_seq[::-1]}\n")
+    targets_fasta.write_text(f">3\n{d3_seq}\n>14\n{d3_seq}\n", encoding="utf-8")
     
     out_html = tmp_path / "den3_den1_report.html"
     
@@ -240,7 +240,7 @@ def test_degenerate_panel_one_matching_variant_nonzero_occupation(tmp_path: Path
     )
 
     targets_fasta = tmp_path / "target_deg.fasta"
-    targets_fasta.write_text(f">TestTarget\n{target_seq}\n")
+    targets_fasta.write_text(f">TestTarget\n{target_seq}\n", encoding="utf-8")
 
     primers_txt = tmp_path / "primers_deg.txt"
     primers_txt.write_text(
@@ -248,7 +248,7 @@ def test_degenerate_panel_one_matching_variant_nonzero_occupation(tmp_path: Path
         f">TestTarget_B3   CTGGTTTGAGACATCTTCT\n"
         f">TestTarget_FIP  TTTTTTTTTTTTTTTTTTTT{fip_deg}\n"
         f">TestTarget_BIP  CCCCCCCCCCCCCCCCCCCCACCACAAAGTCCCAATCA\n"
-    )
+    , encoding="utf-8")
 
     out_html = tmp_path / "deg_report.html"
 
@@ -262,7 +262,7 @@ def test_degenerate_panel_one_matching_variant_nonzero_occupation(tmp_path: Path
     ])
 
     assert result.exit_code == 0, f"Error: {result.stdout}"
-    html = out_html.read_text()
+    html = out_html.read_text(encoding="utf-8")
 
     # Le tableau de comparaison ne doit JAMAIS afficher 'Non analysé' pour une cible analysée
     assert "Non analysé" not in html
@@ -327,13 +327,13 @@ def test_part_a_same_panel_different_fasta_headers_identical_diagnosis(tmp_path:
         f">{h}\n{s}" for h, s in read_multi_fasta(str(p3_file)) if h.startswith("3_")
     ]
     primers_only_3 = tmp_path / "panel_3.txt"
-    primers_only_3.write_text("\n".join(p3_records) + "\n")
+    primers_only_3.write_text("\n".join(p3_records) + "\n", encoding="utf-8")
 
     fasta_m93130 = tmp_path / "target_M93130.fasta"
-    fasta_m93130.write_text(f">M93130.1\n{d3_seq}\n")
+    fasta_m93130.write_text(f">M93130.1\n{d3_seq}\n", encoding="utf-8")
 
     fasta_3 = tmp_path / "target_3.fasta"
-    fasta_3.write_text(f">3\n{d3_seq}\n")
+    fasta_3.write_text(f">3\n{d3_seq}\n", encoding="utf-8")
 
     out_m93130 = tmp_path / "report_M93130.html"
     out_3 = tmp_path / "report_3.html"
@@ -351,8 +351,8 @@ def test_part_a_same_panel_different_fasta_headers_identical_diagnosis(tmp_path:
     assert res1.exit_code == 0, f"Run 1 failed: {res1.stdout}"
     assert res2.exit_code == 0, f"Run 2 failed: {res2.stdout}"
 
-    html1 = out_m93130.read_text()
-    html2 = out_3.read_text()
+    html1 = out_m93130.read_text(encoding="utf-8")
+    html2 = out_3.read_text(encoding="utf-8")
 
     # Extraire la section Diagnostic par Cible de chacun des deux rapports
     def extract_target_diag(html: str, target_label: str) -> str:
@@ -394,7 +394,7 @@ def test_part_b_tolerant_sites_in_analyze_and_coherence_with_coverage(tmp_path: 
         f">{h}\n{s}" for h, s in read_multi_fasta(str(p3_file)) if h.startswith("3_")
     ]
     primers_only_3 = tmp_path / "panel_3.txt"
-    primers_only_3.write_text("\n".join(p3_records) + "\n")
+    primers_only_3.write_text("\n".join(p3_records) + "\n", encoding="utf-8")
 
     out_analyze = tmp_path / "analyze_den3.html"
     out_cov = tmp_path / "coverage_den3.html"
@@ -412,7 +412,7 @@ def test_part_b_tolerant_sites_in_analyze_and_coherence_with_coverage(tmp_path: 
     ])
     assert res_cov.exit_code == 0, f"Coverage failed: {res_cov.stdout}"
 
-    html_an = out_analyze.read_text()
+    html_an = out_analyze.read_text(encoding="utf-8")
     # 1. B3_3_site (1 mismatch) et LB_3_site (2 mismatches) présents dans le rapport HTML d'analyse
     assert "B3_3_site" in html_an
     assert "LB_3_site" in html_an
@@ -420,7 +420,7 @@ def test_part_b_tolerant_sites_in_analyze_and_coherence_with_coverage(tmp_path: 
     assert "2 mismatches" in html_an
 
     # 2. Comparaison position, brin, nombre de mésappariements entre coverage (JSON) et analyze
-    cov_json = json.loads((tmp_path / "coverage_den3.json").read_text())
+    cov_json = json.loads((tmp_path / "coverage_den3.json").read_text(encoding="utf-8"))
     cov_evals = cov_json["strains"][0]["evals"]
 
     cfg = build_config_from_cli(
@@ -502,14 +502,14 @@ def test_part_b_tolerant_sites_in_analyze_and_coherence_with_coverage(tmp_path: 
     f3_pos = cov_evals["F3"]["position"]
     mut_seq = d3_seq[:f3_pos + 17] + ("T" if d3_seq[f3_pos + 17] != "T" else "A") + d3_seq[f3_pos + 18:]
     mut_fasta = tmp_path / "den3_f3_veto.fasta"
-    mut_fasta.write_text(f">DEN3_veto\n{mut_seq}\n")
+    mut_fasta.write_text(f">DEN3_veto\n{mut_seq}\n", encoding="utf-8")
     out_veto = tmp_path / "analyze_veto.html"
     res_veto = runner.invoke(app, [
         "analyze", "-p", str(primers_only_3), "-t", str(mut_fasta), "-o", str(out_veto),
         "--temperature", "63.0", "--na", "50.0", "--mg", "8.0", "--dntp", "1.4"
     ])
     assert res_veto.exit_code == 0
-    html_veto = out_veto.read_text()
+    html_veto = out_veto.read_text(encoding="utf-8")
     assert "Veto" in html_veto or "3' Bloqué" in html_veto
 
 

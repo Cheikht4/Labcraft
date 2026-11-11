@@ -22,7 +22,7 @@ def read_multi_fasta(filepath: str) -> List[Tuple[str, str]]:
     records = []
     seen_headers = set()
     
-    with open(filepath, 'r') as f:
+    with open(filepath, 'r', encoding="utf-8") as f:
         lines = f.read().splitlines()
         
     current_header = None
@@ -136,15 +136,20 @@ def reconstruct_fip_bip(
                 break
 
     def check_orientation(p1: str, p2: str, role_prefix: str) -> Tuple[str, str]:
-        # p1 is F1 or B1. p2 is F2 or B2.
+        # p1 est F1 ou B1 ; p2 est F2 ou B2.
+        # Retourne (sequence_composite, domaine_queue_5p)
+        # p1 is F1 or B1; p2 is F2 or B2.
         # Returns (composite_seq, tail_domain_seq)
         if not target_seq:
-            p1c = reverse_complement(p1)
-            return p1c + linker + p2, p1c
-            
+            raise ParseError(
+                f"Panel '{panel_name}': impossible de vérifier l'orientation de {role_prefix}1 "
+                f"sans séquence cible. Veuillez fournir la séquence complète de l'amorce "
+                f"(>{panel_name}_{role_prefix}IP)."
+            )
+
         p1_matches = _find_iupac_substring(p1, target_seq) >= 0
         p1rc_matches = _find_iupac_substring(reverse_complement(p1), target_seq) >= 0
-        
+
         # Si la recherche exacte échoue, tenter un criblage tolérant (max 2 erreurs)
         # If exact search fails, try tolerant screening (up to 2 errors)
         if not p1_matches and not p1rc_matches:
@@ -156,47 +161,68 @@ def reconstruct_fip_bip(
                     p1_matches = True
                 else:
                     p1rc_matches = True
-        
-        if p1_matches and not p1rc_matches:
-            # p1 is in the same sense as the target. We need its RC.
-            p1c = reverse_complement(p1)
-            return p1c + linker + p2, p1c
-        elif p1rc_matches and not p1_matches:
-            # p1 was provided already as the complement.
-            return p1 + linker + p2, p1
-        elif p1_matches and p1rc_matches:
+
+        if p1_matches and p1rc_matches:
             raise ParseError(
                 f"Panel '{panel_name}': Unable to determine orientation for {role_prefix}1. "
-                f"Both orientations match the target '{panel_name}'."
+                f"Both orientations match the target '{panel_name}'. "
+                f"Veuillez fournir la séquence complète de l'amorce (>{panel_name}_{role_prefix}IP)."
             )
-        else:
-            import warnings
-            warnings.warn(
-                f"L'orientation de {role_prefix}1 pour le panel '{panel_name}' n'a pas pu être vérifiée sur la cible (aucune correspondance). Convention standard (RC) appliquée.",
-                stacklevel=2,
+
+        if not p1_matches and not p1rc_matches:
+            raise ParseError(
+                f"Panel '{panel_name}': l'orientation de {role_prefix}1 n'a pas pu être vérifiée "
+                f"sur la cible (aucune correspondance). Veuillez fournir la séquence complète de "
+                f"l'amorce (>{panel_name}_{role_prefix}IP) plutôt que les sous-domaines."
             )
-            p1c = reverse_complement(p1)
-            return p1c + linker + p2, p1c
+
+        # Pour F (FIP = 5'-F1c-F2-3') : F2 est sur le brin +, donc la queue 5' F1c doit être sur le brin - (RC).
+        # For F (FIP = 5'-F1c-F2-3'): F2 is on + strand, so 5' tail F1c must be on - strand (RC).
+        # Pour B (BIP = 5'-B1c-B2-3') : B2 est sur le brin -, donc la queue 5' B1c doit être sur le brin + (opposé à B2).
+        # For B (BIP = 5'-B1c-B2-3'): B2 is on - strand, so 5' tail B1c must be on + strand (opposite to B2).
+        if role_prefix == 'F':
+            if p1_matches:
+                # p1 sur brin + -> inverser-complémenter pour obtenir F1c (-)
+                p1c = reverse_complement(p1)
+                return p1c + linker + p2, p1c
+            # p1 déjà sur brin - (F1c)
+            return p1 + linker + p2, p1
+
+        # role_prefix == 'B' : inversé par rapport à F / opposite rule to F
+        if p1_matches:
+            # p1 déjà sur brin + (B1c, opposé à B2 sur -)
+            return p1 + linker + p2, p1
+        # p1 sur brin - -> inverser-complémenter pour obtenir B1c (+)
+        p1c = reverse_complement(p1)
+        return p1c + linker + p2, p1c
 
     domains_created: Dict[str, PrimerDomains] = {}
 
-    if 'F1' in primers and 'F2' in primers:
+    if 'FIP' in primers:
+        # La séquence complète >Panel_FIP fait foi sans aucune reconstruction
+        # Full >Panel_FIP sequence takes precedence without reconstruction
+        primers.pop('F1', None)
+        primers.pop('F2', None)
+    elif 'F1' in primers and 'F2' in primers:
         f1_seq = primers['F1']
         f2_seq = primers['F2']
-        if 'FIP' not in primers:
-            fip_seq, f1c_seq = check_orientation(f1_seq, f2_seq, 'F')
-            primers['FIP'] = fip_seq
-            domains_created['FIP'] = PrimerDomains(F2=f2_seq, F1c=f1c_seq, linker=linker)
+        fip_seq, f1c_seq = check_orientation(f1_seq, f2_seq, 'F')
+        primers['FIP'] = fip_seq
+        domains_created['FIP'] = PrimerDomains(F2=f2_seq, F1c=f1c_seq, linker=linker)
         del primers['F1']
         del primers['F2']
-        
-    if 'B1' in primers and 'B2' in primers:
+
+    if 'BIP' in primers:
+        # La séquence complète >Panel_BIP fait foi sans aucune reconstruction
+        # Full >Panel_BIP sequence takes precedence without reconstruction
+        primers.pop('B1', None)
+        primers.pop('B2', None)
+    elif 'B1' in primers and 'B2' in primers:
         b1_seq = primers['B1']
         b2_seq = primers['B2']
-        if 'BIP' not in primers:
-            bip_seq, b1c_seq = check_orientation(b1_seq, b2_seq, 'B')
-            primers['BIP'] = bip_seq
-            domains_created['BIP'] = PrimerDomains(B2=b2_seq, B1c=b1c_seq, linker=linker)
+        bip_seq, b1c_seq = check_orientation(b1_seq, b2_seq, 'B')
+        primers['BIP'] = bip_seq
+        domains_created['BIP'] = PrimerDomains(B2=b2_seq, B1c=b1c_seq, linker=linker)
         del primers['B1']
         del primers['B2']
 
@@ -325,7 +351,7 @@ def build_config_from_cli(
     # 1. Load base config from YAML if provided
     base_data = {}
     if config_path:
-        with open(config_path, "r") as f:
+        with open(config_path, "r", encoding="utf-8") as f:
             base_data = yaml.safe_load(f) or {}
 
     config = PanelConfig.model_validate(base_data) if base_data else PanelConfig()

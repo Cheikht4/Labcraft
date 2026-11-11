@@ -25,10 +25,10 @@ def test_coverage_cli_with_csv(tmp_path: Path):
     dummy_seq = "GAAGAAGCTGTGCAGCCTG" + "N"*20 + "TGGCTTTTGGGCCTGACTTC" + "N"*20 + "GCACGGTGTAGCAGACTAG" + "N"*20 + "TCCCCACGACGGAGCTACAG"
     
     fasta_text = ">S1_parfaite\n" + dummy_seq + "\n>S2_mism_interne\n" + dummy_seq + "\n>S3_veto_3p\n" + dummy_seq + "\n>S4_loop_fail\n" + dummy_seq + "\n>S5_count_lost\n" + dummy_seq + "\n"
-    fasta_file.write_text(fasta_text)
+    fasta_file.write_text(fasta_text, encoding="utf-8")
     
     csv_file = tmp_path / "sites.csv"
-    with open(csv_file, "w") as f:
+    with open(csv_file, "w", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=["strain_id", "primer_role", "primer_name", "position", "strand", "site_seq", "n_mismatches", "panel"])
         writer.writeheader()
         
@@ -56,7 +56,7 @@ def test_coverage_cli_with_csv(tmp_path: Path):
             writer.writerow({"strain_id": s, "primer_role": "LF", "primer_name": "Test_LF", "position": 0, "strand": "+", "site_seq": lf_seq, "n_mismatches": lf_mm, "panel": "Test"})
             
     primers_file = tmp_path / "primers.fasta"
-    primers_file.write_text(">Test_F3\nGCCACCTTAAGCCACAGTA\n>Test_B3\nGTTGTGTCATGGGAGGG\n>Test_F1\nGAAGTCAGGCCCAAAAGCCA\n>Test_F2\nGAAGAAGCTGTGCAGCCTG\n>Test_B1\nTCCCCACGACGGAGCTACAG\n>Test_B2\nCTAGTCTGCTACACCGTGC\n>Test_LF\nCCTTGGACGGGGCT\n")
+    primers_file.write_text(">Test_F3\nGCCACCTTAAGCCACAGTA\n>Test_B3\nGTTGTGTCATGGGAGGG\n>Test_F1\nGAAGTCAGGCCCAAAAGCCA\n>Test_F2\nGAAGAAGCTGTGCAGCCTG\n>Test_B1\nTCCCCACGACGGAGCTACAG\n>Test_B2\nCTAGTCTGCTACACCGTGC\n>Test_LF\nCCTTGGACGGGGCT\n", encoding="utf-8")
     
     out_html = tmp_path / "report.html"
     
@@ -74,7 +74,7 @@ def test_coverage_cli_with_csv(tmp_path: Path):
     
     assert result.exit_code == 0, f"Error: {result.stdout}"
     
-    html_content = out_html.read_text()
+    html_content = out_html.read_text(encoding="utf-8")
     assert "S1_parfaite" in html_content
     assert "S2_mism_interne" in html_content
     assert "S3_veto_3p" in html_content
@@ -89,15 +89,17 @@ def test_coverage_cli_with_csv(tmp_path: Path):
 def test_coverage_cli_auto_seeding_and_export(tmp_path: Path):
     """Test du criblage intégré (sans -s) et vérification de la ré-exécutabilité via --export-sites."""
     fasta_file = tmp_path / "strains.fasta"
-    # Séquence contenant F3, B3(RC), F2, B2(RC), LF
+    # Séquence contenant F3, F2, LF, F1c(-), B1c(+), B2(RC), B3(RC)
     seq_s1 = (
         "GCCACCTTAAGCCACAGTA" + "A"*30 +
         "GAAGAAGCTGTGCAGCCTG" + "A"*30 +
         "CCTTGGACGGGGCT" + "A"*30 +
+        "TGGCTTTTGGGCCTGACTTC" + "A"*30 +
+        "TCCCCACGACGGAGCTACAG" + "A"*30 +
         "GCACGGTGTAGCAGACTAG" + "A"*30 +
         "CCCTCCCATGACACAAC"
     )
-    fasta_file.write_text(f">Strain_1\n{seq_s1}\n")
+    fasta_file.write_text(f">Strain_1\n{seq_s1}\n", encoding="utf-8")
     
     primers_file = tmp_path / "primers.fasta"
     primers_file.write_text(
@@ -108,7 +110,7 @@ def test_coverage_cli_auto_seeding_and_export(tmp_path: Path):
         ">Test_B1\nTCCCCACGACGGAGCTACAG\n"
         ">Test_B2\nCTAGTCTGCTACACCGTGC\n"
         ">Test_LF\nCCTTGGACGGGGCT\n"
-    )
+    , encoding="utf-8")
     
     out_html1 = tmp_path / "report1.html"
     exported_csv = tmp_path / "exported_sites.csv"
@@ -128,7 +130,7 @@ def test_coverage_cli_auto_seeding_and_export(tmp_path: Path):
     assert exported_csv.exists()
     
     # Vérifier que le CSV exporté contient la colonne primer_name
-    with open(exported_csv, "r") as f:
+    with open(exported_csv, "r", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         assert "primer_name" in reader.fieldnames
         rows = list(reader)
@@ -149,8 +151,8 @@ def test_coverage_cli_auto_seeding_and_export(tmp_path: Path):
     assert res2.exit_code == 0, f"Error res2: {res2.stdout}"
     
     # Comparaison des résultats JSON
-    json1 = json.loads((tmp_path / "report1.json").read_text())
-    json2 = json.loads((tmp_path / "report2.json").read_text())
+    json1 = json.loads((tmp_path / "report1.json").read_text(encoding="utf-8"))
+    json2 = json.loads((tmp_path / "report2.json").read_text(encoding="utf-8"))
     assert json1["covered_thermo"] == json2["covered_thermo"]
     assert json1["covered_count"] == json2["covered_count"]
     assert json1["strains"] == json2["strains"]
@@ -177,7 +179,7 @@ def test_coverage_reference_amplifiable_default_options(tmp_path: Path):
     
     assert result.exit_code == 0, f"Error: {result.stdout}"
     
-    json_data = json.loads((tmp_path / "coverage_den3_default.json").read_text())
+    json_data = json.loads((tmp_path / "coverage_den3_default.json").read_text(encoding="utf-8"))
     assert json_data["total_strains"] == 1
     assert json_data["covered_thermo"] == 1, "Le génome de référence doit être amplifiable par défaut."
     assert json_data["covered_count"] == 1
@@ -342,7 +344,7 @@ def test_coverage_200_strains_real_performance(tmp_path: Path):
         strains_lines.append(f">Strain_var_{i:03d}\n{''.join(seq_chars)}")
         
     multi_fasta_path = tmp_path / "201_strains_dengue.fasta"
-    multi_fasta_path.write_text("\n".join(strains_lines) + "\n")
+    multi_fasta_path.write_text("\n".join(strains_lines) + "\n", encoding="utf-8")
     
     out_html = tmp_path / "coverage_201_strains.html"
     
@@ -361,7 +363,7 @@ def test_coverage_200_strains_real_performance(tmp_path: Path):
     assert result.exit_code == 0, f"Error: {result.stdout}"
     total_time = t1 - t0
     
-    json_data = json.loads((tmp_path / "coverage_201_strains.json").read_text())
+    json_data = json.loads((tmp_path / "coverage_201_strains.json").read_text(encoding="utf-8"))
     assert json_data["total_strains"] == 201
     assert json_data["covered_thermo"] >= 1
     assert json_data["covered_count"] >= 1
@@ -389,7 +391,7 @@ def test_veto_3p_reachable_single_command(tmp_path: Path):
     mutated_seq = ref_seq[:f3_term_pos] + 'T' + ref_seq[f3_term_pos + 1:]
     
     fasta_file = tmp_path / "mutated_f3_term.fasta"
-    fasta_file.write_text(f">DEN3_F3_3p_mut\n{mutated_seq}\n")
+    fasta_file.write_text(f">DEN3_F3_3p_mut\n{mutated_seq}\n", encoding="utf-8")
     
     out_html = tmp_path / "coverage_f3_term.html"
     
@@ -405,7 +407,7 @@ def test_veto_3p_reachable_single_command(tmp_path: Path):
     
     assert result.exit_code == 0, f"Error: {result.stdout}"
     
-    json_data = json.loads((tmp_path / "coverage_f3_term.json").read_text())
+    json_data = json.loads((tmp_path / "coverage_f3_term.json").read_text(encoding="utf-8"))
     strain_eval = json_data["strains"][0]["evals"]["F3"]
     assert strain_eval["verdict"] == "veto_3p", f"Attendu: veto_3p, Obtenu: {strain_eval['verdict']}"
     assert strain_eval["first_bad_pos"] == 1
@@ -433,7 +435,7 @@ def test_absent_site_when_heavily_mutated(tmp_path: Path):
     mutated_chars[f3_pos + 3] = 'A' if ref_seq[f3_pos + 3] != 'A' else 'T'
     
     fasta_file = tmp_path / "heavily_mutated.fasta"
-    fasta_file.write_text(f">DEN3_heavy_mut\n{''.join(mutated_chars)}\n")
+    fasta_file.write_text(f">DEN3_heavy_mut\n{''.join(mutated_chars)}\n", encoding="utf-8")
     
     out_html = tmp_path / "coverage_heavy.html"
     
@@ -448,7 +450,7 @@ def test_absent_site_when_heavily_mutated(tmp_path: Path):
     ])
     
     assert result.exit_code == 0, f"Error: {result.stdout}"
-    json_data = json.loads((tmp_path / "coverage_heavy.json").read_text())
+    json_data = json.loads((tmp_path / "coverage_heavy.json").read_text(encoding="utf-8"))
     strain_eval = json_data["strains"][0]["evals"]["F3"]
     assert strain_eval["verdict"] == "absent"
 
@@ -471,7 +473,7 @@ def test_loop_primer_3prime_mutation_remains_amplifiable(tmp_path: Path):
     mutated_chars[lf_pos] = 'A' if ref_seq[lf_pos] != 'A' else 'T'
     
     fasta_file = tmp_path / "mutated_lf.fasta"
-    fasta_file.write_text(f">DEN3_LF_mut\n{''.join(mutated_chars)}\n")
+    fasta_file.write_text(f">DEN3_LF_mut\n{''.join(mutated_chars)}\n", encoding="utf-8")
     
     out_html = tmp_path / "coverage_lf.html"
     
@@ -486,7 +488,7 @@ def test_loop_primer_3prime_mutation_remains_amplifiable(tmp_path: Path):
     ])
     
     assert result.exit_code == 0, f"Error: {result.stdout}"
-    json_data = json.loads((tmp_path / "coverage_lf.json").read_text())
+    json_data = json.loads((tmp_path / "coverage_lf.json").read_text(encoding="utf-8"))
     strain = json_data["strains"][0]
     # LF a un veto_3p mais l'amplification globale reste True
     assert strain["evals"]["LF"]["verdict"] == "veto_3p"
@@ -526,7 +528,7 @@ def test_part_h_three_ns_in_f3_site_gives_indetermine_and_preserves_coverage_rat
     seq_with_3n = ref_seq[:f3_pos + 7] + "NNN" + ref_seq[f3_pos + 10:]
 
     fasta_2strains = tmp_path / "strains_with_3n.fasta"
-    fasta_2strains.write_text(f">M93130_ref\n{ref_seq}\n>M93130_F3_3N\n{seq_with_3n}\n")
+    fasta_2strains.write_text(f">M93130_ref\n{ref_seq}\n>M93130_F3_3N\n{seq_with_3n}\n", encoding="utf-8")
 
     out_cov_html = tmp_path / "coverage_3n.html"
     runner = CliRunner()
@@ -539,7 +541,7 @@ def test_part_h_three_ns_in_f3_site_gives_indetermine_and_preserves_coverage_rat
     ])
     assert res_cov.exit_code == 0, f"Coverage CLI failed: {res_cov.stdout}"
 
-    cov_json = json.loads((tmp_path / "coverage_3n.json").read_text())
+    cov_json = json.loads((tmp_path / "coverage_3n.json").read_text(encoding="utf-8"))
     assert cov_json["total_strains"] == 2
     assert cov_json["indeterminate_strains"] == 1
     assert cov_json["evaluable_strains"] == 1
@@ -558,10 +560,10 @@ def test_part_h_three_ns_in_f3_site_gives_indetermine_and_preserves_coverage_rat
         f">{h}\n{s}" for h, s in read_multi_fasta(str(primers_path)) if h.startswith("3_")
     ]
     primers_only_3 = tmp_path / "panel_3.txt"
-    primers_only_3.write_text("\n".join(p3_records) + "\n")
+    primers_only_3.write_text("\n".join(p3_records) + "\n", encoding="utf-8")
 
     fasta_1strain = tmp_path / "strain_3n_only.fasta"
-    fasta_1strain.write_text(f">M93130_F3_3N\n{seq_with_3n}\n")
+    fasta_1strain.write_text(f">M93130_F3_3N\n{seq_with_3n}\n", encoding="utf-8")
     out_ana_html = tmp_path / "analyze_3n.html"
     res_ana = runner.invoke(app, [
         "analyze",
@@ -570,7 +572,7 @@ def test_part_h_three_ns_in_f3_site_gives_indetermine_and_preserves_coverage_rat
         "-o", str(out_ana_html),
     ])
     assert res_ana.exit_code == 0, f"Analyze CLI failed: {res_ana.stdout}"
-    ana_html_text = out_ana_html.read_text()
+    ana_html_text = out_ana_html.read_text(encoding="utf-8")
     assert "Indéterminé" in ana_html_text
 
 
@@ -603,7 +605,7 @@ def test_coverage_mg_dependence_and_m93130_verdicts(tmp_path: Path):
             "--dntp", dntp_val,
         ])
         assert res.exit_code == 0, f"Coverage CLI failed for Mg={mg_val}: {res.stdout}"
-        data = json.loads((tmp_path / f"cov_mg_{int(mg_val)}.json").read_text())
+        data = json.loads((tmp_path / f"cov_mg_{int(mg_val)}.json").read_text(encoding="utf-8"))
         evals_by_mg[mg_val] = data["strains"][0]["evals"]
 
     for role in ("F3", "B3", "FIP", "BIP", "LF", "LB"):

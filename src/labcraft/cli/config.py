@@ -197,6 +197,16 @@ def build_engine_from_config(
             # Register parent name in primer_to_target
             primer_to_target[name] = t_id
             
+            # Pré-calculer la séparation des domaines sur la séquence parente si FIP/BIP complet fourni sans domains explicites
+            # Pre-split domains on the parent IUPAC sequence when full FIP/BIP is given without explicit domains
+            auto_split_parent: Optional[PhysicalPrimer] = None
+            if role_name.upper() in ("FIP", "BIP") and not isinstance(p_data.domains, PrimerDomains):
+                auto_split_parent = PhysicalPrimer.from_alignment(
+                    name, seq, role_enum, targets.get(t_id, ""),
+                    nominal_concentration=total_conc, parent_name=name,
+                    blocked_3prime=is_blocked, label_5prime=label,
+                )
+
             for v_idx, variant_seq in enumerate(variants):
                 bare_seq, lna_pos = parse_lna_sequence(variant_seq)
                 v_name = f"{name}#{v_idx+1}" if len(variants) > 1 else name
@@ -250,12 +260,28 @@ def build_engine_from_config(
                             lna_positions=tuple(lna_pos)
                         ))
                 elif role_name.upper() in ("FIP", "BIP"):
-                    target_seq = targets.get(t_id, "")
-                    primers.append(PhysicalPrimer.from_alignment(
-                        v_name, variant_seq, role_enum, target_seq, 
-                        nominal_concentration=variant_conc, parent_name=name,
-                        blocked_3prime=is_blocked, label_5prime=label
-                    ))
+                    assert auto_split_parent is not None
+                    if auto_split_parent.tail_domain and auto_split_parent.binding_domain:
+                        t_len = len(auto_split_parent.tail_domain)
+                        l_len = len(auto_split_parent.linker or "")
+                        b_start = t_len + l_len
+                        primers.append(PhysicalPrimer(
+                            v_name, bare_seq, role_enum,
+                            bare_seq[b_start:], bare_seq[:t_len], bare_seq[t_len:b_start] or None,
+                            nominal_concentration=variant_conc, parent_name=name,
+                            parent_binding_domain=auto_split_parent.binding_domain,
+                            blocked_3prime=is_blocked, label_5prime=label,
+                            lna_positions=tuple(lna_pos)
+                        ))
+                    else:
+                        primers.append(PhysicalPrimer(
+                            v_name, bare_seq, role_enum,
+                            bare_seq, None, None,
+                            nominal_concentration=variant_conc, parent_name=name,
+                            parent_binding_domain=auto_split_parent.binding_domain,
+                            blocked_3prime=is_blocked, label_5prime=label,
+                            lna_positions=tuple(lna_pos)
+                        ))
                 else:
                     primers.append(PhysicalPrimer(
                         v_name, bare_seq, role_enum, bare_seq, 

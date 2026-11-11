@@ -1,7 +1,6 @@
 import pytest
 from pathlib import Path
-from labcraft.cli.parsers import parse_primer_file
-from labcraft.cli.parsers import read_multi_fasta
+from labcraft.cli.parsers import ParseError, parse_primer_file, read_multi_fasta
 
 FIXTURE_DIR = Path(__file__).parents[1] / "fixtures" / "real_primer_files"
 
@@ -27,11 +26,10 @@ def test_real_amorceparida():
     
     target_seq = read_multi_fasta(str(target_fasta))[0][1]
     
-    with pytest.warns(UserWarning, match="n'a pas pu être vérifiée"):
-        sets = parse_primer_file(str(primer_file), [("DEN3_M93130", target_seq)])
-    assert len(sets) == 4
-    for i in range(4):
-        assert len(sets[i].primers) == 6
+    # Sans génomes cibles pour tous les sérotypes (ParidaD1/D2/D4), aucune reconstruction silencieuse
+    # Without target genomes for all serotypes (ParidaD1/D2/D4), reject silent fallback
+    with pytest.raises(ParseError, match="séquence complète"):
+        parse_primer_file(str(primer_file), [("DEN3_M93130", target_seq)])
 
 def test_real_nawar_dengue1():
     primer_file = FIXTURE_DIR / "Nawar_dengue1.txt"

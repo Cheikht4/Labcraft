@@ -129,8 +129,8 @@ def test_part_d_dimer_conc_max_and_recommendations_coherence_via_cli(tmp_path):
         recs = generate_recommendations(v_test, risks=[])
         assert all("Le panel semble sain" not in rec for rec in recs)
 
-    # Test CLI réel sur Parida DEN-3 + M93130.1 (~0.34 nM de dimères amplifiables à 63 °C)
-    # Real CLI test on Parida DEN-3 + M93130.1 (~0.34 nM amplifiable dimers at 63 °C)
+    # Test CLI réel sur Parida DEN-3 + M93130.1 (~7.26 nM de dimères amplifiables à 63 °C avec BIP corrigée)
+    # Real CLI test on Parida DEN-3 + M93130.1 (~7.26 nM amplifiable dimers at 63 °C with fixed BIP orientation)
     fixture_dir = Path(__file__).resolve().parent.parent / "fixtures" / "real_primer_files"
     parida_file = fixture_dir / "amorceparida.txt"
     d3_fasta = fixture_dir / "DEN3_M93130.fasta"
@@ -139,28 +139,28 @@ def test_part_d_dimer_conc_max_and_recommendations_coherence_via_cli(tmp_path):
         f">{h}\n{s}" for h, s in read_multi_fasta(str(parida_file)) if h.startswith("ParidaD3_")
     ]
     primers_only_pd3 = tmp_path / "parida_d3.txt"
-    primers_only_pd3.write_text("\n".join(pd3_records) + "\n")
+    primers_only_pd3.write_text("\n".join(pd3_records) + "\n", encoding="utf-8")
 
     runner = CliRunner()
-    # 1) Avec --dimer-conc-max 2.5 (au-dessus de 0.34 nM) -> WARNING
+    # 1) Avec --dimer-conc-max 20.0 (au-dessus de 7.26 nM) -> WARNING
     out_warn = tmp_path / "pd3_warn.html"
     res_warn = runner.invoke(app, [
         "analyze", "-p", str(primers_only_pd3), "-t", str(d3_fasta),
-        "--temperature", "63.0", "--dimer-conc-max", "2.5", "-o", str(out_warn)
+        "--temperature", "63.0", "--dimer-conc-max", "20.0", "-o", str(out_warn)
     ])
     assert res_warn.exit_code == 0, f"CLI failed: {res_warn.stdout}"
-    html_warn = out_warn.read_text()
+    html_warn = out_warn.read_text(encoding="utf-8")
     assert "Verdict Global : WARNING" in html_warn
     assert "Le panel semble sain" not in html_warn
 
-    # 2) Avec --dimer-conc-max 0.1 (en-dessous de 0.34 nM) -> FAILURE
+    # 2) Avec --dimer-conc-max 0.1 (en-dessous de 7.26 nM) -> FAILURE
     out_fail = tmp_path / "pd3_fail.html"
     res_fail = runner.invoke(app, [
         "analyze", "-p", str(primers_only_pd3), "-t", str(d3_fasta),
         "--temperature", "63.0", "--dimer-conc-max", "0.1", "-o", str(out_fail)
     ])
     assert res_fail.exit_code == 0, f"CLI failed: {res_fail.stdout}"
-    html_fail = out_fail.read_text()
+    html_fail = out_fail.read_text(encoding="utf-8")
     assert "Verdict Global : FAILURE" in html_fail
     assert "Le panel semble sain" not in html_fail
 

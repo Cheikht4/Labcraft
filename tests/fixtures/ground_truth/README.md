@@ -9,6 +9,7 @@ Ce répertoire regroupe les séquences d'amorces et les génomes complets de ré
   - **Résultat paillasse** : **Succès en singleplex** (FIP/BIP 0,8 µM, LF/LB 0,4 µM, F3/B3 0,2 µM).
 - **`parida_DENV4.txt`** : Panel RT-LAMP ciblant la région 3'-UTR du virus de la dengue sérotype 4 (DENV-4).
   - **Source** : Parida, M., Horioke, K., Ishida, H., Dash, P. K., Saxena, P., Jana, A. M., Islam, M. A., Inoue, S., Hosaka, N., & Morita, K. (2005). * Rapid detection and differentiation of dengue virus serotypes by a real-time reverse transcription-loop-mediated isothermal amplification assay.* **Journal of Clinical Microbiology**, 43(6), 2895–2903. https://doi.org/10.1128/JCM.43.6.2895-2903.2005
+  - **Note** : `>ParidaD4_F1` (base surnuméraire dans le domaine F1c empêchant la localisation sur `MG272272.1`) a été retiré en attente des séquences complètes `>ParidaD4_FIP` et `>ParidaD4_BIP` commandées.
   - **Résultat paillasse** : **Succès en singleplex** (FIP/BIP 0,8 µM, LF/LB 0,4 µM, F3/B3 0,2 µM).
 - **`nunes_YFV.txt`** : Panel RT-LAMP ciblant le gène NS1 du virus de la fièvre jaune (YFV).
   - **Source** : Nunes, M. R. T., Viana, S., Teixeira, K. N., et al. (2015). *Reverse transcription loop-mediated isothermal amplification for yellow fever virus detection.* **Journal of Virological Methods**.
