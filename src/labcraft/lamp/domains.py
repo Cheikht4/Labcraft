@@ -215,31 +215,35 @@ class PhysicalPrimer:
         target_seq = target_seq.upper()
         target_rc = _revcomp(target_seq)
         
-        # Pour une FIP/BIP, on sait que le domaine de liaison est à l'extrémité 3'.
-        # On va chercher le plus long suffixe de l'amorce qui s'aligne (sens ou RC) sur la cible.
-        # Longueur minimale d'un domaine : typiquement 12-15 bp.
+        from labcraft.target.seeding import primer_matches_sequence, seq_to_regex
+        import regex as _regex
+
         min_domain_len = 12
         best_binding_len = 0
-        
-        # Chercher le suffixe (binding domain) exact d'abord
-        for i in range(len(sequence) - min_domain_len, 0, -1):
+        bind_hit: tuple[int, int, str] | None = None
+
+        # Chercher le plus long suffixe (binding domain) exact d'abord via _match_iupac_substring
+        # Search for the longest exact 3' binding domain suffix first via _match_iupac_substring
+        for i in range(1, len(sequence) - min_domain_len + 1):
             suffix = sequence[i:]
             if _match_iupac_substring(suffix, target_seq) or _match_iupac_substring(suffix, target_rc):
-                if len(suffix) > best_binding_len:
-                    best_binding_len = len(suffix)
-                    
+                best_binding_len = len(suffix)
+                bind_hit = primer_matches_sequence(target_seq, suffix, max_errors=0, strict_3prime_len=0)
+                break
+
         # Si la recherche exacte échoue et qu'une cible est fournie, tenter un criblage tolérant (jusqu'à 2 erreurs)
         # If exact search fails and target is provided, try tolerant screening (up to 2 errors)
         if best_binding_len == 0 and target_seq:
-            from labcraft.target.seeding import primer_matches_sequence
             for cand_len in range(min(25, len(sequence) - min_domain_len), min_domain_len - 1, -1):
                 suffix = sequence[-cand_len:]
-                if primer_matches_sequence(target_seq, suffix, max_errors=2, strict_3prime_len=3, strict_3prime_tolerate=2) is not None:
+                hit = primer_matches_sequence(target_seq, suffix, max_errors=2, strict_3prime_len=3, strict_3prime_tolerate=2)
+                if hit is not None:
                     best_binding_len = cand_len
+                    bind_hit = hit
                     break
-                    
+
         if best_binding_len == 0:
-            if target_seq: # Only warn if we genuinely couldn't find it when target is provided
+            if target_seq:  # Only warn if we genuinely couldn't find it when target is provided
                 warnings.warn(f"Le domaine de liaison de {name} n'est pas trouvé sur la cible.", UserWarning, stacklevel=2)
             return cls(
                 name=name, sequence=sequence, role=role,
@@ -248,20 +252,78 @@ class PhysicalPrimer:
                 blocked_3prime=blocked_3prime, label_5prime=label_5prime,
                 lna_positions=tuple(lna_pos)
             )
-            
-        # Chercher le préfixe (tail domain) exact d'abord
+
         binding_idx = len(sequence) - best_binding_len
         best_tail_len = 0
-        
-        for i in range(min_domain_len, binding_idx + 1):
-            prefix = sequence[:i]
-            if _match_iupac_substring(prefix, target_seq) or _match_iupac_substring(prefix, target_rc):
-                best_tail_len = i
-                
-        # Si la recherche exacte du domaine 5' échoue, tenter un criblage tolérant (jusqu'à 2 erreurs)
-        # If exact search for 5' domain fails, try tolerant screening (up to 2 errors)
+
+        # Fenêtre locale autour du site 3' et brin opposé attendu (LAMP FIP/BIP : queue 5' sur le brin opposé à 3')
+        # Local window around 3' site and expected opposite strand (LAMP FIP/BIP: 5' tail on opposite strand)
+        if bind_hit is not None:
+            b_start, b_end, b_strand = bind_hit
+            w_start = max(0, b_start - 500)
+            w_end = min(len(target_seq), b_end + 500)
+            local_sense = target_seq[w_start:w_end]
+            local_opp = _revcomp(local_sense) if b_strand == "+" else local_sense
+        else:
+            local_opp = ""
+
+        # Repérer un éventuel suffixe linker poly-T immédiatement avant le domaine 3' (>= 3 T)
+        # Identify an optional poly-T linker suffix immediately before the 3' domain (>= 3 Ts)
+        poly_t_start = binding_idx
+        while poly_t_start > min_domain_len and sequence[poly_t_start - 1] == "T":
+            poly_t_start -= 1
+        has_polyt_linker = (binding_idx - poly_t_start) >= 3
+
+        # 1) Match exact sur le brin opposé local (évite les hits fortuits de 12 nt hors amplicon)
+        # 1) Exact match on local opposite strand (avoids spurious 12-mer hits outside amplicon)
+        if local_opp:
+            for i in range(binding_idx, min_domain_len - 1, -1):
+                prefix = sequence[:i]
+                if _match_iupac_substring(prefix, local_opp):
+                    best_tail_len = i
+                    break
+
+        # 2) Fallback exact sur tout le génome (comportement historique si hors fenêtre locale)
+        # 2) Exact fallback across full genome
+        if best_tail_len == 0:
+            for i in range(binding_idx, min_domain_len - 1, -1):
+                prefix = sequence[:i]
+                if _match_iupac_substring(prefix, target_seq) or _match_iupac_substring(prefix, target_rc):
+                    best_tail_len = i
+                    break
+
+        # 3) Fallback tolérant local (substitutions <= 2 puis édition <= 3 incluant 1 indel) sur brin opposé
+        # 3) Local tolerant fallback (substitutions <= 2 then edit distance <= 3) on opposite strand
+        if best_tail_len == 0 and local_opp:
+            # Préférer couper avant le linker poly-T si le préfixe jusque poly_t_start s'aligne déjà bien
+            # Prefer splitting right before a poly-T linker if the candidate before poly-T aligns cleanly
+            candidate_lengths = list(range(binding_idx, min_domain_len - 1, -1))
+            if has_polyt_linker and poly_t_start in candidate_lengths:
+                candidate_lengths.remove(poly_t_start)
+                candidate_lengths.insert(0, poly_t_start)
+
+            for err_mode in ("sub", "edit"):
+                best_err_score = None
+                for i in candidate_lengths:
+                    prefix = sequence[:i]
+                    pat_body = seq_to_regex(prefix)
+                    err_clause = "{s<=2}" if err_mode == "sub" else "{e<=3}"
+                    m = _regex.search(f"(?be)({pat_body}){err_clause}", local_opp)
+                    if m is not None:
+                        err_total = sum(m.fuzzy_counts)
+                        # Minimiser l'erreur totale, puis préférer ne pas avaler le linker poly-T
+                        # Minimize total edits, preferring not to swallow the poly-T linker
+                        eats_linker = (i > poly_t_start) if has_polyt_linker else False
+                        score = (err_total, 1 if eats_linker else 0, -i)
+                        if best_err_score is None or score < best_err_score[0]:
+                            best_err_score = (score, i)
+                if best_err_score is not None:
+                    best_tail_len = best_err_score[1]
+                    break
+
+        # 4) Dernier fallback tolérant global (max_errors=2 en substitutions)
+        # 4) Last global tolerant fallback (max_errors=2 substitutions)
         if best_tail_len == 0 and target_seq:
-            from labcraft.target.seeding import primer_matches_sequence
             for i in range(binding_idx, min_domain_len - 1, -1):
                 prefix = sequence[:i]
                 if primer_matches_sequence(target_seq, prefix, max_errors=2, strict_3prime_len=0) is not None:
