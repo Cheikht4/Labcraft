@@ -175,7 +175,7 @@ def test_part_f_optimizer_cumulative_gain_and_parent_level_variants_via_cli(tmp_
         f">{h}\n{s}" for h, s in read_multi_fasta(str(p3_file)) if h.startswith("14_")
     ]
     primers_only_14 = tmp_path / "panel_14.txt"
-    primers_only_14.write_text("\n".join(p14_records) + "\n")
+    primers_only_14.write_text("\n".join(p14_records) + "\n", encoding="utf-8")
 
     cfg = build_config_from_cli(
         config_path=None,
@@ -225,7 +225,7 @@ def test_part_f_optimizer_cumulative_gain_and_parent_level_variants_via_cli(tmp_
         "--temperature", "63.0", "--na", "50.0", "--mg", "8.0", "--dntp", "1.4"
     ])
     assert res.exit_code == 0, f"CLI failed: {res.stdout}"
-    html = out_html.read_text()
+    html = out_html.read_text(encoding="utf-8")
     expected_pct_str = f"{round(expected_gain * 100, 1)} %"
     assert expected_pct_str in html
     assert "LB_14#" not in html.split("Ajustement de Concentrations")[1].split("Avertissements")[0] if "Ajustement de Concentrations" in html and "Avertissements" in html else True

@@ -18,7 +18,7 @@ def _load_tables():
     
     int_file = os.path.join(data_dir, "mismatch_nn_internal.csv")
     if os.path.exists(int_file):
-        with open(int_file, "r") as f:
+        with open(int_file, "r", encoding="utf-8") as f:
             reader = csv.DictReader(f)
             for row in reader:
                 key = row["nn_step_top_bottom"]
@@ -28,7 +28,7 @@ def _load_tables():
                 
     term_file = os.path.join(data_dir, "mismatch_nn_terminal.csv")
     if os.path.exists(term_file):
-        with open(term_file, "r") as f:
+        with open(term_file, "r", encoding="utf-8") as f:
             reader = csv.DictReader(f)
             for row in reader:
                 key = row["nn_step_top_bottom"]

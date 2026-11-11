@@ -119,7 +119,7 @@ def test_part_c_cli_panel3_dimer_reduction(tmp_path):
         f">{h}\n{s}" for h, s in read_multi_fasta(str(p3_file)) if h.startswith("3_")
     ]
     primers_only_3 = tmp_path / "panel_3.txt"
-    primers_only_3.write_text("\n".join(p3_records) + "\n")
+    primers_only_3.write_text("\n".join(p3_records) + "\n", encoding="utf-8")
     out_html = tmp_path / "report_p3.html"
 
     runner = CliRunner()
@@ -128,7 +128,7 @@ def test_part_c_cli_panel3_dimer_reduction(tmp_path):
         "--temperature", "63.0", "--na", "50.0", "--mg", "8.0", "--dntp", "1.4"
     ])
     assert res.exit_code == 0, f"CLI failed: {res.stdout}"
-    html = out_html.read_text()
+    html = out_html.read_text(encoding="utf-8")
     # LB_3#1_homo avait dg_3p = -2.05 à 1 M Na+, mais avec la correction saline (-1.72 > -2.0),
     # il ne doit plus apparaître à -2.05 kcal/mol dans les dimères amplifiables.
     assert "-2.05 kcal/mol" not in html

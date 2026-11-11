@@ -60,9 +60,9 @@ def test_part_g_default_buffer_and_enzyme_coherence_via_cli(tmp_path):
     primers_file = tmp_path / "primers.txt"
     primers_file.write_text(
         f">P_F3\n{f3_seq}\n>P_B3\n{b3_seq}\n>P_FIP\n{fip_seq}\n>P_BIP\n{bip_seq}\n"
-    )
+    , encoding="utf-8")
     target_file = tmp_path / "target.fasta"
-    target_file.write_text(f">T1\n{'A'*20}{f3_seq}{'C'*20}CTGAAGCCTTTCCCCAGA{'G'*20}TGATTGGGACTTTGTGGT{'T'*20}AGAAGATGTCTCAAGCCAG{'A'*20}\n")
+    target_file.write_text(f">T1\n{'A'*20}{f3_seq}{'C'*20}CTGAAGCCTTTCCCCAGA{'G'*20}TGATTGGGACTTTGTGGT{'T'*20}AGAAGATGTCTCAAGCCAG{'A'*20}\n", encoding="utf-8")
 
     out_an = tmp_path / "an.html"
     out_cov = tmp_path / "cov.html"
@@ -83,7 +83,7 @@ def test_part_g_default_buffer_and_enzyme_coherence_via_cli(tmp_path):
     ])
     assert res_taq.exit_code == 0, f"Analyze taq failed: {res_taq.stdout}"
     assert "Enzyme=Taq" in res_taq.stdout
-    html_taq = out_taq.read_text()
+    html_taq = out_taq.read_text(encoding="utf-8")
     assert "Taq" in html_taq
 
 
@@ -99,7 +99,7 @@ def test_part_i_missing_files_clean_error_exit_code_1_via_cli(tmp_path):
     runner = CliRunner()
     missing = str(tmp_path / "introuvable.fasta")
     existing = tmp_path / "existant.fasta"
-    existing.write_text(">T1\nATGC\n")
+    existing.write_text(">T1\nATGC\n", encoding="utf-8")
 
     for args in [
         ["analyze", "-c", missing],

@@ -19,7 +19,7 @@ def render_coverage_report(
     # Prepare data
     total_strains = len(verdicts)
     if total_strains == 0:
-        with open(output_path, 'w') as f:
+        with open(output_path, 'w', encoding="utf-8") as f:
             f.write("<html><body>No strains analyzed</body></html>")
         return
         
@@ -99,7 +99,7 @@ def render_coverage_report(
             }
         json_data["strains"].append(s_data)
         
-    with open(json_path, 'w') as f:
+    with open(json_path, 'w', encoding="utf-8") as f:
         json.dump(json_data, f, indent=2)
         
     # Render HTML
@@ -127,5 +127,5 @@ def render_coverage_report(
         SiteVerdict=SiteVerdict
     )
     
-    with open(output_path, 'w') as f:
+    with open(output_path, 'w', encoding="utf-8") as f:
         f.write(html)

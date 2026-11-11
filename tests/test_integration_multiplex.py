@@ -4,10 +4,10 @@ import os
 
 def test_multiplex_integration(tmp_path):
     target1_fasta = tmp_path / "t1.fasta"
-    target1_fasta.write_text(">T1\nATCGATCGATCGATCGATCGATCGATCGATCG\n")
+    target1_fasta.write_text(">T1\nATCGATCGATCGATCGATCGATCGATCGATCG\n", encoding="utf-8")
     
     target2_fasta = tmp_path / "t2.fasta"
-    target2_fasta.write_text(">T2\nGCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTA\n")
+    target2_fasta.write_text(">T2\nGCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTA\n", encoding="utf-8")
     
     config_yaml = tmp_path / "multiplex.yaml"
     config_yaml.write_text(f"""
@@ -44,7 +44,7 @@ primer_sets:
         conc_uM: 0.2
         domains:
           F3: "GCTAGCTAGCTAGCTA"
-""")
+""", encoding="utf-8")
 
     # Try to load and run the whole main analysis path logic for mispriming
     from labcraft.cli.main import app

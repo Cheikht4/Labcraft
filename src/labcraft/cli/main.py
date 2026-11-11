@@ -499,7 +499,7 @@ def analyze(
         
         html = render_report(verdict, all_fractions, all_risks, metadata)
         
-        with open(current_output, "w") as f:
+        with open(current_output, "w", encoding="utf-8") as f:
             f.write(html)
             
         typer.echo(f"Analysis complete in {time.time() - start_time:.2f}s. Report saved to {current_output}.")
@@ -550,7 +550,7 @@ def coverage(
         
         first_strain_path = None
         if fasta_list:
-            with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".fasta") as tmp:
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False, suffix=".fasta") as tmp:
                 tmp.write(f">{fasta_list[0][0]}\n{fasta_list[0][1]}\n")
                 first_strain_path = tmp.name
 
@@ -603,7 +603,7 @@ def coverage(
     csv_records = []
     if sites:
         print(f"Lecture des sites candidats depuis : {sites}")
-        with open(sites, 'r') as f:
+        with open(sites, 'r', encoding="utf-8") as f:
             reader = csv.DictReader(f)
             for row in reader:
                 csv_records.append(row)
@@ -622,7 +622,7 @@ def coverage(
         print(f"Criblage terminé en {t_seed_1 - t_seed_0:.3f} s ({len(csv_records)} sites trouvés).")
 
     if export_sites:
-        with open(export_sites, 'w', newline='') as f:
+        with open(export_sites, 'w', newline='', encoding="utf-8") as f:
             fieldnames = ["strain_id", "primer_role", "primer_name", "position", "strand", "site_seq", "n_mismatches", "panel"]
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()

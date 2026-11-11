@@ -130,10 +130,10 @@ def test_part_e_self_target_mispriming_excludes_only_legitimate_locus_via_cli(tm
     )
 
     primers_file = tmp_path / "primers.txt"
-    primers_file.write_text(f">P_F3\n{f3_seq}\n>P_B3\n{b3_seq}\n")
+    primers_file.write_text(f">P_F3\n{f3_seq}\n>P_B3\n{b3_seq}\n", encoding="utf-8")
 
     target_file = tmp_path / "single_target.fasta"
-    target_file.write_text(f">SynthSingle\n{target_seq}\n")
+    target_file.write_text(f">SynthSingle\n{target_seq}\n", encoding="utf-8")
 
     out_html = tmp_path / "report_single.html"
     runner = CliRunner()
@@ -142,7 +142,7 @@ def test_part_e_self_target_mispriming_excludes_only_legitimate_locus_via_cli(tm
         "--temperature", "63.0", "--na", "50.0", "--mg", "8.0", "--dntp", "1.4"
     ])
     assert res.exit_code == 0, f"CLI failed: {res.stdout}"
-    html = out_html.read_text()
+    html = out_html.read_text(encoding="utf-8")
 
     # Le mésamorçage doit être signalé dans le rapport HTML même avec une seule cible
     assert "MÉSAMORÇAGE" in html

@@ -9,7 +9,7 @@ def test_dimer_resolution_stoichiometry():
     """Test que les dimères sont bien résolus par stoechiométrie même avec beaucoup d'underscores."""
     runner = CliRunner()
     
-    with tempfile.NamedTemporaryFile("w", suffix=".fasta", delete=False) as f_fasta:
+    with tempfile.NamedTemporaryFile("w", suffix=".fasta", delete=False, encoding="utf-8") as f_fasta:
         f_fasta.write(">dummy\nATGC\n")
         dummy_fasta = f_fasta.name
     
@@ -38,7 +38,7 @@ def test_dimer_resolution_stoichiometry():
         ]
     }
     
-    with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
+    with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False, encoding="utf-8") as f:
         yaml.dump(panel_data, f)
         config_path = f.name
         
@@ -50,7 +50,7 @@ def test_dimer_resolution_stoichiometry():
         
         # Verify the report was created and has no errors
         assert os.path.exists(out_path)
-        with open(out_path, "r") as f:
+        with open(out_path, "r", encoding="utf-8") as f:
             html = f.read()
         
         assert "StopIteration" not in result.stdout
@@ -63,7 +63,7 @@ def test_no_buffer_config():
     """Test qu'une config sans bloc buffer ne plante pas (UnboundLocalError)."""
     runner = CliRunner()
     
-    with tempfile.NamedTemporaryFile("w", suffix=".fasta", delete=False) as f_fasta:
+    with tempfile.NamedTemporaryFile("w", suffix=".fasta", delete=False, encoding="utf-8") as f_fasta:
         f_fasta.write(">dummy\nATGC\n")
         dummy_fasta = f_fasta.name
         
@@ -92,7 +92,7 @@ def test_no_buffer_config():
     }
     import yaml
     from labcraft.cli.main import app
-    with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f2:
+    with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False, encoding="utf-8") as f2:
         yaml.dump(panel_data, f2)
         config_path = f2.name
     

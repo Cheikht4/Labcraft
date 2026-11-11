@@ -9,6 +9,9 @@ jobs:
   test:
     name: Test on ${{ matrix.os }} with Python ${{ matrix.python }}
     runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
@@ -42,6 +45,6 @@ jobs:
 
       - name: Run pytest from another directory
         run: |
-          mkdir -p /tmp/test_dir
-          cd /tmp/test_dir
-          pytest $GITHUB_WORKSPACE/tests/
+          mkdir -p "${{ runner.temp }}/test_dir"
+          cd "${{ runner.temp }}/test_dir"
+          pytest "$GITHUB_WORKSPACE/tests/"
