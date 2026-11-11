@@ -387,7 +387,6 @@ def enumerate_complexes(
         e0 = site_info["end"]
         extracted_target = t_seq[s0:e0].upper()
         role = site_info.get("role")
-        parent_name = site_info.get("parent_name")
 
         # Accessibilité (unfolding penalty calculée une seule fois par locus physique)
         if role in (PrimerRole.LF, PrimerRole.LB):
@@ -432,7 +431,6 @@ def enumerate_complexes(
             if t_id not in unfolding_penalties:
                 unfolding_penalties[t_id] = {}
             unfolding_penalties[t_id][site_name] = pen_data
-            unfolding_penalties[t_id][f"{parent_name}_site"] = pen_data
         else:
             unfolding_penalties[site_name] = pen_data
 

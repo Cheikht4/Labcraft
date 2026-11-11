@@ -4,12 +4,12 @@
 LabCraft is an open-source thermodynamic simulation engine designed for multiplex primer panel design, supporting both LAMP (Loop-Mediated Isothermal Amplification) and PCR (Polymerase Chain Reaction) assays.
 
 [![CI](https://github.com/Cheikht4/Labcraft/actions/workflows/ci.yml/badge.svg)](https://github.com/Cheikht4/Labcraft/actions/workflows/ci.yml)
-![PyPI](https://img.shields.io/badge/PyPI-v0.0.1-blue)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
 ## Features
 - Thermodynamic calculations for various duplexes (ViennaRNA + Owczarzy salt corrections)
 - Coupled multi-target thermodynamic equilibrium and dimer/mispriming diagnostics
+- Amplifiable dimer failure threshold (`--dimer-conc-max`): default `0.23 nM` (provisoire, calibré sur 5 cas de paillasse, marge d'un facteur 2,3)
 - Multi-strain thermodynamic coverage evaluation (`labcraft coverage`)
 
 ## Installation

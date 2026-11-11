@@ -10,7 +10,7 @@ readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
 authors = [
-    {name = "Cheikh Talibouya Diagne"}
+    {name = "Cheikh Talibouya Touré"}
 ]
 keywords = ["LAMP", "PCR", "multiplex", "thermodynamics", "primer", "diagnostics"]
 classifiers = [

@@ -214,16 +214,24 @@ def is_amplifiable_dimer(
     
     is_amplifiable = amp_a or amp_b
     
-    # Pour le dG_3p, on veut remonter la pire (plus négative) énergie parmi celles 
-    # qui ont une template extensible, même si ce n'est pas "amplifiable" (< seuil).
+    # Pour le dG_3p, on privilégie les brins effectivement amplifiables s'il y en a,
+    # sinon la pire (plus négative) énergie parmi celles qui ont une matrice extensible.
+    # For dG_3p, prefer amplifiable strands if any, otherwise the worst extensible template.
+    amp_dgs = []
+    if amp_a:
+        amp_dgs.append((dg_a, 'a'))
+    if amp_b:
+        amp_dgs.append((dg_b, 'b'))
+
     valid_dgs = []
     if dg_a != 0.0:
         valid_dgs.append((dg_a, 'a'))
     if dg_b != 0.0:
         valid_dgs.append((dg_b, 'b'))
         
-    if valid_dgs:
-        best_tuple = min(valid_dgs, key=lambda x: x[0])
+    candidate_dgs = amp_dgs if amp_dgs else valid_dgs
+    if candidate_dgs:
+        best_tuple = min(candidate_dgs, key=lambda x: x[0])
         min_dg = best_tuple[0]
         ext_strand = best_tuple[1]
     else:
@@ -272,6 +280,23 @@ def evaluate_pair_amplifiable(
         "dntp_mm": backend_kwargs.get("dntp_mm", 0.0),
     }
 
+    pa_parent = p_a.parent_name or p_a.name.split("#")[0]
+    pb_parent = p_b.parent_name or p_b.name.split("#")[0]
+
+    def _resolve_ext_and_template(order_str: str, ext_strand: Optional[str]) -> Tuple[str, str]:
+        """Résout les noms d'amorces parentes étendue et matrice selon l'ordre de repliement.
+        Resolves extended and template parent primer names accounting for fold order.
+        """
+        if order_str == "a&a":
+            return (pa_parent, pa_parent) if ext_strand else ("", "")
+        strand_a_parent = pa_parent if order_str == "a&b" else pb_parent
+        strand_b_parent = pb_parent if order_str == "a&b" else pa_parent
+        if ext_strand == "a":
+            return strand_a_parent, strand_b_parent
+        if ext_strand == "b":
+            return strand_b_parent, strand_a_parent
+        return "", ""
+
     if seq_a == seq_b:
         # Homodimère: un seul ordre suffit car la concaténation est symétrique
         mapped_lna = tuple(list(lna_a) + [pos + len(seq_a) for pos in lna_a])
@@ -279,11 +304,16 @@ def evaluate_pair_amplifiable(
         res = backend.calc_homodimer(seq_a, temp_celsius=temp_celsius, **backend_kwargs)
         struct, mfe = res.structure.replace('&', ''), res.dg_kcal
         is_amp, dg_3p, ext_strand, blocked_veto = is_amplifiable_dimer(seq_a, seq_a, struct, mfe, enzyme, temp_celsius, blocked_a, blocked_b, lna_positions=mapped_lna, **salt_kwargs)
+        ext_par, tpl_par = _resolve_ext_and_template("a&a", ext_strand)
         details = {
             "seq_a": seq_a, "seq_b": seq_a, "structure": res.structure, 
             "delta_g": mfe, "delta_g_3p": dg_3p,
             "order": "a&a",
             "extensible_strand": ext_strand,
+            "parent_a": pa_parent,
+            "parent_b": pb_parent,
+            "extensible_primer_parent": ext_par,
+            "template_primer_parent": tpl_par,
             "is_blocked_veto": blocked_veto
         }
         return is_amp, dg_3p, details
@@ -387,6 +417,7 @@ def evaluate_pair_amplifiable(
             worst_ext_strand = ext_strand_ba
             worst_blocked = blocked_veto_ba
             
+    ext_par, tpl_par = _resolve_ext_and_template(chosen_order, worst_ext_strand)
     details = {
         "seq_a": seq_1,
         "seq_b": seq_2,
@@ -395,6 +426,10 @@ def evaluate_pair_amplifiable(
         "delta_g_3p": worst_dg,
         "order": chosen_order,
         "extensible_strand": worst_ext_strand,
+        "parent_a": pa_parent,
+        "parent_b": pb_parent,
+        "extensible_primer_parent": ext_par,
+        "template_primer_parent": tpl_par,
         "is_blocked_veto": worst_blocked
     }
     return is_amplifiable, worst_dg, details

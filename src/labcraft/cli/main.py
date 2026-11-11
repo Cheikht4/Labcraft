@@ -4,22 +4,121 @@ import time
 import importlib.metadata
 import os
 
+from labcraft import __version__
 from labcraft.lamp.domains import PrimerRole
 from labcraft.lamp.complex_enumeration import enumerate_complexes
 from labcraft.solver.dual import solve_dual
 from labcraft.metrics.fractions import compute_fractions
 from labcraft.diagnostics.amplifiable_dimer import evaluate_pair_amplifiable
 from labcraft.diagnostics.probe_tm import check_probes_tm
-from labcraft.metrics.risk import evaluate_risks
+from labcraft.metrics.risk import evaluate_risks, summarize_amplifiable_dimers
 from labcraft.metrics.verdict import generate_verdict
 from labcraft.report.renderer import render_report
 from labcraft.cli.config import build_engine_from_config
 from pydantic import ValidationError
 
-from labcraft.cli.parsers import build_config_from_cli, read_multi_fasta, ParseError
-from typing import Optional
+from labcraft.cli.parsers import (
+    build_config_from_cli,
+    read_multi_fasta,
+    validate_target_sequence,
+    ParseError,
+)
+from typing import Dict, List, Optional, Tuple
 
 app = typer.Typer(help="LabCraft CLI - Thermodynamic multiplex primer panel design engine.")
+
+
+def _version_callback(value: bool) -> None:
+    """Affiche la version de LabCraft et quitte / Print LabCraft version and exit."""
+    if value:
+        typer.echo(f"LabCraft {__version__}")
+        raise typer.Exit()
+
+
+@app.callback()
+def main_callback(
+    version: Optional[bool] = typer.Option(
+        None,
+        "--version",
+        callback=_version_callback,
+        is_eager=True,
+        help="Show the LabCraft version and exit.",
+    ),
+) -> None:
+    """LabCraft CLI entry point."""
+
+
+def _evaluate_dimer_complexes(
+    prob,
+    res,
+    complexes: List[str],
+    primers,
+    backend,
+    enzyme,
+    temp_celsius: float,
+    backend_kwargs: dict,
+    primer_to_panel_map: Dict[str, str],
+) -> Tuple[List[bool], List[float], List[dict]]:
+    """Évalue chaque complexe dimérique sans cible pour l'extensibilité 3' et la décomposition.
+    Evaluates each target-free dimer complex for 3' extensibility and panel decomposition.
+    """
+    from labcraft.report.alignment import dotbracket_to_alignment, get_alignment_columns
+
+    amplifiable_flags: List[bool] = []
+    concs: List[float] = []
+    dimer_details: List[dict] = []
+
+    for i, _c_name in enumerate(complexes):
+        conc = res.concentrations[i]
+        concs.append(conc)
+
+        is_amp = False
+        details: dict = {}
+        has_target = any(k >= len(primers) and val > 0 for k, val in enumerate(prob.stoichiometry[i]))
+
+        if not has_target:
+            p_counts = {
+                k: prob.stoichiometry[i][k]
+                for k, val in enumerate(prob.stoichiometry[i])
+                if val > 0 and k < len(primers)
+            }
+            if sum(p_counts.values()) == 2:
+                ks = list(p_counts.keys())
+                p_a = primers[ks[0]]
+                p_b = primers[ks[0]] if len(ks) == 1 else primers[ks[1]]
+                is_amp, _dg_3p, details = evaluate_pair_amplifiable(
+                    p_a, p_b, backend, enzyme, temp_celsius, **backend_kwargs
+                )
+                pa_par = details.get("parent_a") or p_a.name.split("#")[0]
+                pb_par = details.get("parent_b") or p_b.name.split("#")[0]
+                details["panel_a"] = primer_to_panel_map.get(pa_par, primer_to_panel_map.get(p_a.name, ""))
+                details["panel_b"] = primer_to_panel_map.get(pb_par, primer_to_panel_map.get(p_b.name, ""))
+
+                if details and "alignment" not in details:
+                    details["alignment"] = dotbracket_to_alignment(
+                        details["seq_a"], details["seq_b"], details["structure"]
+                    )
+                if details and "alignment_columns" not in details:
+                    cols = get_alignment_columns(
+                        details["seq_a"], details["seq_b"], details["structure"], details.get("extensible_strand")
+                    )
+                    details["alignment_columns"] = cols
+                    three_prime_idx = next((idx for idx, c in enumerate(cols) if c.get("role") == "three_prime"), -1)
+                    template_count = sum(1 for c in cols if c.get("role") == "template")
+                    before_arrow = (
+                        sum(1 for c in cols[:three_prime_idx] if not c.get("is_truncation"))
+                        if three_prime_idx != -1
+                        else 0
+                    )
+                    details["arrow_metrics"] = {
+                        "show": three_prime_idx != -1 and template_count > 0,
+                        "margin_cols": before_arrow,
+                        "width_cols": template_count,
+                    }
+        amplifiable_flags.append(is_amp)
+        dimer_details.append(details)
+
+    return amplifiable_flags, concs, dimer_details
 
 def hash_file(filepath: str) -> str:
     hasher = hashlib.sha256()
@@ -49,7 +148,7 @@ def analyze(
     errors: int = typer.Option(2, "--errors", help="Max errors for candidate site seeding outside 3' zone."),
     strict_3prime: int = typer.Option(3, "--strict-3prime", help="Length of strict 3' zone for candidate site seeding."),
     strict_3prime_tolerate: int = typer.Option(2, "--strict-3prime-tolerate", help="Number of tolerated substitutions in strict 3' zone for seeding."),
-    dimer_conc_max: float = typer.Option(2.5, "--dimer-conc-max", help="Seuil maximal de concentration totale de dimères amplifiables en nM déclenchant FAILURE (calibré provisoirement sur 4 cas de vérité terrain)."),
+    dimer_conc_max: float = typer.Option(0.23, "--dimer-conc-max", help="Seuil maximal de concentration totale de dimères amplifiables en nM déclenchant FAILURE (provisoire, calibré sur 5 cas de paillasse, marge d'un facteur 2,3)."),
     separate_targets: bool = typer.Option(False, "--separate-targets", "--per-target", help="Solve targets independently instead of joint multi-target equilibrium."),
     force_joint: bool = typer.Option(False, "--force-joint", help="Force joint analysis of multiple panels for the same target.")
 ):
@@ -98,6 +197,7 @@ def analyze(
 
     # 1. Parse Targets
     targets_dict = {}
+    target_warnings: List[str] = []
     for t in config_obj.targets:
         try:
             records = read_multi_fasta(t.sequence_file)
@@ -107,7 +207,13 @@ def analyze(
                 # If we parsed it via CLI -t, they are all inside config_obj.targets.
                 # We can just match the one we need, or collect them all.
                 if t_id == t.id or not config: # if not config, we just collect them all
-                    targets_dict[t_id] = seq
+                    if t_id in targets_dict:
+                        continue
+                    clean_seq, w_msg = validate_target_sequence(t_id, seq, warn_dashes=True)
+                    targets_dict[t_id] = clean_seq
+                    if w_msg:
+                        typer.echo(f"Avertissement : {w_msg}")
+                        target_warnings.append(w_msg)
         except Exception as e:
             typer.echo(f"Erreur lors de la lecture du fichier cible {t.sequence_file}:\n{e}")
             raise typer.Exit(code=1) from e
@@ -144,8 +250,24 @@ def analyze(
             
         # 2. & 3. Build Internal Engine Components
         # Construire les composants internes et la table primer_to_target
-        primers, primer_to_target, backend, backend_kwargs, mon_molar, enzyme, temp_celsius, profiles = build_engine_from_config(current_config, targets_dict, max_variants=max_variants)
+        try:
+            primers, primer_to_target, backend, backend_kwargs, mon_molar, enzyme, temp_celsius, profiles = build_engine_from_config(current_config, targets_dict, max_variants=max_variants)
+        except (ParseError, ValueError) as e:
+            typer.echo(f"Erreur de validation des séquences :\n{e}")
+            raise typer.Exit(code=1) from e
+
         primer_to_panel = primer_to_target
+        primer_to_panel_map: Dict[str, str] = {}
+        for ps in current_config.primer_sets:
+            panel_id = ps.panel_name if ps.panel_name else ps.target
+            for role_name in ps.primers:
+                primer_to_panel_map[f"{role_name}_{panel_id}"] = panel_id
+        for p in primers:
+            p_par = p.parent_name or p.name.split("#")[0]
+            if p_par in primer_to_panel_map:
+                primer_to_panel_map[p.name] = primer_to_panel_map[p_par]
+            elif p.name not in primer_to_panel_map:
+                primer_to_panel_map[p.name] = primer_to_target.get(p.name, "")
 
         buf_cfg = current_config.experiment.buffer
         if buf_cfg:
@@ -200,51 +322,9 @@ def analyze(
                 max_residual_global = res.max_residual
                 
                 # Diagnostics
-                amplifiable_flags = []
-                concs = []
-                dimer_details = []
-                
-                for i, _c_name in enumerate(complexes):
-                    conc = res.concentrations[i]
-                    concs.append(conc)
-                    
-                    is_amp = False
-                    details = {}
-                    has_target = any(k >= len(primers) and val > 0 for k, val in enumerate(prob.stoichiometry[i]))
-                    
-                    if not has_target:
-                        p_counts = {k: prob.stoichiometry[i][k] for k, val in enumerate(prob.stoichiometry[i]) if val > 0 and k < len(primers)}
-                        total_primers = sum(p_counts.values())
-                        
-                        if total_primers == 2:
-                            if len(p_counts) == 1:
-                                k = list(p_counts.keys())[0]
-                                p_a = primers[k]
-                                is_amp, _dg_3p, details = evaluate_pair_amplifiable(p_a, p_a, backend, enzyme, temp_celsius, **backend_kwargs)
-                            elif len(p_counts) == 2:
-                                k1, k2 = list(p_counts.keys())
-                                p_a = primers[k1]
-                                p_b = primers[k2]
-                                is_amp, _dg_3p, details = evaluate_pair_amplifiable(p_a, p_b, backend, enzyme, temp_celsius, **backend_kwargs)
-                                
-                            from labcraft.report.alignment import dotbracket_to_alignment, get_alignment_columns
-                            if details and 'alignment' not in details:
-                                details['alignment'] = dotbracket_to_alignment(details['seq_a'], details['seq_b'], details['structure'])
-                            if details and 'alignment_columns' not in details:
-                                cols = get_alignment_columns(details['seq_a'], details['seq_b'], details['structure'], details.get('extensible_strand'))
-                                details['alignment_columns'] = cols
-                                
-                                three_prime_idx = next((i for i, c in enumerate(cols) if c.get('role') == 'three_prime'), -1)
-                                template_count = sum(1 for c in cols if c.get('role') == 'template')
-                                before_arrow = sum(1 for c in cols[:three_prime_idx] if not c.get('is_truncation')) if three_prime_idx != -1 else 0
-                                
-                                details['arrow_metrics'] = {
-                                    "show": three_prime_idx != -1 and template_count > 0,
-                                    "margin_cols": before_arrow,
-                                    "width_cols": template_count
-                                }
-                    amplifiable_flags.append(is_amp)
-                    dimer_details.append(details)
+                amplifiable_flags, concs, dimer_details = _evaluate_dimer_complexes(
+                    prob, res, complexes, primers, backend, enzyme, temp_celsius, backend_kwargs, primer_to_panel_map
+                )
                     
                 risks = evaluate_risks(complexes, concs, amplifiable_flags, is_warm_start=enzyme.warm_start, dimer_details=dimer_details)
                 fractions = compute_fractions(strands, complexes, prob.stoichiometry, res.free_concentrations, prob.delta_g, temp_celsius, primer_to_panel)
@@ -302,51 +382,9 @@ def analyze(
                     max_residual_global = max(max_residual_global, res.max_residual)
                     
                     # Diagnostics
-                    amplifiable_flags = []
-                    concs = []
-                    dimer_details = []
-                    
-                    for i, _c_name in enumerate(complexes):
-                        conc = res.concentrations[i]
-                        concs.append(conc)
-                        
-                        is_amp = False
-                        details = {}
-                        has_target = any(k >= len(primers) and val > 0 for k, val in enumerate(prob.stoichiometry[i]))
-                        
-                        if not has_target:
-                            p_counts = {k: prob.stoichiometry[i][k] for k, val in enumerate(prob.stoichiometry[i]) if val > 0 and k < len(primers)}
-                            total_primers = sum(p_counts.values())
-                            
-                            if total_primers == 2:
-                                if len(p_counts) == 1:
-                                    k = list(p_counts.keys())[0]
-                                    p_a = primers[k]
-                                    is_amp, _dg_3p, details = evaluate_pair_amplifiable(p_a, p_a, backend, enzyme, temp_celsius, **backend_kwargs)
-                                elif len(p_counts) == 2:
-                                    k1, k2 = list(p_counts.keys())
-                                    p_a = primers[k1]
-                                    p_b = primers[k2]
-                                    is_amp, _dg_3p, details = evaluate_pair_amplifiable(p_a, p_b, backend, enzyme, temp_celsius, **backend_kwargs)
-                                    
-                                from labcraft.report.alignment import dotbracket_to_alignment, get_alignment_columns
-                                if details and 'alignment' not in details:
-                                    details['alignment'] = dotbracket_to_alignment(details['seq_a'], details['seq_b'], details['structure'])
-                                if details and 'alignment_columns' not in details:
-                                    cols = get_alignment_columns(details['seq_a'], details['seq_b'], details['structure'], details.get('extensible_strand'))
-                                    details['alignment_columns'] = cols
-                                    
-                                    three_prime_idx = next((i for i, c in enumerate(cols) if c.get('role') == 'three_prime'), -1)
-                                    template_count = sum(1 for c in cols if c.get('role') == 'template')
-                                    before_arrow = sum(1 for c in cols[:three_prime_idx] if not c.get('is_truncation')) if three_prime_idx != -1 else 0
-                                    
-                                    details['arrow_metrics'] = {
-                                        "show": three_prime_idx != -1 and template_count > 0,
-                                        "margin_cols": before_arrow,
-                                        "width_cols": template_count
-                                    }
-                        amplifiable_flags.append(is_amp)
-                        dimer_details.append(details)
+                    amplifiable_flags, concs, dimer_details = _evaluate_dimer_complexes(
+                        prob, res, complexes, primers, backend, enzyme, temp_celsius, backend_kwargs, primer_to_panel_map
+                    )
                         
                     risks = evaluate_risks(complexes, concs, amplifiable_flags, is_warm_start=enzyme.warm_start, dimer_details=dimer_details)
                     fractions = compute_fractions(strands, complexes, prob.stoichiometry, res.free_concentrations, prob.delta_g, temp_celsius, primer_to_panel)
@@ -405,9 +443,27 @@ def analyze(
         
         verdict = generate_verdict(all_fractions, target_occupations, all_risks, loop_primer_parents=loop_primer_parents, primer_to_panel=primer_to_target, primer_to_target=primer_to_target, unfolding_penalties=all_unfolding_penalties, dimer_conc_max_nm=dimer_conc_max)
         
+        dimer_decomposition = summarize_amplifiable_dimers(all_risks, primer_to_panel=primer_to_panel_map)
+        if dimer_decomposition["total_nm"] > 0.0:
+            def _f_nm(v: float) -> str:
+                return f"{v:.4f}" if 0.0 < v < 0.01 else f"{v:.2f}"
+
+            dom_f = dimer_decomposition["dominant_family"]
+            dom_txt = f" | Famille dominante : {dom_f['label']} ({_f_nm(dom_f['conc_nm'])} nM)" if dom_f else ""
+            if dimer_decomposition["is_multiplex"]:
+                intra_txt = ", ".join(
+                    f"{pan}={_f_nm(val)} nM" for pan, val in dimer_decomposition["intra_by_panel_nm"].items()
+                )
+                typer.echo(
+                    f"Dimères amplifiables : {_f_nm(dimer_decomposition['total_nm'])} nM "
+                    f"(intra : {intra_txt} ; inter-panels : {_f_nm(dimer_decomposition['inter_nm'])} nM{dom_txt})"
+                )
+            else:
+                typer.echo(f"Dimères amplifiables : {_f_nm(dimer_decomposition['total_nm'])} nM{dom_txt}")
+
         # Recommandations
         from labcraft.optimize.recommendations import generate_recommendations
-        recommendations = generate_recommendations(verdict, risks=all_risks)
+        recommendations = generate_recommendations(verdict, risks=all_risks, primer_to_panel=primer_to_panel_map)
         
         # Contrôle des Sondes TaqMan : déclenché par la présence de sondes, pas par la chimie
         # TaqMan probe check: triggered by presence of probes, not by chemistry field
@@ -493,8 +549,10 @@ def analyze(
             "recommendations": recommendations,
             "loop_primer_parents": list(loop_primer_parents),
             "primers_parent": primers,
+            "has_lna": any(len(p.lna_positions) > 0 for p in primers),
+            "dimer_decomposition": dimer_decomposition,
             "multiplex_mode": "Conjoint (joint multi-target equilibrium)" if not separate_targets else "Séparé (cible par cible)",
-            "warnings": [str(w.message) for w in captured_warnings]
+            "warnings": target_warnings + [str(w.message) for w in captured_warnings]
         }
         
         html = render_report(verdict, all_fractions, all_risks, metadata)
@@ -545,7 +603,12 @@ def coverage(
 
     try:
         print("Lecture des entrées...")
-        fasta_list = read_multi_fasta(fasta)
+        fasta_list = []
+        for name, seq in read_multi_fasta(fasta):
+            clean_seq, w_msg = validate_target_sequence(name, seq, warn_dashes=True)
+            if w_msg:
+                typer.echo(f"Avertissement : {w_msg}")
+            fasta_list.append((name, clean_seq))
         fasta_dict = {name: seq for name, seq in fasta_list}
         
         first_strain_path = None
@@ -568,7 +631,7 @@ def coverage(
     except FileNotFoundError as e:
         typer.echo(f"Erreur de fichier introuvable : {e.filename}")
         raise typer.Exit(code=1) from e
-    except ParseError as e:
+    except (ParseError, ValueError) as e:
         typer.echo(f"Erreur de lecture de fichier :\n{e}")
         raise typer.Exit(code=1) from e
     except ValidationError as e:

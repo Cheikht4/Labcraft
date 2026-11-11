@@ -163,9 +163,10 @@ def build_engine_from_config(
         # Track concentrations for this target's profile
         conc_map = {}
         
+        from labcraft.cli.parsers import validate_primer_sequence
         for role_name, p_data in p_dict.items():
             name = f"{role_name}_{panel_id}"
-            seq = p_data.seq
+            seq = validate_primer_sequence(name, p_data.seq)
             primer_to_target[name] = t_id
             
             try:
@@ -199,10 +200,11 @@ def build_engine_from_config(
             
             # Pré-calculer la séparation des domaines sur la séquence parente si FIP/BIP complet fourni sans domains explicites
             # Pre-split domains on the parent IUPAC sequence when full FIP/BIP is given without explicit domains
+            bare_parent_seq, _ = parse_lna_sequence(seq)
             auto_split_parent: Optional[PhysicalPrimer] = None
             if role_name.upper() in ("FIP", "BIP") and not isinstance(p_data.domains, PrimerDomains):
                 auto_split_parent = PhysicalPrimer.from_alignment(
-                    name, seq, role_enum, targets.get(t_id, ""),
+                    name, bare_parent_seq, role_enum, targets.get(t_id, ""),
                     nominal_concentration=total_conc, parent_name=name,
                     blocked_3prime=is_blocked, label_5prime=label,
                 )
@@ -247,7 +249,7 @@ def build_engine_from_config(
                         primers.append(PhysicalPrimer(
                             v_name, bare_seq, role_enum, variant_f2, variant_f1c, variant_linker,
                             nominal_concentration=variant_conc, parent_name=name,
-                            parent_binding_domain=d_f2_raw,
+                            parent_binding_domain=d_f2_bare,
                             blocked_3prime=is_blocked, label_5prime=label,
                             lna_positions=tuple(lna_pos)
                         ))
@@ -255,7 +257,7 @@ def build_engine_from_config(
                         primers.append(PhysicalPrimer(
                             v_name, bare_seq, role_enum, d_f2_bare, d_f1c_bare, d_linker_bare,
                             nominal_concentration=variant_conc, parent_name=name,
-                            parent_binding_domain=d_f2_raw,
+                            parent_binding_domain=d_f2_bare,
                             blocked_3prime=is_blocked, label_5prime=label,
                             lna_positions=tuple(lna_pos)
                         ))
@@ -286,7 +288,7 @@ def build_engine_from_config(
                     primers.append(PhysicalPrimer(
                         v_name, bare_seq, role_enum, bare_seq, 
                         nominal_concentration=variant_conc, parent_name=name,
-                        parent_binding_domain=seq,
+                        parent_binding_domain=bare_parent_seq,
                         blocked_3prime=is_blocked, label_5prime=label,
                         lna_positions=tuple(lna_pos)
                     ))

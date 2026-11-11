@@ -401,9 +401,11 @@
             <p><strong>Cause dominante globale :</strong> {{ verdict.global_cause }}</p>
         </div>
         
+        {% if metadata.get('has_lna', False) %}
         <div style="background-color: #e2f0d9; border: 1px solid #70ad47; padding: 10px; margin-bottom: 20px; border-radius: 4px; font-size: 13px;">
             <strong>ℹ️ Support LNA (Phase 2) :</strong> L'effet des bases LNA sur l'augmentation du Tm et du ΔG (stabilité) est appliqué de bout en bout au calcul du Tm intrinsèque (contrôle sondes/amorces), aux dimères, et à l'hybridation à la cible, y compris sous l'effet du sel.
         </div>
+        {% endif %}
 
         <!-- Conditions de réaction -->
         <h2>Conditions de Réaction</h2>
@@ -693,7 +695,7 @@
                     {% set mismatches = info.mismatches if info is mapping else 0 %}
                     {% set extensible = info.extensible if info is mapping else True %}
                     {% set target_occ = metadata.target_occupations.get(target, {}).get(site_name, 0.0) %}
-                    {% set site_parent = site_name.replace('_site', '').split('#')[0] %}
+                    {% set site_parent = site_name.replace('_site', '').split('@')[0].split('#')[0] %}
                     <tr>
                         <td>
                             {{ site_name }}
@@ -827,6 +829,63 @@
         {% endif %}
         
         {% if amplifiable_dimers %}
+        {% set decomp = metadata.get('dimer_decomposition') %}
+        {% if decomp and decomp.total_nm > 0 %}
+        <h3>Décomposition des Dimères Amplifiables</h3>
+        <div class="target-box">
+            <p><strong>Total dimères amplifiables :</strong> {{ "%.4f"|format(decomp.total_nm) if 0 < decomp.total_nm < 0.01 else "%.2f"|format(decomp.total_nm) }} nM</p>
+            {% if decomp.is_multiplex %}
+            <p>
+                <strong>Part inter-panels</strong> (absents de tout panel seul) :
+                <strong>{{ "%.2f"|format(decomp.inter_nm) }} nM</strong>
+                ({{ "%.1f"|format((decomp.inter_nm / decomp.total_nm * 100) if decomp.total_nm > 0 else 0.0) }} %)
+            </p>
+            <p>
+                <strong>Parts internes par panel :</strong>
+                {% for pan, val in decomp.intra_by_panel_nm.items() %}
+                    {{ pan }} : <strong>{{ "%.2f"|format(val) }} nM</strong>{% if not loop.last %} ; {% endif %}
+                {% endfor %}
+            </p>
+            {% endif %}
+            {% if decomp.dominant_family %}
+            <p>
+                <strong>Famille dominante (niveau parent) :</strong>
+                {{ decomp.dominant_family.label }} — <strong>{{ "%.2f"|format(decomp.dominant_family.conc_nm) }} nM</strong>
+                ({{ "%.1f"|format(decomp.dominant_family.share_pct) }} %)
+                {% if decomp.dominant_family.extensible_primer %}
+                    — extrémité 3' étendue : <strong>{{ decomp.dominant_family.extensible_primer }}</strong>
+                    {% if decomp.dominant_family.template_primer and decomp.dominant_family.template_primer != decomp.dominant_family.extensible_primer %}
+                        (matrice : {{ decomp.dominant_family.template_primer }})
+                    {% endif %}
+                {% endif %}
+            </p>
+            {% endif %}
+            {% if decomp.families %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>Famille d'amorces (parent)</th>
+                        <th>Origine</th>
+                        <th>3' étendu</th>
+                        <th>Concentration (nM)</th>
+                        <th>Part (%)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for fam in decomp.families %}
+                    <tr>
+                        <td><strong>{{ fam.label }}</strong></td>
+                        <td>{% if fam.is_inter_panel %}Inter-panels{% elif fam.panel_a %}Intra ({{ fam.panel_a }}){% else %}Intra{% endif %}</td>
+                        <td>{{ fam.extensible_primer or "—" }}</td>
+                        <td>{{ "%.4f"|format(fam.conc_nm) }} nM</td>
+                        <td>{{ "%.1f"|format(fam.share_pct) }} %</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% endif %}
+        </div>
+        {% endif %}
         <h3>Classement des Dimères Amplifiables</h3>
         <div class="barchart-container">
             {% set sorted_amps = amplifiable_dimers | sort(attribute='delta_g_3p') %}

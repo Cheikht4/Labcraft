@@ -45,8 +45,10 @@ class TestRecommendationsCoherence:
         # Ne doit PAS contenir "panel semble sain"
         assert not any("sain" in r.lower() for r in recs), \
             f"Recommandations contradictoires : {recs}"
-        # Doit contenir la recommandation WarmStart
-        assert any("WarmStart" in r for r in recs)
+        # Doit nommer la famille dominante et ne plus émettre de textes génériques WarmStart/TaqMan
+        # Must name the dominant family and omit generic WarmStart/TaqMan texts
+        assert any("FIP_x" in r and "LF_x" in r for r in recs)
+        assert not any("WarmStart" in r or "TaqMan" in r for r in recs)
         
     def test_no_risks_panel_sain(self):
         """Un panel sans aucun dimère dangereux doit afficher 'panel sain'."""

@@ -1,13 +1,78 @@
 """Parsers for LabCraft CLI inputs (FASTA, TXT)."""
-import re
+import warnings
 from typing import List, Tuple, Dict, Optional
 from collections import defaultdict
 
 from labcraft.cli.config import PrimerConfig, PrimerSetConfig, PrimerDomains
 from labcraft.lamp.domains import _find_iupac_substring
 
+_IUPAC_DNA_CHARS = frozenset("ACGTURYMKSWBDHVN")
+
+
 class ParseError(Exception):
     pass
+
+
+def validate_primer_sequence(primer_name: str, seq: str) -> str:
+    """Valide et normalise une séquence d'amorce (codes IUPAC ADN, U->T, notation LNA '+base').
+    Validates and normalizes a primer sequence (DNA IUPAC codes, U->T, LNA '+base' notation).
+    """
+    cleaned = "".join(seq.split()).upper().replace("U", "T")
+    if not cleaned:
+        raise ParseError(f"Amorce '{primer_name}' : séquence vide.")
+
+    i = 0
+    while i < len(cleaned):
+        ch = cleaned[i]
+        if ch == "+":
+            if i + 1 >= len(cleaned):
+                raise ParseError(
+                    f"Amorce '{primer_name}' : modificateur LNA '+' isolé à la position {i + 1}."
+                )
+            nxt = cleaned[i + 1]
+            if nxt not in _IUPAC_DNA_CHARS:
+                raise ParseError(
+                    f"Amorce '{primer_name}' : caractère invalide '{nxt}' après '+' à la position {i + 2}."
+                )
+            i += 2
+        elif ch in _IUPAC_DNA_CHARS:
+            i += 1
+        else:
+            raise ParseError(
+                f"Amorce '{primer_name}' : caractère invalide '{ch}' à la position {i + 1} "
+                "(seuls les codes IUPAC ADN et la notation LNA +base sont admis)."
+            )
+    return cleaned
+
+
+def validate_target_sequence(
+    target_name: str,
+    seq: str,
+    warn_dashes: bool = True,
+) -> Tuple[str, Optional[str]]:
+    """Valide une séquence cible (IUPAC ADN, U->T) et retire les tirets d'alignement ('-').
+    Validates a target sequence (DNA IUPAC, U->T) and strips alignment dashes ('-').
+    """
+    cleaned = "".join(seq.split()).upper().replace("U", "T")
+    for idx, ch in enumerate(cleaned):
+        if ch != "-" and ch not in _IUPAC_DNA_CHARS:
+            raise ParseError(
+                f"Cible '{target_name}' : caractère invalide '{ch}' à la position {idx + 1} "
+                "(seuls les codes IUPAC ADN, U et '-' sont admis)."
+            )
+
+    n_dashes = cleaned.count("-")
+    warn_msg: Optional[str] = None
+    if n_dashes > 0:
+        cleaned = cleaned.replace("-", "")
+        warn_msg = f"Cible '{target_name}' : {n_dashes} tiret(s) d'alignement ('-') retiré(s)."
+        if warn_dashes:
+            warnings.warn(warn_msg, UserWarning, stacklevel=2)
+
+    if not cleaned:
+        raise ParseError(f"Cible '{target_name}' : séquence vide après nettoyage.")
+    return cleaned, warn_msg
+
 
 def read_multi_fasta(filepath: str) -> List[Tuple[str, str]]:
     """
@@ -26,13 +91,24 @@ def read_multi_fasta(filepath: str) -> List[Tuple[str, str]]:
         lines = f.read().splitlines()
         
     current_header = None
-    current_seq_parts = []
+    current_seq_parts: List[str] = []
+    pending_header_rest: Optional[str] = None
     
     def save_current():
         if current_header is not None:
             if current_header in seen_headers:
                 raise ParseError(f"Duplicate header found in {filepath}: '{current_header}'")
-            seq = "".join(current_seq_parts).upper().replace("U", "T")
+            parts_to_join = current_seq_parts
+            # Format mono-ligne (>Header   Sequence) si aucune ligne de séquence ne suit
+            # One-line format (>Header   Sequence) when no sequence lines follow
+            if (
+                not parts_to_join
+                and pending_header_rest
+                and " " not in pending_header_rest
+                and "\t" not in pending_header_rest
+            ):
+                parts_to_join = [pending_header_rest]
+            seq = "".join(parts_to_join).upper().replace("U", "T")
             records.append((current_header, seq))
             seen_headers.add(current_header)
             
@@ -47,11 +123,7 @@ def read_multi_fasta(filepath: str) -> List[Tuple[str, str]]:
             parts = line[1:].strip().split(None, 1)
             current_header = parts[0]
             current_seq_parts = []
-            if len(parts) > 1:
-                # Sequence is on the same line only if it is a single valid IUPAC token without spaces
-                rest = parts[1].strip()
-                if " " not in rest and "\t" not in rest and re.match(r'^[A-Za-z]+$', rest) and len(rest) > 3 and set(rest.upper()).issubset(set("ACGTURYMKSWBDHVN")):
-                    current_seq_parts.append(rest)
+            pending_header_rest = parts[1].strip() if len(parts) > 1 else None
         else:
             if current_header is None:
                 # If no header yet, maybe it's just raw sequence or a bad file
@@ -248,6 +320,7 @@ def parse_primer_file(
         # Allow spaces in header, but typically the first word is the name
         name = header.split()[0]
         panel_name, role, version = parse_primer_name(name)
+        seq = validate_primer_sequence(name, seq)
         v_key = version or "default"
         
         if role in panels[panel_name][v_key]:
@@ -379,7 +452,8 @@ def build_config_from_cli(
         records = read_multi_fasta(targets_path)
         for h, seq in records:
             t_id = h.split()[0]
-            target_list.append((t_id, seq))
+            clean_seq, _ = validate_target_sequence(t_id, seq, warn_dashes=False)
+            target_list.append((t_id, clean_seq))
             
             c = copies if copies is not None else 1000.0
             config.targets.append(TargetConfig(id=t_id, sequence_file=targets_path, copies_per_uL=c))
