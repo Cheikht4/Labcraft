@@ -62,34 +62,37 @@ def solve_primal(
     # Precomputed ΔG°/RT / ΔG°/RT précalculé
     dg_rt = dg / rt
 
+    # Normaliser par la plus grande concentration totale pour stabiliser SLSQP
+    # Normalize by largest total concentration so SLSQP operates on O(1) variables
+    scale = float(np.max(xtot)) if np.max(xtot) > 0.0 else 1.0
+    xtot_scaled = xtot / scale
+    ln_scale = float(np.log(scale))
+
     # Minimum bound for concentrations (avoid log(0))
     # Borne minimale pour les concentrations (éviter log(0))
     x_min = 1e-30
+    y_min = x_min / scale
 
-    # --- Objective: G(x) = Σ_c x_c · (ΔG°_c/RT + ln(x_c) - 1) ---
-    # --- Objectif : G(x) = Σ_c x_c · (ΔG°_c/RT + ln(x_c) - 1) ---
-    def obj_fun(x: np.ndarray) -> float:
-        x_safe = np.maximum(x, x_min)
-        return float(np.sum(x_safe * (dg_rt + np.log(x_safe) - 1.0)))
+    # --- Objective (scaled): G(scale·y) / scale = Σ_c y_c · (ΔG°_c/RT + ln(scale) + ln(y_c) - 1) ---
+    # --- Objectif normalisé : G(scale·y) / scale = Σ_c y_c · (ΔG°_c/RT + ln(scale) + ln(y_c) - 1) ---
+    def obj_fun(y: np.ndarray) -> float:
+        y_safe = np.maximum(y, y_min)
+        return float(np.sum(y_safe * (dg_rt + ln_scale + np.log(y_safe) - 1.0)))
 
-    def obj_jac(x: np.ndarray) -> np.ndarray:
-        x_safe = np.maximum(x, x_min)
-        return (dg_rt + np.log(x_safe)).astype(np.float64)
+    def obj_jac(y: np.ndarray) -> np.ndarray:
+        y_safe = np.maximum(y, y_min)
+        return (dg_rt + ln_scale + np.log(y_safe)).astype(np.float64)
 
-    def obj_hess(x: np.ndarray) -> np.ndarray:
-        x_safe = np.maximum(x, x_min)
-        return np.diag((1.0 / x_safe).astype(np.float64))
+    # --- Constraints: A^T · y = x_total / scale ---
+    # --- Contraintes : A^T · y = x_total / scale ---
+    def mass_eq(y: np.ndarray) -> np.ndarray:
+        return a_mat.T @ y - xtot_scaled
 
-    # --- Constraints: A^T · x = x_total ---
-    # --- Contraintes : A^T · x = x_total ---
-    def mass_eq(x: np.ndarray) -> np.ndarray:
-        return a_mat.T @ x - xtot
-
-    def mass_jac(x: np.ndarray) -> np.ndarray:
+    def mass_jac(y: np.ndarray) -> np.ndarray:
         return a_mat.T
 
     mass_constraint = {'type': 'eq', 'fun': mass_eq, 'jac': mass_jac}
-    positivity_bounds = [(x_min, None) for _ in range(n_c)]
+    positivity_bounds = [(y_min, None) for _ in range(n_c)]
 
     # --- Initialization: distribute mass among complexes containing each strand ---
     # --- Initialisation : distribue la masse parmi les complexes contenant chaque brin ---
@@ -119,11 +122,13 @@ def solve_primal(
             for c_idx in other_complexes:
                 x0[c_idx] = max(x0[c_idx], share)
 
+    y0 = x0 / scale
+
     # Solve / Résolution
     try:
         res = scipy.optimize.minimize(
             fun=obj_fun,
-            x0=x0,
+            x0=y0,
             method="SLSQP",
             jac=obj_jac,
             constraints=[mass_constraint],
@@ -138,7 +143,7 @@ def solve_primal(
             f"Primal solver (SLSQP) raised an exception: {exc}"
         ) from exc
 
-    c_conc = np.maximum(res.x, 0.0)
+    c_conc = np.maximum(res.x * scale, 0.0)
 
     # Compute mass conservation residuals / Calcule les résidus de conservation de masse
     g_resid = xtot - a_mat.T @ c_conc

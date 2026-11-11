@@ -44,8 +44,8 @@ jobs:
       - name: Run pytest
         run: |
           set -o pipefail
-          pytest --maxfail=1 --tb=short --cov=labcraft --cov-report=xml tests/ 2>&1 | tee "${{ runner.temp }}/pytest_out.txt" || {
-            python -c 'import os, pathlib; p=pathlib.Path(os.environ["RUNNER_TEMP"])/"pytest_out.txt"; lines=p.read_text(encoding="utf-8", errors="replace").splitlines()[-35:]; print("::error title=pytest failure::" + " | ".join(lines))'
+          pytest --maxfail=1 --tb=short --cov=labcraft --cov-report=xml tests/ 2>&1 | tee "$RUNNER_TEMP/pytest_out.txt" || {
+            python -c 'import os, pathlib, sys; p=pathlib.Path(os.environ["RUNNER_TEMP"])/"pytest_out.txt"; lines=p.read_text(encoding="utf-8", errors="replace").splitlines()[-35:]; sys.stdout.buffer.write(("::error title=pytest failure::" + " | ".join(lines) + "\n").encode("ascii", "replace"))'
             exit 1
           }
 
@@ -54,7 +54,7 @@ jobs:
           set -o pipefail
           mkdir -p "${{ runner.temp }}/test_dir"
           cd "${{ runner.temp }}/test_dir"
-          pytest --maxfail=1 --tb=short "$GITHUB_WORKSPACE/tests/" 2>&1 | tee "${{ runner.temp }}/pytest_ext.txt" || {
-            python -c 'import os, pathlib; p=pathlib.Path(os.environ["RUNNER_TEMP"])/"pytest_ext.txt"; lines=p.read_text(encoding="utf-8", errors="replace").splitlines()[-35:]; print("::error title=pytest ext failure::" + " | ".join(lines))'
+          pytest --maxfail=1 --tb=short "$GITHUB_WORKSPACE/tests/" 2>&1 | tee "$RUNNER_TEMP/pytest_ext.txt" || {
+            python -c 'import os, pathlib, sys; p=pathlib.Path(os.environ["RUNNER_TEMP"])/"pytest_ext.txt"; lines=p.read_text(encoding="utf-8", errors="replace").splitlines()[-35:]; sys.stdout.buffer.write(("::error title=pytest ext failure::" + " | ".join(lines) + "\n").encode("ascii", "replace"))'
             exit 1
           }

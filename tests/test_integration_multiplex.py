@@ -23,10 +23,10 @@ experiment:
 
 targets:
   - id: "T1"
-    sequence_file: "{target1_fasta}"
+    sequence_file: "{target1_fasta.as_posix()}"
     copies_per_uL: 100.0
   - id: "T2"
-    sequence_file: "{target2_fasta}"
+    sequence_file: "{target2_fasta.as_posix()}"
     copies_per_uL: 100.0
 
 primer_sets:
