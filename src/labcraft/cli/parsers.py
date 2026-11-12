@@ -99,17 +99,18 @@ def read_multi_fasta(filepath: str) -> List[Tuple[str, str]]:
             if current_header in seen_headers:
                 raise ParseError(f"Duplicate header found in {filepath}: '{current_header}'")
             parts_to_join = current_seq_parts
+            # Séparer l'attribut conc=<µM> du reste de l'en-tête
+            # Split the conc=<uM> attribute from the rest of the header
+            rest_tokens = pending_header_rest.split() if pending_header_rest else []
+            conc_tokens = [t for t in rest_tokens if t.lower().startswith("conc=")]
+            other_tokens = [t for t in rest_tokens if not t.lower().startswith("conc=")]
             # Format mono-ligne (>Header   Sequence) si aucune ligne de séquence ne suit
             # One-line format (>Header   Sequence) when no sequence lines follow
-            if (
-                not parts_to_join
-                and pending_header_rest
-                and " " not in pending_header_rest
-                and "\t" not in pending_header_rest
-            ):
-                parts_to_join = [pending_header_rest]
+            if not parts_to_join and len(other_tokens) == 1:
+                parts_to_join = [other_tokens[0]]
             seq = "".join(parts_to_join).upper().replace("U", "T")
-            records.append((current_header, seq))
+            header_out = " ".join([current_header] + conc_tokens)
+            records.append((header_out, seq))
             seen_headers.add(current_header)
             
     for line in lines:
@@ -301,6 +302,48 @@ def reconstruct_fip_bip(
     return domains_created
 
 
+def _parse_header_conc(header: str) -> Tuple[str, Optional[float]]:
+    """Extrait le nom de l'amorce et l'attribut optionnel conc=<µM> de l'en-tête FASTA.
+    Extracts primer name and optional conc=<uM> attribute from a FASTA header.
+    """
+    tokens = header.split()
+    name = tokens[0]
+    conc_val: Optional[float] = None
+    for tok in tokens[1:]:
+        if tok.lower().startswith("conc="):
+            raw_val = tok.split("=", 1)[1].strip()
+            try:
+                val = float(raw_val)
+            except ValueError as exc:
+                raise ParseError(f"Concentration invalide pour l'amorce '{name}' : '{tok}'.") from exc
+            if val < 0:
+                raise ParseError(f"Concentration négative interdite pour l'amorce '{name}' : {val} µM.")
+            conc_val = val
+    return name, conc_val
+
+
+def parse_primer_conc_args(conc_args: Optional[List[str]]) -> Dict[str, float]:
+    """Parse les arguments CLI --conc NOM=VALEUR en dictionnaire {nom: concentration_uM}.
+    Parses --conc NAME=VALUE CLI arguments into a {name: concentration_uM} mapping.
+    """
+    parsed: Dict[str, float] = {}
+    for item in conc_args or []:
+        if "=" not in item:
+            raise ParseError(f"Format --conc invalide : '{item}'. Attendu : NOM=VALEUR (ex: Nunes_YFV_FIP=0.1).")
+        name_part, val_part = item.split("=", 1)
+        name_clean = name_part.strip()
+        if not name_clean:
+            raise ParseError(f"Nom d'amorce vide dans --conc : '{item}'.")
+        try:
+            val = float(val_part.strip())
+        except ValueError as exc:
+            raise ParseError(f"Valeur de concentration invalide dans --conc '{item}'.") from exc
+        if val < 0:
+            raise ParseError(f"Concentration négative interdite dans --conc '{item}'.")
+        parsed[name_clean] = val
+    return parsed
+
+
 def parse_primer_file(
     filepath: str,
     targets: List[Tuple[str, str]],
@@ -315,10 +358,11 @@ def parse_primer_file(
     
     # Nested dict: PanelName -> Version -> {Role: Sequence}
     panels = defaultdict(lambda: defaultdict(dict))
+    panel_concs = defaultdict(lambda: defaultdict(dict))
+    panel_raw_names = defaultdict(lambda: defaultdict(dict))
     
     for header, seq in records:
-        # Allow spaces in header, but typically the first word is the name
-        name = header.split()[0]
+        name, header_conc = _parse_header_conc(header)
         panel_name, role, version = parse_primer_name(name)
         seq = validate_primer_sequence(name, seq)
         v_key = version or "default"
@@ -327,6 +371,9 @@ def parse_primer_file(
             raise ParseError(f"Duplicate role '{role}' for panel '{panel_name}' version '{v_key}' in {filepath}.")
             
         panels[panel_name][v_key][role] = seq
+        panel_raw_names[panel_name][v_key][role] = name
+        if header_conc is not None:
+            panel_concs[panel_name][v_key][role] = header_conc
         
     config_sets = []
     
@@ -383,12 +430,25 @@ def parse_primer_file(
             (t_name, t_seq) for t_name, t_seq in targets if t_name == target_name
         ] or targets
         for v_key, roles_dict in versions.items():
+            raw_roles = panel_raw_names[panel_name][v_key]
+            conc_roles = panel_concs[panel_name][v_key]
             domains_map = reconstruct_fip_bip(panel_name, roles_dict, matched_targets, linker)
             
             primer_configs = {}
             for role, seq in roles_dict.items():
                 dom = domains_map.get(role)
-                primer_configs[role] = PrimerConfig(seq=seq, domains=dom)
+                c_val = conc_roles.get(role)
+                r_name = raw_roles.get(role)
+                if c_val is None and role == "FIP":
+                    c_val = conc_roles.get("F2", conc_roles.get("F1"))
+                elif c_val is None and role == "BIP":
+                    c_val = conc_roles.get("B2", conc_roles.get("B1"))
+                primer_configs[role] = PrimerConfig(
+                    seq=seq,
+                    conc_uM=c_val,
+                    raw_name=r_name,
+                    domains=dom,
+                )
                 
             p_name = panel_name if v_key == "default" else f"{panel_name}_{v_key}"
             config_sets.append(PrimerSetConfig(
@@ -417,6 +477,7 @@ def build_config_from_cli(
     conc_fip_bip: Optional[float] = None,
     conc_f3_b3: Optional[float] = None,
     conc_loop: Optional[float] = None,
+    primer_concs: Optional[Dict[str, float]] = None,
     copies: Optional[float] = None,
     linker: str = "",
     allow_unmatched_targets: bool = False
@@ -467,18 +528,49 @@ def build_config_from_cli(
             allow_unmatched_targets=allow_unmatched_targets
         )
         
-        # Override concentrations
+        # Appliquer les concentrations de classe uniquement si aucune concentration explicite (FASTA conc=) n'est fixée
+        # Apply class concentrations only if no explicit per-primer FASTA conc= is set
         for pset in new_sets:
             for role, p_data in pset.primers.items():
+                if p_data.conc_uM is not None:
+                    continue
                 r_upper = role.upper()
                 if r_upper in ("FIP", "BIP") and conc_fip_bip is not None:
                     p_data.conc_uM = conc_fip_bip
-                elif r_upper in ("F3", "B3") and conc_f3_b3 is not None:
+                elif r_upper in ("F3", "B3", "PROBE") and conc_f3_b3 is not None:
                     p_data.conc_uM = conc_f3_b3
                 elif r_upper in ("LF", "LB") and conc_loop is not None:
                     p_data.conc_uM = conc_loop
                     
         config.primer_sets.extend(new_sets)
+
+    # Priorité absolue aux overrides CLI --conc NOM=VALEUR
+    # Highest priority for --conc NAME=VALUE CLI overrides
+    if primer_concs:
+        matched_keys = set()
+        available_names: List[str] = []
+        single_panel = len(config.primer_sets) == 1
+        for pset in config.primer_sets:
+            panel_id = pset.panel_name if pset.panel_name else pset.target
+            for role, p_data in pset.primers.items():
+                internal_name = f"{role}_{panel_id}"
+                alt_name = f"{panel_id}_{role}"
+                candidates = [internal_name, alt_name]
+                if p_data.raw_name:
+                    candidates.append(p_data.raw_name)
+                if single_panel:
+                    candidates.append(role)
+                available_names.append(p_data.raw_name or internal_name)
+                for c_key in candidates:
+                    if c_key in primer_concs:
+                        p_data.conc_uM = primer_concs[c_key]
+                        matched_keys.add(c_key)
+        unmatched = [k for k in primer_concs if k not in matched_keys]
+        if unmatched:
+            raise ParseError(
+                f"Amorce(s) inconnue(s) dans --conc : {', '.join(unmatched)}. "
+                f"Amorces disponibles : {', '.join(available_names)}"
+            )
 
     # Re-valider le modèle pour déclencher les validateurs (ex: check_mg_dntp)
     # Re-validate model to trigger post-validation checks (e.g. check_mg_dntp)

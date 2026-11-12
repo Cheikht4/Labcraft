@@ -419,6 +419,17 @@
                 Na+: {{ metadata.buffer.na_mM }} mM, K+: {{ metadata.buffer.k_mM }} mM, Tris: {{ metadata.buffer.tris_mM }} mM, Mg++: {{ metadata.buffer.mg_mM }} mM, dNTPs: {{ metadata.buffer.dntp_mM }} mM
             {% endif %}
             </p>
+            {% if metadata.get('primer_concentrations_uM') %}
+            <p><strong>Concentration effective par amorce :</strong></p>
+            <table id="primer-concentrations">
+                <thead><tr><th>Amorce</th><th>Concentration (µM)</th></tr></thead>
+                <tbody>
+                {% for pname, cval in metadata.primer_concentrations_uM.items() %}
+                    <tr><td>{{ pname }}</td><td>{{ "%.3g"|format(cval) }}</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% endif %}
         </div>
 
         <!-- Amorces en difficulté par cible -->

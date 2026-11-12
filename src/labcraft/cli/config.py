@@ -40,6 +40,7 @@ class PrimerDomains(BaseModel):
 class PrimerConfig(BaseModel):
     seq: str
     conc_uM: Optional[float] = None
+    raw_name: Optional[str] = None
     domains: Union[PrimerDomains, str, None] = None
     blocked_3prime: bool = False
     mod_3prime: Optional[str] = None

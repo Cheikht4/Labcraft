@@ -19,6 +19,7 @@ from pydantic import ValidationError
 
 from labcraft.cli.parsers import (
     build_config_from_cli,
+    parse_primer_conc_args,
     read_multi_fasta,
     validate_target_sequence,
     ParseError,
@@ -143,6 +144,7 @@ def analyze(
     conc_fip_bip: Optional[float] = typer.Option(None, "--conc-fip-bip", help="FIP/BIP concentration in uM."),
     conc_f3_b3: Optional[float] = typer.Option(None, "--conc-f3-b3", help="F3/B3 concentration in uM."),
     conc_loop: Optional[float] = typer.Option(None, "--conc-loop", help="Loop primer concentration in uM."),
+    conc: Optional[List[str]] = typer.Option(None, "--conc", help="Per-primer concentration in uM (e.g. --conc Nunes_YFV_FIP=0.1). Repeatable."),  # noqa: B008
     copies: Optional[float] = typer.Option(None, "--copies", help="Target copies per uL."),
     max_variants: int = typer.Option(64, "--max-variants", help="Maximum variants allowed per degenerate primer (default: 64)."),
     errors: int = typer.Option(2, "--errors", help="Max errors for candidate site seeding outside 3' zone."),
@@ -168,11 +170,19 @@ def analyze(
 
     typer.echo("Loading configuration...")
     start_time = time.time()
+
+    # Empreinte des entrées (avant réaffectation de `primers`) / Input fingerprint (before `primers` is reassigned)
+    inputs_fp = {
+        "config": {"path": config, "sha256": hash_file(config)} if config else None,
+        "primers": {"path": primers, "sha256": hash_file(primers)} if primers else None,
+        "targets": {"path": targets, "sha256": hash_file(targets)} if targets else None,
+    }
     
     # Use config file for hash if available, otherwise primers file
     file_hash = hash_file(config) if config else (hash_file(primers) if primers else "no-file")
 
     try:
+        primer_concs = parse_primer_conc_args(conc)
         config_obj = build_config_from_cli(
             config_path=config,
             primers_path=primers,
@@ -183,6 +193,7 @@ def analyze(
             conc_fip_bip=conc_fip_bip,
             conc_f3_b3=conc_f3_b3,
             conc_loop=conc_loop,
+            primer_concs=primer_concs,
             copies=copies
         )
     except FileNotFoundError as e:
@@ -281,6 +292,16 @@ def analyze(
         if not primers:
             typer.echo("Erreur : Le panel d'amorces est vide. Veuillez définir au moins un jeu d'amorces (primer_sets).")
             raise typer.Exit(code=1)
+
+        # Concentration effective de chaque amorce (somme des variants dégénérés), en µM
+        # Effective concentration of each primer (sum over degenerate variants), in uM
+        effective_concs_uM: Dict[str, float] = {}
+        for p in primers:
+            p_par = p.parent_name or p.name.split("#")[0]
+            effective_concs_uM[p_par] = effective_concs_uM.get(p_par, 0.0) + float(p.nominal_concentration) * 1e6
+        typer.echo("Concentrations effectives par amorce (µM) : " + ", ".join(
+            f"{n}={v:.3g}" for n, v in effective_concs_uM.items()
+        ))
         
         # 4. Simulation
         target_occupations = {}
@@ -551,6 +572,7 @@ def analyze(
             "primers_parent": primers,
             "has_lna": any(len(p.lna_positions) > 0 for p in primers),
             "dimer_decomposition": dimer_decomposition,
+            "primer_concentrations_uM": effective_concs_uM,
             "multiplex_mode": "Conjoint (joint multi-target equilibrium)" if not separate_targets else "Séparé (cible par cible)",
             "warnings": target_warnings + [str(w.message) for w in captured_warnings]
         }
@@ -559,6 +581,41 @@ def analyze(
         
         with open(current_output, "w", encoding="utf-8") as f:
             f.write(html)
+
+        # Sortie machine JSON à côté du HTML / Machine-readable JSON next to the HTML
+        from labcraft.report.json_export import build_analyze_json_payload, write_analyze_json
+        conditions_json = {
+            "temperature_C": temp_celsius,
+            "enzyme": enzyme.name,
+            "buffer": buf_cfg.model_dump() if buf_cfg else None,
+            "dimer_conc_max_nm": dimer_conc_max,
+            "dimer_dg_threshold": enzyme.dimer_dg_threshold,
+            "max_variants": max_variants,
+            "seeding": {
+                "errors": errors,
+                "strict_3prime": strict_3prime,
+                "strict_3prime_tolerate": strict_3prime_tolerate,
+            },
+            "multiplex_mode": metadata["multiplex_mode"],
+            "target_copies_per_uL": {t.id: t.copies_per_uL for t in current_config.targets},
+        }
+        payload = build_analyze_json_payload(
+            version=metadata["version"],
+            timestamp=metadata["timestamp"],
+            inputs=inputs_fp,
+            conditions=conditions_json,
+            primer_concentrations_uM=effective_concs_uM,
+            fractions=all_fractions,
+            unfolding_penalties=all_unfolding_penalties,
+            target_occupations=target_occupations,
+            risks=all_risks,
+            dimer_decomposition=dimer_decomposition,
+            mispriming_risks=mispriming_risks,
+            verdict=verdict,
+            panel_summaries=panel_summaries,
+        )
+        json_out = write_analyze_json(current_output, payload)
+        typer.echo(f"JSON saved to {json_out}.")
             
         typer.echo(f"Analysis complete in {time.time() - start_time:.2f}s. Report saved to {current_output}.")
         
@@ -605,6 +662,7 @@ def coverage(
         print("Lecture des entrées...")
         fasta_list = []
         for name, seq in read_multi_fasta(fasta):
+            name = name.split()[0]
             clean_seq, w_msg = validate_target_sequence(name, seq, warn_dashes=True)
             if w_msg:
                 typer.echo(f"Avertissement : {w_msg}")
@@ -715,6 +773,270 @@ def coverage(
         max_mismatches_count=max_mismatches, temperature_C=temperature
     )
     print(f"Rapport généré : {output}")
+
+
+@app.command()
+def redesign(
+    primers: str = typer.Option(..., "-p", "--primers", help="Path to primers FASTA/TXT file."),
+    targets: str = typer.Option(..., "-t", "--targets", help="Path to targets FASTA/TXT file."),
+    primer: str = typer.Option(..., "--primer", help="Name of the primer to redesign (F3, B3, LF or LB), e.g. ParidaD4_F3."),
+    shift: int = typer.Option(12, "--shift", help="Maximum shift (nt) of the 3' end around the legitimate locus."),
+    length: str = typer.Option("17-22", "--length", help="Candidate length range, e.g. 17-22."),
+    top: int = typer.Option(5, "--top", help="Number of best candidates re-evaluated by the full coupled equilibrium."),
+    output: str = typer.Option("redesign_report.html", "-o", "--output", help="Output HTML report path (JSON written alongside)."),
+    temperature: Optional[float] = typer.Option(None, "--temperature", help="Experiment temperature in Celsius."),
+    enzyme: Optional[str] = typer.Option(None, "--enzyme", help="Enzyme name (e.g. bst2.0)."),
+    na: Optional[float] = typer.Option(None, "--na", help="Na+ concentration in mM."),
+    k: Optional[float] = typer.Option(None, "--k", help="K+ concentration in mM."),
+    tris: Optional[float] = typer.Option(None, "--tris", help="Tris concentration in mM."),
+    mg: Optional[float] = typer.Option(None, "--mg", help="Mg2+ concentration in mM."),
+    dntp: Optional[float] = typer.Option(None, "--dntp", help="dNTP concentration in mM."),
+    conc_fip_bip: Optional[float] = typer.Option(None, "--conc-fip-bip", help="FIP/BIP concentration in uM."),
+    conc_f3_b3: Optional[float] = typer.Option(None, "--conc-f3-b3", help="F3/B3 concentration in uM."),
+    conc_loop: Optional[float] = typer.Option(None, "--conc-loop", help="Loop primer concentration in uM."),
+    conc: Optional[List[str]] = typer.Option(None, "--conc", help="Per-primer concentration in uM (NAME=VALUE). Repeatable."),  # noqa: B008
+    copies: Optional[float] = typer.Option(None, "--copies", help="Target copies per uL."),
+    max_variants: int = typer.Option(64, "--max-variants", help="Maximum variants allowed per degenerate primer."),
+    dimer_conc_max: float = typer.Option(0.23, "--dimer-conc-max", help="Amplifiable dimer threshold in nM (same as analyze)."),
+):
+    """Propose des séquences de remplacement pour une amorce externe ou de boucle.
+    Proposes replacement sequences for an outer or loop primer.
+    """
+    import contextlib
+    import io
+    import json
+    import tempfile
+    from labcraft.optimize.redesign import (
+        RedesignError,
+        check_role_redesignable,
+        compute_site_energies,
+        generate_candidates,
+        geometry_satisfied,
+        locate_on_target,
+        panel_geometry,
+        prescreen_dimers,
+        rewrite_primer_file,
+    )
+    from labcraft.cli.parsers import parse_primer_name
+    from labcraft.report.json_export import json_path_for_output
+
+    for fpath in (primers, targets):
+        if not os.path.isfile(fpath):
+            typer.echo(f"Erreur de fichier introuvable : {fpath}")
+            raise typer.Exit(code=1)
+
+    # 1. Rôle demandé : refus explicite des FIP/BIP / Requested role: explicit FIP/BIP refusal
+    try:
+        _pan, role_req, _ver = parse_primer_name(primer)
+        check_role_redesignable(role_req, primer)
+        lo_s, _, hi_s = length.partition("-")
+        len_min = int(lo_s)
+        len_max = int(hi_s) if hi_s else len_min
+        if len_min <= 0 or len_max < len_min:
+            raise RedesignError(f"Plage de longueur invalide : '{length}'.")
+    except (RedesignError, ParseError, ValueError) as e:
+        typer.echo(f"Erreur : {e}")
+        raise typer.Exit(code=1) from e
+
+    # 2. Configuration et moteur, identiques à analyze / Config and engine, identical to analyze
+    try:
+        primer_concs = parse_primer_conc_args(conc)
+        config_obj = build_config_from_cli(
+            primers_path=primers, targets_path=targets, temperature=temperature, enzyme=enzyme,
+            na=na, k=k, tris=tris, mg=mg, dntp=dntp,
+            conc_fip_bip=conc_fip_bip, conc_f3_b3=conc_f3_b3, conc_loop=conc_loop,
+            primer_concs=primer_concs, copies=copies,
+        )
+        targets_dict: Dict[str, str] = {}
+        for h, seq in read_multi_fasta(targets):
+            t_id = h.split()[0]
+            clean_seq, _w = validate_target_sequence(t_id, seq, warn_dashes=False)
+            targets_dict[t_id] = clean_seq
+        engine_primers, primer_to_target, backend, backend_kwargs, mon_molar, enzyme_obj, temp_celsius, _prof = (
+            build_engine_from_config(config_obj, targets_dict, max_variants=max_variants)
+        )
+    except (ParseError, ValueError, ValidationError) as e:
+        typer.echo(f"Erreur de lecture de fichier :\n{e}")
+        raise typer.Exit(code=1) from e
+
+    # 3. Retrouver l'amorce visée / Locate the requested primer
+    sel = None
+    for pset in config_obj.primer_sets:
+        panel_id = pset.panel_name or pset.target
+        for role_name, p_data in pset.primers.items():
+            names = {p_data.raw_name, f"{role_name}_{panel_id}", f"{panel_id}_{role_name}"}
+            if primer in names:
+                sel = (pset, panel_id, role_name, p_data)
+                break
+        if sel is not None:
+            break
+    if sel is None:
+        typer.echo(f"Erreur : amorce '{primer}' introuvable dans {primers}.")
+        raise typer.Exit(code=1)
+    pset, panel_id, role_name, p_data = sel
+    internal_name = f"{role_name}_{panel_id}"
+    raw_name = p_data.raw_name or primer
+    target_id = pset.target
+    target_seq = targets_dict.get(target_id, "")
+    from labcraft.thermo.lna import parse_lna_sequence
+    orig_seq, _lna = parse_lna_sequence(p_data.seq)
+
+    try:
+        orig_locus = locate_on_target(orig_seq, target_seq)
+        if orig_locus is None:
+            raise RedesignError(f"Locus légitime de '{primer}' introuvable sur la cible '{target_id}'.")
+        panel_parents: Dict[str, object] = {}
+        for p in engine_primers:
+            par_id = p.parent_name or p.name.split("#")[0]
+            if par_id == f"{p.role.value}_{panel_id}" and p.role.value not in panel_parents:
+                panel_parents[p.role.value] = p
+        geo = panel_geometry(panel_parents, target_seq)
+        cands = generate_candidates(orig_seq, orig_locus, target_seq, shift, len_min, len_max)
+        for c in cands:
+            c.geometry_ok = geometry_satisfied(role_name, c.locus, geo)
+    except RedesignError as e:
+        typer.echo(f"Erreur : {e}")
+        raise typer.Exit(code=1) from e
+
+    ref = cands[0]
+    valid = [c for c in cands[1:] if c.geometry_ok]
+    typer.echo(
+        f"Amorce {primer} ({role_name}) : locus {orig_locus.start}-{orig_locus.end} brin {orig_locus.strand} ; "
+        f"{len(valid)} candidats géométriquement valides sur {len(cands) - 1}."
+    )
+
+    # 4. Criblage : ΔG duplex, ΔG ouverture, dimères amplifiables / Prescreen
+    total_conc_uM = sum(
+        float(p.nominal_concentration) * 1e6 for p in engine_primers
+        if (p.parent_name or p.name.split("#")[0]) == internal_name
+    )
+    partners = [p for p in engine_primers if (p.parent_name or p.name.split("#")[0]) != internal_name]
+    role_enum = PrimerRole[role_name.upper()]
+    for c in [ref] + valid:
+        compute_site_energies(c, role_name, target_seq, backend, temp_celsius, mon_molar, backend_kwargs)
+        prescreen_dimers(c, internal_name, role_enum, total_conc_uM * 1e-6, partners, backend, enzyme_obj, temp_celsius, backend_kwargs)
+    valid.sort(key=lambda c: (c.prescreen_score, c.dg_duplex + c.dg_open))
+    best = valid[:max(0, top)]
+
+    # 5. Réévaluation par l'équilibre couplé complet (même pipeline qu'analyze)
+    # Full coupled-equilibrium re-evaluation (same pipeline as analyze)
+    records = read_multi_fasta(primers)
+    with tempfile.TemporaryDirectory() as tdir:
+        for i_c, c in enumerate([ref] + best):
+            p_file = os.path.join(tdir, f"cand_{i_c}.txt")
+            out_html = os.path.join(tdir, f"cand_{i_c}.html")
+            rewrite_primer_file(records, raw_name, c.sequence, p_file)
+            typer.echo(f"Équilibre couplé : candidat {i_c} (décalage {c.shift:+d}, longueur {c.length})...")
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                analyze(
+                    config=None, primers=p_file, targets=targets, output=out_html,
+                    temperature=temperature, enzyme=enzyme, na=na, k=k, tris=tris, mg=mg, dntp=dntp,
+                    conc_fip_bip=conc_fip_bip, conc_f3_b3=conc_f3_b3, conc_loop=conc_loop, conc=conc,
+                    copies=copies, max_variants=max_variants, errors=2, strict_3prime=3,
+                    strict_3prime_tolerate=2, dimer_conc_max=dimer_conc_max,
+                    separate_targets=False, force_joint=False,
+                )
+            with open(json_path_for_output(out_html), "r", encoding="utf-8") as jf:
+                js = json.load(jf)
+            tot = js["totals"]
+            fam_labels = [f.get("label", "") for f in tot.get("families", [])]
+            site_occupations = {
+                t_id: {
+                    s_name: s_info.get("occupation")
+                    for s_name, s_info in s_map.items()
+                    if isinstance(s_info, dict)
+                }
+                for t_id, s_map in js.get("sites_by_target", {}).items()
+                if isinstance(s_map, dict)
+            }
+            c.equilibrium = {
+                "amplifiable_total_nm": tot["amplifiable_dimers_total_nm"],
+                "amplifiable_inter_nm": tot["amplifiable_dimers_inter_nm"],
+                "amplifiable_intra_by_panel_nm": tot["amplifiable_dimers_intra_by_panel_nm"],
+                "dominant_family": tot.get("dominant_family"),
+                "families": fam_labels,
+                "initiation_access_by_panel": js.get("initiation_access_by_panel", {}),
+                "site_occupations": site_occupations,
+                "mispriming_alerts": len(js.get("mispriming_risks", [])),
+                "verdict": js["verdict"],
+                "verdict_cause": js["verdict_cause"],
+            }
+
+    # 6. Sortie HTML et JSON / HTML and JSON output
+    def _rank_key(cand) -> Tuple[float, float, float, float]:
+        eq = cand.equilibrium
+        if not eq:
+            return (1e9, 1e9, 1e9, 1e9)
+        return (
+            float(eq["amplifiable_total_nm"]),
+            float(eq["amplifiable_inter_nm"]),
+            float(cand.prescreen_score),
+            float(cand.dg_duplex + cand.dg_open),
+        )
+
+    ranked_sorted = [ref] + sorted(best, key=_rank_key)
+    payload = {
+        "primer": primer,
+        "role": role_name,
+        "panel": panel_id,
+        "target": target_id,
+        "original_sequence": orig_seq,
+        "original_locus": {"start": orig_locus.start, "end": orig_locus.end, "strand": orig_locus.strand},
+        "shift": shift,
+        "length_range": [len_min, len_max],
+        "n_candidates_total": len(cands) - 1,
+        "n_candidates_geometry_ok": len(valid),
+        "ranked": [c.to_dict() for c in ranked_sorted],
+        "prescreen": [c.to_dict() for c in valid],
+    }
+    json_out = json_path_for_output(output)
+    with open(json_out, "w", encoding="utf-8") as jf:
+        json.dump(payload, jf, indent=2, ensure_ascii=False)
+
+    def _row(c) -> str:
+        eq = c.equilibrium or {}
+        acc = eq.get("initiation_access_by_panel", {})
+        acc_txt = "; ".join(
+            f"{pan}: {(v.get('min_occupation') or 0) * 100:.1f} %" for pan, v in acc.items() if isinstance(v, dict)
+        )
+        fams = ", ".join(eq.get("families", [])) or "—"
+        return (
+            f"<tr><td>{'Référence' if c.is_reference else ''}</td><td>{c.shift:+d}</td><td>{c.length}</td>"
+            f"<td><code>{c.sequence}</code></td><td>{c.locus.start}-{c.locus.end} ({c.locus.strand})</td>"
+            f"<td>{c.dg_duplex:.2f}</td><td>{c.dg_open:.2f}</td><td>{c.n_amplifiable_pairs}</td>"
+            f"<td>{eq.get('amplifiable_total_nm', float('nan')):.4f}</td>"
+            f"<td>{eq.get('amplifiable_inter_nm', float('nan')):.4f}</td>"
+            f"<td>{acc_txt}</td><td>{eq.get('mispriming_alerts', '')}</td>"
+            f"<td>{eq.get('verdict', '')}</td><td>{fams}</td></tr>"
+        )
+
+    html = (
+        "<!DOCTYPE html><html lang='fr'><head><meta charset='utf-8'><title>LabCraft - Redessin</title>"
+        "<style>body{font-family:sans-serif;margin:20px}table{border-collapse:collapse;font-size:12px}"
+        "td,th{border:1px solid #ccc;padding:4px}th{background:#eee}</style></head><body>"
+        f"<h1>Redessin de {primer} ({role_name})</h1>"
+        f"<p>Cible : {target_id} ; locus d'origine {orig_locus.start}-{orig_locus.end} brin {orig_locus.strand} ; "
+        f"décalage ±{shift} nt ; longueurs {len_min}-{len_max} ; "
+        f"{len(valid)} candidats géométriquement valides sur {len(cands) - 1}.</p>"
+        '<table id="redesign-ranking"><thead><tr><th></th><th>Décalage</th><th>Longueur</th><th>Séquence 5\'→3\'</th>'
+        "<th>Locus</th><th>ΔG duplex</th><th>ΔG ouverture</th><th>Paires amplifiables (criblage)</th>"
+        "<th>Dimères amplifiables (nM)</th><th>Inter-panels (nM)</th><th>Accès à l'initiation (min)</th>"
+        "<th>Alertes mésamorçage</th><th>Verdict</th><th>Familles amplifiables</th></tr></thead><tbody>"
+        + "".join(_row(c) for c in ranked_sorted)
+        + "</tbody></table></body></html>"
+    )
+    with open(output, "w", encoding="utf-8") as hf:
+        hf.write(html)
+
+    for c in ranked_sorted:
+        eq = c.equilibrium or {}
+        typer.echo(
+            f"{'REF ' if c.is_reference else '    '}décalage {c.shift:+d} L={c.length} {c.sequence} | "
+            f"dimères amplifiables {eq.get('amplifiable_total_nm', float('nan')):.4f} nM "
+            f"(inter {eq.get('amplifiable_inter_nm', float('nan')):.4f}) | verdict {eq.get('verdict', '')}"
+        )
+    typer.echo(f"Rapport de redessin : {output} ; JSON : {json_out}")
 
 
 if __name__ == "__main__":
