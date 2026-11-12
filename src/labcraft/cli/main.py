@@ -3,6 +3,16 @@ import hashlib
 import time
 import importlib.metadata
 import os
+import sys
+
+# Désactiver les codes ANSI forcés en CI/pytest pour préserver la sortie --help sans séquences d'échappement
+# Disable forced ANSI codes under CI/pytest so --help output stays free of escape sequences
+if not sys.stdout.isatty() and (
+    "pytest" in sys.modules or os.getenv("GITHUB_ACTIONS") or os.getenv("CI")
+):
+    import typer.rich_utils as _rich_utils
+
+    _rich_utils.FORCE_TERMINAL = False
 
 from labcraft import __version__
 from labcraft.lamp.domains import PrimerRole
@@ -144,7 +154,7 @@ def analyze(
     conc_fip_bip: Optional[float] = typer.Option(None, "--conc-fip-bip", help="FIP/BIP concentration in uM."),
     conc_f3_b3: Optional[float] = typer.Option(None, "--conc-f3-b3", help="F3/B3 concentration in uM."),
     conc_loop: Optional[float] = typer.Option(None, "--conc-loop", help="Loop primer concentration in uM."),
-    conc: Optional[List[str]] = typer.Option(None, "--conc", help="Per-primer concentration in uM (e.g. --conc Nunes_YFV_FIP=0.1). Repeatable."),  # noqa: B008
+    conc: Optional[List[str]] = typer.Option(None, "--conc", metavar="NOM=µM", help="Per-primer concentration in uM (e.g. --conc Nunes_YFV_FIP=0.1). Repeatable."),  # noqa: B008
     copies: Optional[float] = typer.Option(None, "--copies", help="Target copies per uL."),
     max_variants: int = typer.Option(64, "--max-variants", help="Maximum variants allowed per degenerate primer (default: 64)."),
     errors: int = typer.Option(2, "--errors", help="Max errors for candidate site seeding outside 3' zone."),
@@ -794,7 +804,7 @@ def redesign(
     conc_fip_bip: Optional[float] = typer.Option(None, "--conc-fip-bip", help="FIP/BIP concentration in uM."),
     conc_f3_b3: Optional[float] = typer.Option(None, "--conc-f3-b3", help="F3/B3 concentration in uM."),
     conc_loop: Optional[float] = typer.Option(None, "--conc-loop", help="Loop primer concentration in uM."),
-    conc: Optional[List[str]] = typer.Option(None, "--conc", help="Per-primer concentration in uM (NAME=VALUE). Repeatable."),  # noqa: B008
+    conc: Optional[List[str]] = typer.Option(None, "--conc", metavar="NOM=µM", help="Per-primer concentration in uM (NAME=VALUE). Repeatable."),  # noqa: B008
     copies: Optional[float] = typer.Option(None, "--copies", help="Target copies per uL."),
     max_variants: int = typer.Option(64, "--max-variants", help="Maximum variants allowed per degenerate primer."),
     dimer_conc_max: float = typer.Option(0.23, "--dimer-conc-max", help="Amplifiable dimer threshold in nM (same as analyze)."),
