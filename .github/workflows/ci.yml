@@ -13,6 +13,7 @@ jobs:
       run:
         shell: bash
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
         python: ["3.10", "3.11", "3.12", "3.13"]
@@ -41,10 +42,19 @@ jobs:
         run: python -m py_compile validation/*.py
         
       - name: Run pytest
-        run: pytest --maxfail=1 --cov=labcraft --cov-report=xml tests/
+        run: |
+          set -o pipefail
+          pytest --maxfail=1 --tb=short --cov=labcraft --cov-report=xml tests/ 2>&1 | tee "$RUNNER_TEMP/pytest_out.txt" || {
+            python -c 'import os, pathlib, sys; p=pathlib.Path(os.environ["RUNNER_TEMP"])/"pytest_out.txt"; lines=p.read_text(encoding="utf-8", errors="replace").splitlines()[-35:]; sys.stdout.buffer.write(("::error title=pytest failure::" + " | ".join(lines) + "\n").encode("ascii", "replace"))'
+            exit 1
+          }
 
       - name: Run pytest from another directory
         run: |
+          set -o pipefail
           mkdir -p "${{ runner.temp }}/test_dir"
           cd "${{ runner.temp }}/test_dir"
-          pytest "$GITHUB_WORKSPACE/tests/"
+          pytest --maxfail=1 --tb=short "$GITHUB_WORKSPACE/tests/" 2>&1 | tee "$RUNNER_TEMP/pytest_ext.txt" || {
+            python -c 'import os, pathlib, sys; p=pathlib.Path(os.environ["RUNNER_TEMP"])/"pytest_ext.txt"; lines=p.read_text(encoding="utf-8", errors="replace").splitlines()[-35:]; sys.stdout.buffer.write(("::error title=pytest ext failure::" + " | ".join(lines) + "\n").encode("ascii", "replace"))'
+            exit 1
+          }
