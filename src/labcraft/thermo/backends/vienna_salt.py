@@ -131,12 +131,19 @@ def estimate_helix_thermo(seq: str, structure: str, lna_positions: tuple[int, ..
     f_gc = gc_count / n_bp if n_bp > 0 else 0.0
     return dh_total, ds_total, n_bp, f_gc, ddH_lna, ddS_lna
 
+_MAX_SALT_CACHE_SIZE = 65536
+_SHARED_SALT_CACHE: Dict[Tuple, DuplexResult] = {}
+
+
 class ViennaSaltShiftBackend(DuplexEnergyBackend):
     def __init__(self, salt_model: UnifiedSaltModel, default_ct_molar: float = 2e-6):
         self.vienna = ViennaRNABackend()
         self.salt_model = salt_model
         self.default_ct_molar = default_ct_molar
-        self._cache: Dict[Tuple, DuplexResult] = {}
+        if type(salt_model) is UnifiedSaltModel and default_ct_molar == 2e-6:
+            self._cache: Dict[Tuple, DuplexResult] = _SHARED_SALT_CACHE
+        else:
+            self._cache = {}
         
     def _apply_shift(self, res: DuplexResult, seq: str, ct_molar: float, kwargs: dict, lna_positions: tuple[int, ...] = ()) -> DuplexResult:
         if not res.structure or '(' not in res.structure:
@@ -210,6 +217,8 @@ class ViennaSaltShiftBackend(DuplexEnergyBackend):
         # Remap lna_positions on concatenated sequence 'seq1seq2' (without &)
         mapped_lna = list(lna_pos_a) + [pos + len(seq1) for pos in lna_pos_b]
         shifted = self._apply_shift(res, f"{seq1}&{seq2}", ct, kwargs, tuple(mapped_lna))
+        if len(self._cache) >= _MAX_SALT_CACHE_SIZE:
+            self._cache.clear()
         self._cache[cache_key] = shifted
         return shifted
         
@@ -223,6 +232,8 @@ class ViennaSaltShiftBackend(DuplexEnergyBackend):
         lna_pos = kwargs.get('lna_positions', ())
         mapped_lna = list(lna_pos) + [pos + len(seq) for pos in lna_pos]
         shifted = self._apply_shift(res, f"{seq}&{seq}", ct, kwargs, tuple(mapped_lna))
+        if len(self._cache) >= _MAX_SALT_CACHE_SIZE:
+            self._cache.clear()
         self._cache[cache_key] = shifted
         return shifted
         
@@ -235,6 +246,8 @@ class ViennaSaltShiftBackend(DuplexEnergyBackend):
         if ct is None: ct = self.default_ct_molar
         lna_pos = kwargs.get('lna_positions', ())
         shifted = self._apply_shift(res, seq, ct, kwargs, tuple(lna_pos))
+        if len(self._cache) >= _MAX_SALT_CACHE_SIZE:
+            self._cache.clear()
         self._cache[cache_key] = shifted
         return shifted
         

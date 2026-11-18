@@ -19,6 +19,7 @@ from labcraft.target.unfolding import calc_unfolding_penalty
 from labcraft.target.seeding import find_candidate_sites
 from labcraft.thermo.backends.base import DuplexEnergyBackend
 from labcraft.thermo.mismatch import calculate_hybridization_dg, three_prime_extensible
+from labcraft.thermo.vienna import dna_session
 from labcraft.diagnostics.enzyme import PolymeraseProfile, get_enzyme
 from labcraft.solver.types import EquilibriumProblem
 
@@ -30,6 +31,42 @@ class ComplexInfo:
 
 
 def enumerate_complexes(
+    primers: List[PhysicalPrimer],
+    target_seq: Optional[Union[str, Dict[str, str]]] = None,
+    backend: DuplexEnergyBackend = None,
+    profile: Union[ConcentrationProfile, Dict[str, ConcentrationProfile]] = LAMP_DEFAULT_PROFILE,
+    temp_celsius: float = 65.0,
+    mon_molar: float | None = None,
+    buffer: dict | None = None,
+    unfolding_window: int = 150,
+    enzyme: Optional[PolymeraseProfile] = None,
+    max_errors: int = 2,
+    strict_3prime_len: int = 3,
+    strict_3prime_tolerate: int = 2,
+    primer_to_target: Optional[Dict[str, str]] = None
+) -> Tuple[EquilibriumProblem, List[str], List[str], Dict[str, Any]]:
+    """Énumère toutes les espèces et génère le problème d'équilibre dans une session ADN unique.
+    Enumerates all species and builds the equilibrium problem within a single DNA session.
+    """
+    with dna_session(temp_celsius=temp_celsius):
+        return _enumerate_complexes_impl(
+            primers=primers,
+            target_seq=target_seq,
+            backend=backend,
+            profile=profile,
+            temp_celsius=temp_celsius,
+            mon_molar=mon_molar,
+            buffer=buffer,
+            unfolding_window=unfolding_window,
+            enzyme=enzyme,
+            max_errors=max_errors,
+            strict_3prime_len=strict_3prime_len,
+            strict_3prime_tolerate=strict_3prime_tolerate,
+            primer_to_target=primer_to_target,
+        )
+
+
+def _enumerate_complexes_impl(
     primers: List[PhysicalPrimer],
     target_seq: Optional[Union[str, Dict[str, str]]] = None,
     backend: DuplexEnergyBackend = None,

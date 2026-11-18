@@ -12,6 +12,7 @@ from enum import Enum
 from labcraft.lamp.domains import PhysicalPrimer, PrimerRole, IUPAC_MATCHABLE
 from labcraft.thermo.backends.vienna_salt import ViennaSaltShiftBackend
 from labcraft.thermo.mismatch import calculate_hybridization_dg, three_prime_extensible
+from labcraft.thermo.vienna import dna_session
 from labcraft.diagnostics.enzyme import PolymeraseProfile
 
 
@@ -267,9 +268,13 @@ class CoverageAnalyzer:
         )
 
     def analyze_strains(self, csv_records: List[Dict]) -> List[StrainVerdict]:
-        """Analyse l'ensemble des souches à partir des enregistrements de sites candidats.
-        Analyzes all strains from candidate site records.
+        """Analyse l'ensemble des souches dans une session ADN unique.
+        Analyzes all strains within a single DNA parameter session.
         """
+        with dna_session(temp_celsius=self.temp_celsius):
+            return self._analyze_strains_impl(csv_records)
+
+    def _analyze_strains_impl(self, csv_records: List[Dict]) -> List[StrainVerdict]:
         if not csv_records:
             return []
 

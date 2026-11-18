@@ -25,6 +25,7 @@ from labcraft.metrics.risk import evaluate_risks, summarize_amplifiable_dimers
 from labcraft.metrics.verdict import generate_verdict
 from labcraft.report.renderer import render_report
 from labcraft.cli.config import build_engine_from_config
+from labcraft.thermo.vienna import dna_session
 from pydantic import ValidationError
 
 from labcraft.cli.parsers import (
@@ -60,6 +61,27 @@ def main_callback(
 
 
 def _evaluate_dimer_complexes(
+    prob,
+    res,
+    complexes: List[str],
+    primers,
+    backend,
+    enzyme,
+    temp_celsius: float,
+    backend_kwargs: dict,
+    primer_to_panel_map: Dict[str, str],
+) -> Tuple[List[bool], List[float], List[dict]]:
+    """Évalue chaque complexe dimérique sans cible dans une session ADN unique.
+    Evaluates each target-free dimer complex within a single DNA parameter session.
+    """
+    with dna_session(temp_celsius=temp_celsius):
+        return _evaluate_dimer_complexes_impl(
+            prob, res, complexes, primers, backend, enzyme,
+            temp_celsius, backend_kwargs, primer_to_panel_map,
+        )
+
+
+def _evaluate_dimer_complexes_impl(
     prob,
     res,
     complexes: List[str],
@@ -216,6 +238,42 @@ def analyze(
         typer.echo(f"Erreur de validation de la configuration :\n{e}")
         raise typer.Exit(code=1) from e
 
+    # Session ADN unique pour toute l'analyse (chargement unique Mathews 2004, restauration finale Turner 2004)
+    # Single DNA session for the whole analysis (single Mathews 2004 load, final Turner 2004 restore)
+    with dna_session(temp_celsius=config_obj.experiment.temperature_C):
+        _run_analyze_with_config(
+            config=config,
+            config_obj=config_obj,
+            output=output,
+            start_time=start_time,
+            inputs_fp=inputs_fp,
+            file_hash=file_hash,
+            max_variants=max_variants,
+            errors=errors,
+            strict_3prime=strict_3prime,
+            strict_3prime_tolerate=strict_3prime_tolerate,
+            dimer_conc_max=dimer_conc_max,
+            separate_targets=separate_targets,
+            force_joint=force_joint,
+        )
+
+
+def _run_analyze_with_config(
+    *,
+    config: Optional[str],
+    config_obj,
+    output: str,
+    start_time: float,
+    inputs_fp: dict,
+    file_hash: str,
+    max_variants: int,
+    errors: int,
+    strict_3prime: int,
+    strict_3prime_tolerate: int,
+    dimer_conc_max: float,
+    separate_targets: bool,
+    force_joint: bool,
+) -> None:
     # 1. Parse Targets
     targets_dict = {}
     target_warnings: List[str] = []
@@ -819,13 +877,19 @@ def redesign(
     from labcraft.optimize.redesign import (
         RedesignError,
         check_role_redesignable,
+        compute_f2_comparison,
+        compute_max_3p_complementarity,
+        compute_panel_f2_dg,
         compute_site_energies,
+        equilibrium_sort_key,
         generate_candidates,
         geometry_satisfied,
         locate_on_target,
         panel_geometry,
         prescreen_dimers,
+        prescreen_sort_key,
         rewrite_primer_file,
+        select_top_candidates,
     )
     from labcraft.cli.parsers import parse_primer_name
     from labcraft.report.json_export import json_path_for_output
@@ -862,7 +926,7 @@ def redesign(
             t_id = h.split()[0]
             clean_seq, _w = validate_target_sequence(t_id, seq, warn_dashes=False)
             targets_dict[t_id] = clean_seq
-        engine_primers, primer_to_target, backend, backend_kwargs, mon_molar, enzyme_obj, temp_celsius, _prof = (
+        engine_primers, _primer_to_target, backend, backend_kwargs, mon_molar, enzyme_obj, temp_celsius, _prof = (
             build_engine_from_config(config_obj, targets_dict, max_variants=max_variants)
         )
     except (ParseError, ValueError, ValidationError) as e:
@@ -890,6 +954,7 @@ def redesign(
     target_seq = targets_dict.get(target_id, "")
     from labcraft.thermo.lna import parse_lna_sequence
     orig_seq, _lna = parse_lna_sequence(p_data.seq)
+    orig_len = len(orig_seq)
 
     try:
         orig_locus = locate_on_target(orig_seq, target_seq)
@@ -915,77 +980,79 @@ def redesign(
         f"{len(valid)} candidats géométriquement valides sur {len(cands) - 1}."
     )
 
-    # 4. Criblage : ΔG duplex, ΔG ouverture, dimères amplifiables / Prescreen
+    # 4. & 5. Session ADN unique pour le criblage et les équilibres couplés
+    # Single DNA session across prescreen and full coupled equilibria
     total_conc_uM = sum(
         float(p.nominal_concentration) * 1e6 for p in engine_primers
         if (p.parent_name or p.name.split("#")[0]) == internal_name
     )
     partners = [p for p in engine_primers if (p.parent_name or p.name.split("#")[0]) != internal_name]
     role_enum = PrimerRole[role_name.upper()]
-    for c in [ref] + valid:
-        compute_site_energies(c, role_name, target_seq, backend, temp_celsius, mon_molar, backend_kwargs)
-        prescreen_dimers(c, internal_name, role_enum, total_conc_uM * 1e-6, partners, backend, enzyme_obj, temp_celsius, backend_kwargs)
-    valid.sort(key=lambda c: (c.prescreen_score, c.dg_duplex + c.dg_open))
-    best = valid[:max(0, top)]
 
-    # 5. Réévaluation par l'équilibre couplé complet (même pipeline qu'analyze)
-    # Full coupled-equilibrium re-evaluation (same pipeline as analyze)
-    records = read_multi_fasta(primers)
-    with tempfile.TemporaryDirectory() as tdir:
-        for i_c, c in enumerate([ref] + best):
-            p_file = os.path.join(tdir, f"cand_{i_c}.txt")
-            out_html = os.path.join(tdir, f"cand_{i_c}.html")
-            rewrite_primer_file(records, raw_name, c.sequence, p_file)
-            typer.echo(f"Équilibre couplé : candidat {i_c} (décalage {c.shift:+d}, longueur {c.length})...")
-            buf = io.StringIO()
-            with contextlib.redirect_stdout(buf):
-                analyze(
-                    config=None, primers=p_file, targets=targets, output=out_html,
-                    temperature=temperature, enzyme=enzyme, na=na, k=k, tris=tris, mg=mg, dntp=dntp,
-                    conc_fip_bip=conc_fip_bip, conc_f3_b3=conc_f3_b3, conc_loop=conc_loop, conc=conc,
-                    copies=copies, max_variants=max_variants, errors=2, strict_3prime=3,
-                    strict_3prime_tolerate=2, dimer_conc_max=dimer_conc_max,
-                    separate_targets=False, force_joint=False,
-                )
-            with open(json_path_for_output(out_html), "r", encoding="utf-8") as jf:
-                js = json.load(jf)
-            tot = js["totals"]
-            fam_labels = [f.get("label", "") for f in tot.get("families", [])]
-            site_occupations = {
-                t_id: {
-                    s_name: s_info.get("occupation")
-                    for s_name, s_info in s_map.items()
-                    if isinstance(s_info, dict)
+    with dna_session(temp_celsius=temp_celsius):
+        dg_f2 = compute_panel_f2_dg(engine_primers, panel_id, backend, temp_celsius, backend_kwargs)
+        for c in [ref] + valid:
+            compute_site_energies(c, role_name, target_seq, backend, temp_celsius, mon_molar, backend_kwargs)
+            compute_f2_comparison(c, dg_f2)
+            compute_max_3p_complementarity(c, partners)
+            prescreen_dimers(
+                c, internal_name, role_enum, total_conc_uM * 1e-6, partners,
+                backend, enzyme_obj, temp_celsius, backend_kwargs,
+            )
+
+        valid.sort(key=lambda c: prescreen_sort_key(c, orig_len))
+        best, n_discarded_f2 = select_top_candidates(valid, top, role_name)
+        if dg_f2 is not None:
+            typer.echo(
+                f"Référence interne F2 ({panel_id}) : ΔG(F2) = {dg_f2:.2f} kcal/mol "
+                f"({n_discarded_f2} candidat(s) plus stable(s) que F2 écarté(s))."
+            )
+
+        records = read_multi_fasta(primers)
+        with tempfile.TemporaryDirectory() as tdir:
+            for i_c, c in enumerate([ref] + best):
+                p_file = os.path.join(tdir, f"cand_{i_c}.txt")
+                out_html = os.path.join(tdir, f"cand_{i_c}.html")
+                rewrite_primer_file(records, raw_name, c.sequence, p_file)
+                typer.echo(f"Équilibre couplé : candidat {i_c} (décalage {c.shift:+d}, longueur {c.length})...")
+                buf = io.StringIO()
+                with contextlib.redirect_stdout(buf):
+                    analyze(
+                        config=None, primers=p_file, targets=targets, output=out_html,
+                        temperature=temperature, enzyme=enzyme, na=na, k=k, tris=tris, mg=mg, dntp=dntp,
+                        conc_fip_bip=conc_fip_bip, conc_f3_b3=conc_f3_b3, conc_loop=conc_loop, conc=conc,
+                        copies=copies, max_variants=max_variants, errors=2, strict_3prime=3,
+                        strict_3prime_tolerate=2, dimer_conc_max=dimer_conc_max,
+                        separate_targets=False, force_joint=False,
+                    )
+                with open(json_path_for_output(out_html), "r", encoding="utf-8") as jf:
+                    js = json.load(jf)
+                tot = js["totals"]
+                fam_labels = [f.get("label", "") for f in tot.get("families", [])]
+                site_occupations = {
+                    t_id: {
+                        s_name: s_info.get("occupation")
+                        for s_name, s_info in s_map.items()
+                        if isinstance(s_info, dict)
+                    }
+                    for t_id, s_map in js.get("sites_by_target", {}).items()
+                    if isinstance(s_map, dict)
                 }
-                for t_id, s_map in js.get("sites_by_target", {}).items()
-                if isinstance(s_map, dict)
-            }
-            c.equilibrium = {
-                "amplifiable_total_nm": tot["amplifiable_dimers_total_nm"],
-                "amplifiable_inter_nm": tot["amplifiable_dimers_inter_nm"],
-                "amplifiable_intra_by_panel_nm": tot["amplifiable_dimers_intra_by_panel_nm"],
-                "dominant_family": tot.get("dominant_family"),
-                "families": fam_labels,
-                "initiation_access_by_panel": js.get("initiation_access_by_panel", {}),
-                "site_occupations": site_occupations,
-                "mispriming_alerts": len(js.get("mispriming_risks", [])),
-                "verdict": js["verdict"],
-                "verdict_cause": js["verdict_cause"],
-            }
+                c.equilibrium = {
+                    "amplifiable_total_nm": tot["amplifiable_dimers_total_nm"],
+                    "amplifiable_inter_nm": tot["amplifiable_dimers_inter_nm"],
+                    "amplifiable_intra_by_panel_nm": tot["amplifiable_dimers_intra_by_panel_nm"],
+                    "dominant_family": tot.get("dominant_family"),
+                    "families": fam_labels,
+                    "initiation_access_by_panel": js.get("initiation_access_by_panel", {}),
+                    "site_occupations": site_occupations,
+                    "mispriming_alerts": len(js.get("mispriming_risks", [])),
+                    "verdict": js["verdict"],
+                    "verdict_cause": js["verdict_cause"],
+                }
 
     # 6. Sortie HTML et JSON / HTML and JSON output
-    def _rank_key(cand) -> Tuple[float, float, float, float]:
-        eq = cand.equilibrium
-        if not eq:
-            return (1e9, 1e9, 1e9, 1e9)
-        return (
-            float(eq["amplifiable_total_nm"]),
-            float(eq["amplifiable_inter_nm"]),
-            float(cand.prescreen_score),
-            float(cand.dg_duplex + cand.dg_open),
-        )
-
-    ranked_sorted = [ref] + sorted(best, key=_rank_key)
+    ranked_sorted = [ref] + sorted(best, key=lambda c: equilibrium_sort_key(c, orig_len))
     payload = {
         "primer": primer,
         "role": role_name,
@@ -993,6 +1060,8 @@ def redesign(
         "target": target_id,
         "original_sequence": orig_seq,
         "original_locus": {"start": orig_locus.start, "end": orig_locus.end, "strand": orig_locus.strand},
+        "dg_f2": dg_f2,
+        "n_discarded_more_stable_than_f2": n_discarded_f2,
         "shift": shift,
         "length_range": [len_min, len_max],
         "n_candidates_total": len(cands) - 1,
@@ -1004,36 +1073,52 @@ def redesign(
     with open(json_out, "w", encoding="utf-8") as jf:
         json.dump(payload, jf, indent=2, ensure_ascii=False)
 
-    def _row(c) -> str:
+    def _fmt_f2_cmp(c) -> str:
+        if c.ddg_vs_f2 is None:
+            return "—"
+        flag = " ⚠️ &gt; F2" if c.more_stable_than_f2 else ""
+        return f"{c.ddg_vs_f2:+.2f}{flag}"
+
+    def _fmt_3p_comp(c) -> str:
+        if c.max_3p_comp <= 0:
+            return "0"
+        title = f" title='Partenaire : {c.max_3p_partner}'" if c.max_3p_partner else ""
+        return f"<span{title}>{c.max_3p_comp}</span>"
+
+    def _row(idx_rank: int, c) -> str:
         eq = c.equilibrium or {}
         acc = eq.get("initiation_access_by_panel", {})
         acc_txt = "; ".join(
             f"{pan}: {(v.get('min_occupation') or 0) * 100:.1f} %" for pan, v in acc.items() if isinstance(v, dict)
         )
         fams = ", ".join(eq.get("families", [])) or "—"
+        label = "Référence" if c.is_reference else f"#{idx_rank}"
         return (
-            f"<tr><td>{'Référence' if c.is_reference else ''}</td><td>{c.shift:+d}</td><td>{c.length}</td>"
+            f"<tr><td>{label}</td><td>{c.shift:+d}</td><td>{c.length}</td><td>{c.gc_percent:.1f} %</td>"
             f"<td><code>{c.sequence}</code></td><td>{c.locus.start}-{c.locus.end} ({c.locus.strand})</td>"
-            f"<td>{c.dg_duplex:.2f}</td><td>{c.dg_open:.2f}</td><td>{c.n_amplifiable_pairs}</td>"
+            f"<td>{c.dg_duplex:.2f}</td><td>{_fmt_f2_cmp(c)}</td><td>{c.dg_open:.2f}</td>"
+            f"<td>{_fmt_3p_comp(c)}</td><td>{c.n_amplifiable_pairs}</td>"
             f"<td>{eq.get('amplifiable_total_nm', float('nan')):.4f}</td>"
             f"<td>{eq.get('amplifiable_inter_nm', float('nan')):.4f}</td>"
             f"<td>{acc_txt}</td><td>{eq.get('mispriming_alerts', '')}</td>"
             f"<td>{eq.get('verdict', '')}</td><td>{fams}</td></tr>"
         )
 
+    f2_txt = f" ; ΔG(F2) = {dg_f2:.2f} kcal/mol" if dg_f2 is not None else ""
     html = (
         "<!DOCTYPE html><html lang='fr'><head><meta charset='utf-8'><title>LabCraft - Redessin</title>"
         "<style>body{font-family:sans-serif;margin:20px}table{border-collapse:collapse;font-size:12px}"
         "td,th{border:1px solid #ccc;padding:4px}th{background:#eee}</style></head><body>"
         f"<h1>Redessin de {primer} ({role_name})</h1>"
-        f"<p>Cible : {target_id} ; locus d'origine {orig_locus.start}-{orig_locus.end} brin {orig_locus.strand} ; "
-        f"décalage ±{shift} nt ; longueurs {len_min}-{len_max} ; "
+        f"<p>Cible : {target_id} ; locus d'origine {orig_locus.start}-{orig_locus.end} brin {orig_locus.strand}"
+        f"{f2_txt} ; décalage ±{shift} nt ; longueurs {len_min}-{len_max} ; "
         f"{len(valid)} candidats géométriquement valides sur {len(cands) - 1}.</p>"
-        '<table id="redesign-ranking"><thead><tr><th></th><th>Décalage</th><th>Longueur</th><th>Séquence 5\'→3\'</th>'
-        "<th>Locus</th><th>ΔG duplex</th><th>ΔG ouverture</th><th>Paires amplifiables (criblage)</th>"
+        '<table id="redesign-ranking"><thead><tr><th></th><th>Décalage</th><th>Longueur</th><th>GC (%)</th>'
+        "<th>Séquence 5'→3'</th><th>Locus</th><th>ΔG duplex</th><th>ΔG vs F2</th><th>ΔG ouverture</th>"
+        "<th>Comp. 3' max (nt)</th><th>Paires amplifiables (criblage)</th>"
         "<th>Dimères amplifiables (nM)</th><th>Inter-panels (nM)</th><th>Accès à l'initiation (min)</th>"
         "<th>Alertes mésamorçage</th><th>Verdict</th><th>Familles amplifiables</th></tr></thead><tbody>"
-        + "".join(_row(c) for c in ranked_sorted)
+        + "".join(_row(i, c) for i, c in enumerate(ranked_sorted))
         + "</tbody></table></body></html>"
     )
     with open(output, "w", encoding="utf-8") as hf:
@@ -1041,8 +1126,11 @@ def redesign(
 
     for c in ranked_sorted:
         eq = c.equilibrium or {}
+        f2_cmp = f"ΔΔG(F2)={c.ddg_vs_f2:+.2f}{'(>F2!)' if c.more_stable_than_f2 else ''}" if c.ddg_vs_f2 is not None else ""
         typer.echo(
-            f"{'REF ' if c.is_reference else '    '}décalage {c.shift:+d} L={c.length} {c.sequence} | "
+            f"{'REF ' if c.is_reference else '    '}décalage {c.shift:+d} L={c.length} GC={c.gc_percent:.1f}% "
+            f"{c.locus.start}-{c.locus.end}({c.locus.strand}) {c.sequence} | "
+            f"ΔG={c.dg_duplex:.2f} {f2_cmp} 3'max={c.max_3p_comp}nt | "
             f"dimères amplifiables {eq.get('amplifiable_total_nm', float('nan')):.4f} nM "
             f"(inter {eq.get('amplifiable_inter_nm', float('nan')):.4f}) | verdict {eq.get('verdict', '')}"
         )

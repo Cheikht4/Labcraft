@@ -7,6 +7,7 @@ from labcraft.solver.dual import solve_dual
 from labcraft.lamp.domains import PhysicalPrimer, PrimerRole
 from labcraft.metrics.balance import calculate_multiplex_balance
 from labcraft.diagnostics.amplifiable_dimer import evaluate_pair_amplifiable
+from labcraft.thermo.vienna import dna_session
 
 def get_dangerous_dimers(
     prob_template: EquilibriumProblem,
@@ -55,6 +56,51 @@ def get_dangerous_dimers(
     return dangerous
 
 def optimize_concentrations(
+    prob_template: EquilibriumProblem,
+    species_names: List[str],
+    primers: List[PhysicalPrimer],
+    target_dict: Dict[str, str],
+    primer_to_panel: Dict[str, str],
+    original_free_fractions: Dict[str, float],
+    original_target_occupations: Dict[str, float],
+    complex_names: List[str],
+    temp_celsius: float,
+    backend: Any,
+    enzyme: Any = None,
+    max_iter: int = 3,
+    min_initiation_occupation: float = 0.01,
+    weight_dangerous: float = 1e6,
+    weight_floor: float = 1e4,
+    weight_cv: float = 1.0,
+    weight_regularization: float = 1.0,
+    min_improvement_ratio: float = 0.05,
+    min_absolute_improvement: float = 1e-3,
+    max_occ_drop_ratio: float = 0.20,
+    min_tradeoff_factor: float = 2.0,
+    min_dimer_reduction_ratio: float = 0.20,
+    **backend_kwargs
+) -> Union[Dict[str, Any], List[Any]]:
+    """Optimise les concentrations d'amorces dans une session ADN unique.
+    Optimizes primer concentrations within a single DNA parameter session.
+    """
+    with dna_session(temp_celsius=temp_celsius):
+        return _optimize_concentrations_impl(
+            prob_template, species_names, primers, target_dict, primer_to_panel,
+            original_free_fractions, original_target_occupations, complex_names,
+            temp_celsius, backend, enzyme=enzyme, max_iter=max_iter,
+            min_initiation_occupation=min_initiation_occupation,
+            weight_dangerous=weight_dangerous, weight_floor=weight_floor,
+            weight_cv=weight_cv, weight_regularization=weight_regularization,
+            min_improvement_ratio=min_improvement_ratio,
+            min_absolute_improvement=min_absolute_improvement,
+            max_occ_drop_ratio=max_occ_drop_ratio,
+            min_tradeoff_factor=min_tradeoff_factor,
+            min_dimer_reduction_ratio=min_dimer_reduction_ratio,
+            **backend_kwargs,
+        )
+
+
+def _optimize_concentrations_impl(
     prob_template: EquilibriumProblem,
     species_names: List[str],
     primers: List[PhysicalPrimer],

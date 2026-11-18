@@ -1,5 +1,5 @@
-"""Tests de la Phase 2 : concentration par amorce, sortie JSON de analyze, commande redesign.
-Phase 2 tests: per-primer concentration, analyze JSON output, redesign command.
+"""Tests des Phases 2 et 3 : concentration par amorce, JSON de analyze, redesign, et chargement unique ViennaRNA.
+Phase 2 and 3 tests: per-primer concentration, analyze JSON, redesign ranking/F2/locus, and single-load ViennaRNA.
 """
 from __future__ import annotations
 
@@ -16,19 +16,25 @@ from labcraft.cli.parsers import (
     build_config_from_cli,
     parse_primer_conc_args,
     read_multi_fasta,
-    reverse_complement,
 )
-from labcraft.lamp.domains import _find_iupac_substring
+from labcraft.lamp.domains import PhysicalPrimer, PrimerRole
 from labcraft.optimize.redesign import (
+    Candidate,
     Locus,
     RedesignError,
+    compute_f2_comparison,
+    compute_max_3p_complementarity,
+    equilibrium_sort_key,
     generate_candidates,
     geometry_satisfied,
+    prescreen_sort_key,
+    select_top_candidates,
 )
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 GT_DIR = REPO_ROOT / "tests" / "fixtures" / "ground_truth"
 DUPLEX_PRIMERS = GT_DIR / "duplex_YFV_DENV4_primers.txt"
+DUPLEX_TARGETS = GT_DIR / "duplex_YFV_DENV4_targets.fasta"
 HALF_CONC_ARGS = [
     "--temperature", "63.0",
     "--conc-fip-bip", "0.4",
@@ -36,24 +42,12 @@ HALF_CONC_ARGS = [
     "--conc-f3-b3", "0.1",
 ]
 
-
-def _slice_around_amplicon(target_seq: str, primer_file: Path, pad: int = 100) -> str:
-    """Extrait la fenêtre cible autour de l'amplicon pour accélérer les tests CLI.
-    Slices target sequence tightly around the LAMP amplicon to speed up CLI tests.
-    """
-    recs = dict(read_multi_fasta(str(primer_file)))
-    spans = []
-    for name, seq in recs.items():
-        if name.endswith(("FIP", "BIP")):
-            continue
-        for cand in (seq, reverse_complement(seq)):
-            pos = _find_iupac_substring(cand, target_seq)
-            if pos >= 0:
-                spans.append((pos, pos + len(cand)))
-    assert spans, f"Aucun domaine trouvé pour {primer_file.name}"
-    lo = max(0, min(a for a, _ in spans) - pad)
-    hi = min(len(target_seq), max(b for _, b in spans) + pad)
-    return target_seq[lo:hi]
+GT_TARGETS_MAP = {
+    "d3": GT_DIR / "DEN3_M93130.fasta",
+    "d4": GT_DIR / "Dengue_4_S1028.fasta",
+    "yfv": GT_DIR / "YFV_17D_17DD.fasta",
+    "dup": DUPLEX_TARGETS,
+}
 
 
 def _sum_amplifiable_families_nm(html: str) -> float:
@@ -62,32 +56,6 @@ def _sum_amplifiable_families_nm(html: str) -> float:
     """
     vals = re.findall(r"<td>([0-9]+\.[0-9]{4})\s+nM</td>", html)
     return sum(float(v) for v in vals)
-
-
-@pytest.fixture(scope="module")
-def gt_targets_truncated(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
-    """Cibles de vérité terrain tronquées autour des amplicons (singleplex et duplex).
-    Truncated ground-truth target FASTA files around each amplicon (singleplex and duplex).
-    """
-    tdir = tmp_path_factory.mktemp("p2_targets")
-    d3_id, d3_seq = read_multi_fasta(str(GT_DIR / "DEN3_M93130.fasta"))[0]
-    d4_id, d4_seq = read_multi_fasta(str(GT_DIR / "Dengue_4_S1028.fasta"))[0]
-    y_id, y_seq = read_multi_fasta(str(GT_DIR / "YFV_17D_17DD.fasta"))[0]
-
-    d3w = _slice_around_amplicon(d3_seq, GT_DIR / "primer_dengue_3_panel3.txt")
-    d4w = _slice_around_amplicon(d4_seq, GT_DIR / "parida_DENV4.txt")
-    yw = _slice_around_amplicon(y_seq, GT_DIR / "nunes_YFV.txt")
-
-    p_d3 = tdir / "DEN3.fasta"
-    p_d4 = tdir / "DENV4.fasta"
-    p_y = tdir / "YFV.fasta"
-    p_dup = tdir / "DUPLEX.fasta"
-
-    p_d3.write_text(f">{d3_id}\n{d3w}\n", encoding="utf-8")
-    p_d4.write_text(f">{d4_id}\n{d4w}\n", encoding="utf-8")
-    p_y.write_text(f">{y_id}\n{yw}\n", encoding="utf-8")
-    p_dup.write_text(f">{y_id}\n{yw}\n>{d4_id}\n{d4w}\n", encoding="utf-8")
-    return {"d3": p_d3, "d4": p_d4, "yfv": p_y, "dup": p_dup}
 
 
 # --- 2.1 Concentration par amorce / Per-primer concentration ---------------------------
@@ -126,14 +94,13 @@ def _conc_map(cfg) -> dict:
     }
 
 
-def test_fasta_header_conc_and_cli_priority(tmp_path: Path, gt_targets_truncated: dict[str, Path]) -> None:
+def test_fasta_header_conc_and_cli_priority(tmp_path: Path) -> None:
     """FASTA conc= s'applique à l'amorce seule, la CLI --conc est prioritaire, les autres gardent leur classe.
     FASTA conc= applies to that primer only, CLI --conc wins, others keep their class value.
     """
     p_file = _write_panel(tmp_path, "conc=0.1")
-    dup_targets = gt_targets_truncated["dup"]
     cfg = build_config_from_cli(
-        primers_path=str(p_file), targets_path=str(dup_targets),
+        primers_path=str(p_file), targets_path=str(DUPLEX_TARGETS),
         conc_fip_bip=0.4, conc_f3_b3=0.1, conc_loop=0.2,
     )
     m = _conc_map(cfg)
@@ -143,7 +110,7 @@ def test_fasta_header_conc_and_cli_priority(tmp_path: Path, gt_targets_truncated
     assert m["F3_ParidaD4"] == pytest.approx(0.1)
 
     cfg2 = build_config_from_cli(
-        primers_path=str(p_file), targets_path=str(dup_targets),
+        primers_path=str(p_file), targets_path=str(DUPLEX_TARGETS),
         conc_fip_bip=0.4, conc_f3_b3=0.1, conc_loop=0.2,
         primer_concs={"Nunes_YFV_FIP": 0.05, "Nunes_YFV_BIP": 0.1},
     )
@@ -154,22 +121,19 @@ def test_fasta_header_conc_and_cli_priority(tmp_path: Path, gt_targets_truncated
 
     with pytest.raises(ParseError):
         build_config_from_cli(
-            primers_path=str(p_file), targets_path=str(dup_targets),
+            primers_path=str(p_file), targets_path=str(DUPLEX_TARGETS),
             primer_concs={"Inconnu_FIP": 0.1},
         )
 
 
 @pytest.fixture(scope="module")
-def quarter_fip_bip_run(
-    gt_targets_truncated: dict[str, Path],
-    tmp_path_factory: pytest.TempPathFactory,
-) -> tuple[int, str, dict]:
-    """Duplex demi-concentration avec Nunes_YFV_FIP et Nunes_YFV_BIP à 0,1 µM.
-    Half-concentration duplex with Nunes_YFV_FIP and Nunes_YFV_BIP at 0.1 uM.
+def quarter_fip_bip_run(tmp_path_factory: pytest.TempPathFactory) -> tuple[int, str, dict]:
+    """Duplex demi-concentration avec Nunes_YFV_FIP et Nunes_YFV_BIP à 0,1 µM sur cibles complètes.
+    Half-concentration duplex with Nunes_YFV_FIP and Nunes_YFV_BIP at 0.1 uM on full targets.
     """
     out = tmp_path_factory.mktemp("quarter") / "dup_quarter.html"
     res = CliRunner().invoke(app, [
-        "analyze", "-p", str(DUPLEX_PRIMERS), "-t", str(gt_targets_truncated["dup"]), *HALF_CONC_ARGS,
+        "analyze", "-p", str(DUPLEX_PRIMERS), "-t", str(DUPLEX_TARGETS), *HALF_CONC_ARGS,
         "--conc", "Nunes_YFV_FIP=0.1", "--conc", "Nunes_YFV_BIP=0.1", "-o", str(out),
     ])
     js = json.loads(out.with_suffix(".json").read_text(encoding="utf-8")) if out.with_suffix(".json").exists() else {}
@@ -191,7 +155,6 @@ def test_quarter_fip_bip_reduces_dominant_family(quarter_fip_bip_run: tuple[int,
 
     fam = {f["label"]: f["conc_nm"] for f in js["totals"]["families"]}
     key = next(k for k in fam if "FIP_Nunes_YFV" in k and "F3_ParidaD4" in k)
-    # Référence demi-concentration : 0,29 nM (Phase 1) / Half-conc reference: 0.29 nM (Phase 1)
     assert fam[key] < 0.29
     assert js["totals"]["amplifiable_dimers_total_nm"] < 0.3514
     assert js["totals"]["amplifiable_dimers_inter_nm"] < 0.3097
@@ -199,7 +162,7 @@ def test_quarter_fip_bip_reduces_dominant_family(quarter_fip_bip_run: tuple[int,
     assert set(js["sites_by_target"]).issuperset({"U17066.1", "MG272272.1"})
 
 
-# --- 2.2 JSON de analyze / analyze JSON -------------------------------------------------
+# --- 2.2 JSON de analyze & non-régression au centième / analyze JSON & regression -------
 
 def test_analyze_json_schema(quarter_fip_bip_run: tuple[int, str, dict]) -> None:
     """Le JSON contient toutes les rubriques demandées.
@@ -241,11 +204,10 @@ def test_analyze_json_matches_html_five_cases(
     c_f3: str,
     ref_nm: float,
     expect_failure: bool,
-    gt_targets_truncated: dict[str, Path],
     tmp_path: Path,
 ) -> None:
-    """Sur les 5 cas de non-régression, les totaux du JSON égalent ceux du HTML et les valeurs restent inchangées.
-    Across all 5 regression cases, JSON totals match HTML totals and reference values remain unchanged.
+    """Sur les 5 cas de non-régression (cibles complètes), JSON == HTML et valeurs inchangées au centième.
+    Across all 5 regression cases (full targets), JSON matches HTML and reference values hold within 0.01.
     """
     out_html = tmp_path / f"{case_id}.html"
     res = CliRunner().invoke(
@@ -253,7 +215,7 @@ def test_analyze_json_matches_html_five_cases(
         [
             "analyze",
             "-p", str(GT_DIR / primers_file),
-            "-t", str(gt_targets_truncated[target_key]),
+            "-t", str(GT_TARGETS_MAP[target_key]),
             "--temperature", "63.0",
             "--conc-fip-bip", c_fip,
             "--conc-loop", c_loop,
@@ -275,6 +237,7 @@ def test_analyze_json_matches_html_five_cases(
         expected_banner = f"{js_total_nm:.4f}" if js_total_nm < 0.01 else f"{js_total_nm:.2f}"
         m_banner = re.search(r"Total dimères amplifiables :</strong>\s*([0-9.]+)\s+nM", html)
         assert m_banner is not None and m_banner.group(1) == expected_banner
+        assert abs(js_total_nm - ref_nm) < 0.01
         assert abs(js_total_nm - ref_nm) <= max(0.01 * ref_nm, 5e-5)
 
     if js["totals"]["is_multiplex"]:
@@ -283,15 +246,15 @@ def test_analyze_json_matches_html_five_cases(
         assert f"{js['totals']['amplifiable_dimers_inter_nm']:.2f}" == html_inter.group(1)
 
 
-# --- 2.3 Redessin / Redesign ------------------------------------------------------------
+# --- 2.3 Redessin : classement, F2, complémentarité 3', coordonnées réelles -------------
 
-def test_redesign_refuses_fip_and_bip(gt_targets_truncated: dict[str, Path], tmp_path: Path) -> None:
+def test_redesign_refuses_fip_and_bip(tmp_path: Path) -> None:
     """Une demande sur une amorce interne (FIP ou BIP) renvoie le message de refus.
     A request on an inner primer (FIP or BIP) returns the refusal message.
     """
     for pname in ("Nunes_YFV_FIP", "ParidaD4_BIP"):
         res = CliRunner().invoke(app, [
-            "redesign", "-p", str(DUPLEX_PRIMERS), "-t", str(gt_targets_truncated["dup"]),
+            "redesign", "-p", str(DUPLEX_PRIMERS), "-t", str(DUPLEX_TARGETS),
             "--primer", pname, "-o", str(tmp_path / f"{pname}.html"),
         ])
         assert res.exit_code == 1
@@ -299,9 +262,9 @@ def test_redesign_refuses_fip_and_bip(gt_targets_truncated: dict[str, Path], tmp
         assert "FIP/BIP" in res.stdout
 
 
-def test_redesign_geometry_and_candidates_unit() -> None:
-    """Contraintes géométriques F3/B3/LF/LB et génération de candidats sur le même brin.
-    Geometric constraints for F3/B3/LF/LB and candidate generation on the same strand.
+def test_redesign_geometry_and_ranking_unit() -> None:
+    """Contraintes géométriques, comparaison F2, complémentarité 3' avec matrice 5' et départage.
+    Geometric constraints, F2 stability rule, 5'-templated 3' complementarity, and tie-breaking.
     """
     geo = {
         "F2": Locus(120, 140, "+"),
@@ -310,13 +273,13 @@ def test_redesign_geometry_and_candidates_unit() -> None:
         "B2": Locus(240, 260, "-"),
     }
     assert geometry_satisfied("F3", Locus(95, 115, "+"), geo)
-    assert not geometry_satisfied("F3", Locus(105, 125, "+"), geo)  # chevauche F2 / overlaps F2
+    assert not geometry_satisfied("F3", Locus(105, 125, "+"), geo)
     assert geometry_satisfied("B3", Locus(265, 285, "-"), geo)
-    assert not geometry_satisfied("B3", Locus(250, 270, "-"), geo)  # chevauche B2 / overlaps B2
+    assert not geometry_satisfied("B3", Locus(250, 270, "-"), geo)
     assert geometry_satisfied("LF", Locus(142, 158, "-"), geo)
-    assert not geometry_satisfied("LF", Locus(150, 165, "-"), geo)  # chevauche F1 / overlaps F1
+    assert not geometry_satisfied("LF", Locus(150, 165, "-"), geo)
     assert geometry_satisfied("LB", Locus(222, 238, "+"), geo)
-    assert not geometry_satisfied("LB", Locus(215, 235, "+"), geo)  # chevauche B1 / overlaps B1
+    assert not geometry_satisfied("LB", Locus(215, 235, "+"), geo)
 
     with pytest.raises(RedesignError):
         geometry_satisfied("F3", Locus(95, 115, "+"), {"F2": None, "F1": None, "B2": None, "B1": None})
@@ -327,31 +290,153 @@ def test_redesign_geometry_and_candidates_unit() -> None:
     assert all(c.locus.strand == "+" for c in cands)
     assert all("N" not in c.sequence for c in cands)
 
+    # Vérifie l'exigence de matrice en 5' (position >= 1 dans le partenaire)
+    # Checks the 5' template requirement (match at index >= 1 in partner, not flush at 5' end)
+    p_flush_5p = PhysicalPrimer.from_simple("P1", "CCGGGGTTTT", PrimerRole.FIP)   # revcomp(CCCCGG)=CCGGGG en pos 0 -> pas de matrice 5'
+    p_with_5p = PhysicalPrimer.from_simple("P2", "ATCCGGTTTT", PrimerRole.BIP)    # revcomp(CCGG)=CCGG en pos 2 -> matrice 5' 'AT'
+    c_test = Candidate(0, 10, "AAAACCCCGG", Locus(0, 10, "+"))
+    compute_max_3p_complementarity(c_test, [p_flush_5p, p_with_5p])
+    assert c_test.max_3p_comp == 4
+    assert c_test.max_3p_partner == "P2"
 
-def test_redesign_parida_f3_reference_and_family(gt_targets_truncated: dict[str, Path], tmp_path: Path) -> None:
-    """La ligne de référence reproduit 0,351 nM et un candidat supprime la famille FIP_Nunes_YFV × F3_ParidaD4.
-    The reference row reproduces 0.351 nM and a candidate eliminates the FIP_Nunes_YFV x F3_ParidaD4 family.
+    # Ordre de départage : non >F2, puis comp 3', puis |L - L0|, puis GC dans [40, 60]
+    # Tie-breaker order: not >F2, then 3' comp, then |L - L0|, then GC in [40, 60]
+    dg_f2 = -12.91
+    c_too_stable = Candidate(+2, 22, "GGCTATTGAAGTCAGGCCACTT", Locus(0, 22, "+"), dg_duplex=-13.87)
+    c_comp4 = Candidate(-9, 18, "CCAAAGAGGCTATTGAAG", Locus(0, 18, "+"), dg_duplex=-9.36)
+    c_len19_gc_ok = Candidate(-7, 19, "CAAAGAGGCTATTGAAGTC", Locus(0, 19, "+"), dg_duplex=-9.34)
+    c_len19_gc_bad = Candidate(-8, 17, "AAAGAGGCTATTGAAGT", Locus(0, 17, "+"), dg_duplex=-8.78)
+    c_best_len18 = Candidate(-7, 18, "AAAGAGGCTATTGAAGTC", Locus(0, 18, "+"), dg_duplex=-9.04)
 
-    Plage réduite (--shift 4, --top 2) pour borner la durée en CI.
-    Reduced range (--shift 4, --top 2) to bound CI runtime.
+    for c_item, k3, gc in [
+        (c_too_stable, 3, 50.0),
+        (c_comp4, 4, 50.0),
+        (c_len19_gc_ok, 3, 42.1),
+        (c_len19_gc_bad, 3, 35.3),
+        (c_best_len18, 3, 38.9),
+    ]:
+        compute_f2_comparison(c_item, dg_f2)
+        c_item.max_3p_comp = k3
+        c_item.gc_percent = gc
+        c_item.equilibrium = {"amplifiable_total_nm": 0.058569, "amplifiable_inter_nm": 0.0168}
+
+    pool = [c_too_stable, c_comp4, c_len19_gc_bad, c_len19_gc_ok, c_best_len18]
+    pool.sort(key=lambda c: prescreen_sort_key(c, orig_len=18))
+    assert pool == [c_best_len18, c_len19_gc_ok, c_len19_gc_bad, c_comp4, c_too_stable]
+
+    eq_sorted = sorted(pool, key=lambda c: equilibrium_sort_key(c, orig_len=18))
+    assert eq_sorted == [c_best_len18, c_len19_gc_ok, c_len19_gc_bad, c_comp4, c_too_stable]
+
+    kept, n_disc = select_top_candidates(pool, top=4, role="F3")
+    assert n_disc == 1
+    assert c_too_stable not in kept
+
+
+def test_redesign_parida_f3_full_exploration(tmp_path: Path) -> None:
+    """Exploration complète ParidaD4_F3 (107 candidats) : locus réel 10291-10309, filtre F2 et départage.
+    Full ParidaD4_F3 exploration (107 candidates): true locus 10291-10309, F2 rule, and tie-breaking.
     """
     out = tmp_path / "redesign.html"
     res = CliRunner().invoke(app, [
-        "redesign", "-p", str(DUPLEX_PRIMERS), "-t", str(gt_targets_truncated["dup"]), *HALF_CONC_ARGS,
-        "--primer", "ParidaD4_F3", "--shift", "4", "--top", "2", "-o", str(out),
+        "redesign", "-p", str(DUPLEX_PRIMERS), "-t", str(DUPLEX_TARGETS), *HALF_CONC_ARGS,
+        "--primer", "ParidaD4_F3", "--shift", "12", "--length", "17-22", "--top", "5", "-o", str(out),
     ])
     assert res.exit_code == 0, res.stdout
     js = json.loads(out.with_suffix(".json").read_text(encoding="utf-8"))
+    html = out.read_text(encoding="utf-8")
+
+    assert js["n_candidates_geometry_ok"] == 107
+    assert js["original_locus"] == {"start": 10291, "end": 10309, "strand": "+"}
+    assert js["dg_f2"] == pytest.approx(-12.9052, abs=0.01)
+    assert js["n_discarded_more_stable_than_f2"] > 0
+
     ref = js["ranked"][0]
-    assert ref["is_reference"] and ref["shift"] == 0 and ref["length"] == len(js["original_sequence"])
-    assert abs(ref["equilibrium"]["amplifiable_total_nm"] - 0.3514) / 0.3514 < 0.01
+    assert ref["is_reference"] and ref["shift"] == 0 and ref["length"] == 18
+    assert ref["start"] == 10291 and ref["end"] == 10309
+    assert ref["max_3p_complementarity"] == 6
+    assert abs(ref["equilibrium"]["amplifiable_total_nm"] - 0.3514) < 0.01
     assert any("FIP_Nunes_YFV" in f and "F3_ParidaD4" in f for f in ref["equilibrium"]["families"])
-    for c in js["ranked"][1:]:
+
+    recs = js["ranked"][1:]
+    assert len(recs) == 5
+    for c in recs:
         assert c["geometry_ok"]
-        assert c["strand"] == js["original_locus"]["strand"]
+        assert c["strand"] == "+"
+        assert not c["more_stable_than_f2"]
+        assert c["dg_duplex"] >= js["dg_f2"]
+        assert c["ddg_vs_f2"] >= 0.0
+        assert c["max_3p_complementarity"] == 3
         assert "site_occupations" in c["equilibrium"]
-    assert any(
-        not any("FIP_Nunes_YFV" in f and "F3_ParidaD4" in f for f in c["equilibrium"]["families"])
-        for c in js["ranked"][1:]
-    )
-    assert 'id="redesign-ranking"' in out.read_text(encoding="utf-8")
+        assert not any("FIP_Nunes_YFV" in f and "F3_ParidaD4" in f for f in c["equilibrium"]["families"])
+
+    # Départage : d'abord L=18 (|L - 18| == 0), puis |L - 18| == 1 avec GC entre 40 et 60 %
+    # Tie-breaking: first L=18 (|L - 18| == 0), then |L - 18| == 1 with GC within [40%, 60%]
+    assert [c["length"] for c in recs[:2]] == [18, 18]
+    for c in recs[2:]:
+        assert abs(c["length"] - 18) == 1
+        assert 40.0 <= c["gc_percent"] <= 60.0
+
+    assert 'id="redesign-ranking"' in html
+    assert "10291-10309 (+)" in html
+    assert "100-118" not in html
+    assert "ΔG vs F2" in html
+    assert "Comp. 3' max (nt)" in html
+
+
+# --- Phase 3 : chargement unique des paramètres ADN ViennaRNA / Single DNA load ---------
+
+def test_phase3_single_dna_params_load_per_execution(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Une exécution complète de `analyze` ne charge Mathews 2004 qu'une seule fois et restaure Turner 2004.
+    A full `analyze` execution loads Mathews 2004 DNA params exactly once and restores Turner 2004 RNA at exit.
+    """
+    import RNA
+    from labcraft.thermo.backends.vienna import _SHARED_VIENNA_CACHE
+    from labcraft.thermo.backends.vienna_salt import _SHARED_SALT_CACHE
+    from labcraft.target.cache import unfolding_cache
+
+    _SHARED_VIENNA_CACHE.clear()
+    _SHARED_SALT_CACHE.clear()
+    unfolding_cache.clear()
+
+    dna_loads = 0
+    rna_loads = 0
+    orig_dna = RNA.params_load_DNA_Mathews2004
+    orig_rna = RNA.params_load_RNA_Turner2004
+
+    def counted_dna() -> None:
+        nonlocal dna_loads
+        dna_loads += 1
+        orig_dna()
+
+    def counted_rna() -> None:
+        nonlocal rna_loads
+        rna_loads += 1
+        orig_rna()
+
+    orig_rna()
+    RNA.cvar.temperature = 37.0
+    ref_rna_energy = RNA.fold_compound("GGGGCCAAAAAAGGCCCC").pf()[1]
+
+    monkeypatch.setattr(RNA, "params_load_DNA_Mathews2004", counted_dna)
+    monkeypatch.setattr(RNA, "params_load_RNA_Turner2004", counted_rna)
+
+    out_html = tmp_path / "d4_single_load.html"
+    res = CliRunner().invoke(app, [
+        "analyze",
+        "-p", str(GT_DIR / "parida_DENV4.txt"),
+        "-t", str(GT_DIR / "Dengue_4_S1028.fasta"),
+        "--temperature", "63.0",
+        "--conc-fip-bip", "0.8",
+        "--conc-loop", "0.4",
+        "--conc-f3-b3", "0.2",
+        "-o", str(out_html),
+    ])
+    assert res.exit_code == 0, res.stdout
+    assert dna_loads == 1
+    assert rna_loads == 1
+
+    # Vérifie que l'état ARN et la température ont bien été restaurés en fin d'exécution
+    # Verify that RNA parameters and temperature are properly restored after execution
+    assert RNA.cvar.temperature == 37.0
+    post_rna_energy = RNA.fold_compound("GGGGCCAAAAAAGGCCCC").pf()[1]
+    assert abs(post_rna_energy - ref_rna_energy) < 1e-4

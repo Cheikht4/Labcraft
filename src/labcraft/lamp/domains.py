@@ -79,6 +79,14 @@ IUPAC_MATCHABLE = {
     'H': {'A', 'C', 'T'}, 'V': {'A', 'C', 'G'},
 }
 
+# Classe regex bilatérale précalculée par code IUPAC (N et caractères inconnus exclus)
+# Precomputed bilateral regex character class per IUPAC code (N and unknown chars excluded)
+_IUPAC_BILATERAL_REGEX: dict[str, str] = {
+    code: "[" + "".join(sorted(k for k, v in IUPAC_MATCHABLE.items() if v & bases)) + "]"
+    for code, bases in IUPAC_MATCHABLE.items()
+}
+
+
 def _find_iupac_substring(query: str, target: str) -> int:
     """
     Retourne l'indice de la première occurrence de query dans target avec tolérance
@@ -96,25 +104,17 @@ def _find_iupac_substring(query: str, target: str) -> int:
     if q_len == 0 or q_len > t_len:
         return -1
 
-    # Pré-calcul des ensembles de bases ; None signifie « non appariable »
-    # Pre-compute base sets; None means 'non-matchable'
-    q_sets = [IUPAC_MATCHABLE.get(c.upper()) for c in query]
-    t_sets = [IUPAC_MATCHABLE.get(c.upper()) for c in target]
+    q_up = query.upper()
+    parts = []
+    for ch in q_up:
+        cls_pat = _IUPAC_BILATERAL_REGEX.get(ch)
+        if cls_pat is None:
+            return -1
+        parts.append(cls_pat)
 
-    for i in range(t_len - q_len + 1):
-        match = True
-        for j in range(q_len):
-            q_s = q_sets[j]
-            t_s = t_sets[i + j]
-            # Si l'un des deux côtés est None (N ou inconnu), pas de correspondance
-            # If either side is None (N or unknown), no match
-            if q_s is None or t_s is None or not q_s.intersection(t_s):
-                match = False
-                break
-        if match:
-            return i
-
-    return -1
+    import re
+    m = re.search("".join(parts), target.upper())
+    return m.start() if m is not None else -1
 def _revcomp(seq: str) -> str:
     complement = {'A': 'T', 'T': 'A', 'C': 'G', 'G': 'C',
                   'R': 'Y', 'Y': 'R', 'S': 'S', 'W': 'W',

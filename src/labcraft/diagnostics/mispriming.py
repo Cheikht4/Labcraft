@@ -11,6 +11,7 @@ from labcraft.lamp.domains import PhysicalPrimer
 from labcraft.thermo.backends.base import DuplexEnergyBackend
 from labcraft.diagnostics.enzyme import PolymeraseProfile
 from labcraft.thermo.mismatch import calculate_hybridization_dg, three_prime_extensible
+from labcraft.thermo.vienna import dna_session
 
 
 def _revcomp(seq: str) -> str:
@@ -41,6 +42,30 @@ class MisprimingRisk(BaseModel):
 
 
 def detect_inter_target_mispriming(
+    primers: List[PhysicalPrimer],
+    primer_to_panel: Dict[str, str],
+    targets: Dict[str, str],
+    backend: DuplexEnergyBackend,
+    enzyme: PolymeraseProfile,
+    temp_celsius: float,
+    k_len: int = 5,
+    ddg_max: float = 4.0,
+    primer_to_target: Optional[Dict[str, str]] = None,
+    legitimate_loci: Optional[Dict[str, Any]] = None,
+    **backend_kwargs
+) -> List[MisprimingRisk]:
+    """Détecte les risques réels d'amorçage croisé illégitime dans une session ADN unique.
+    Detects off-target mispriming risks within a single DNA parameter session.
+    """
+    with dna_session(temp_celsius=temp_celsius):
+        return _detect_inter_target_mispriming_impl(
+            primers, primer_to_panel, targets, backend, enzyme, temp_celsius,
+            k_len=k_len, ddg_max=ddg_max, primer_to_target=primer_to_target,
+            legitimate_loci=legitimate_loci, **backend_kwargs,
+        )
+
+
+def _detect_inter_target_mispriming_impl(
     primers: List[PhysicalPrimer],
     primer_to_panel: Dict[str, str],
     targets: Dict[str, str],
