@@ -1,6 +1,6 @@
 import jinja2
 import os
-from typing import Dict, List
+from typing import Any, Dict, List
 from labcraft.metrics.verdict import PanelVerdict
 from labcraft.metrics.fractions import PrimerFractions
 from labcraft.metrics.risk import RiskItem
@@ -48,3 +48,17 @@ def render_report(
         blocking_dimers=blocking_dimers,
         metadata=metadata
     )
+
+
+def render_redesign_report(context: Dict[str, Any]) -> str:
+    """Rend le rapport HTML de `labcraft redesign` via le template Jinja2 dédié.
+    Renders the `labcraft redesign` HTML report using its dedicated Jinja2 template.
+    """
+    template_dir = os.path.join(os.path.dirname(__file__), "templates")
+    env = jinja2.Environment(
+        loader=jinja2.FileSystemLoader(template_dir),
+        undefined=jinja2.StrictUndefined,
+        autoescape=True,
+    )
+    template = env.get_template("redesign.html.j2")
+    return template.render(**context)

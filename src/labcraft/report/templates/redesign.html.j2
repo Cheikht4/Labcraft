@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LabCraft — Redessin de {{ primer }} ({{ role_name }})</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #f8fafc;
+            color: #1e293b;
+            margin: 0;
+            padding: 24px;
+            line-height: 1.5;
+        }
+        .container {
+            max-width: 1440px;
+            margin: 0 auto;
+            background: #ffffff;
+            border: 1px solid #e2e8f0;
+            border-radius: 10px;
+            padding: 24px 28px;
+            box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+        }
+        h1 {
+            margin: 0 0 8px 0;
+            font-size: 1.5rem;
+            color: #0f172a;
+        }
+        .subtitle {
+            margin: 0 0 18px 0;
+            color: #475569;
+            font-size: 0.92rem;
+        }
+        .meta-bar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        .meta-pill {
+            background: #f1f5f9;
+            border: 1px solid #cbd5e1;
+            border-radius: 6px;
+            padding: 6px 12px;
+            font-size: 0.84rem;
+            color: #334155;
+        }
+        .table-wrap {
+            overflow-x: auto;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.82rem;
+        }
+        th, td {
+            border: 1px solid #cbd5e1;
+            padding: 7px 9px;
+            text-align: left;
+            vertical-align: middle;
+        }
+        th {
+            background-color: #f1f5f9;
+            color: #0f172a;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+        tr.ref-row {
+            background-color: #fefce8;
+        }
+        tr:nth-child(even):not(.ref-row) {
+            background-color: #f8fafc;
+        }
+        code {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            font-size: 0.82rem;
+            background: #f1f5f9;
+            padding: 2px 5px;
+            border-radius: 4px;
+        }
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 999px;
+            font-weight: 600;
+            font-size: 0.76rem;
+        }
+        .badge-ok { background: #dcfce7; color: #166534; }
+        .badge-warning { background: #fef3c7; color: #92400e; }
+        .badge-failure { background: #fee2e2; color: #991b1b; }
+        .warn-flag { color: #b45309; font-weight: 600; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>Redessin de {{ primer }} ({{ role_name }})</h1>
+    <p class="subtitle">
+        Cible : <strong>{{ target_id }}</strong> ;
+        locus d'origine {{ orig_locus.start }}-{{ orig_locus.end }} brin {{ orig_locus.strand }}
+        {%- if dg_ref_inner is not none %} ; ΔG({{ ref_inner_domain }}) = {{ "%.2f"|format(dg_ref_inner) }} kcal/mol{% endif -%}
+        {%- if n_discarded_inner > 0 %} ({{ n_discarded_inner }} candidat(s) plus stable(s) que {{ ref_inner_domain }} écarté(s)){% endif %} ;
+        décalage ±{{ shift }} nt ; longueurs {{ len_min }}-{{ len_max }} ;
+        {{ n_valid }} candidats géométriquement valides sur {{ n_total }}.
+    </p>
+
+    <div class="meta-bar">
+        <span class="meta-pill"><strong>Panel :</strong> {{ panel_id }}</span>
+        <span class="meta-pill"><strong>Température :</strong> {{ "%.1f"|format(temp_celsius) }} °C</span>
+        <span class="meta-pill"><strong>Enzyme :</strong> {{ enzyme_name }}</span>
+        {% if dg_f2 is not none %}
+        <span class="meta-pill"><strong>ΔG(F2) :</strong> {{ "%.2f"|format(dg_f2) }} kcal/mol</span>
+        {% endif %}
+        {% if dg_ref_inner is not none and ref_inner_domain != "F2" %}
+        <span class="meta-pill"><strong>ΔG({{ ref_inner_domain }}) :</strong> {{ "%.2f"|format(dg_ref_inner) }} kcal/mol</span>
+        {% endif %}
+    </div>
+
+    <div class="table-wrap">
+        <table id="redesign-ranking">
+            <thead>
+                <tr>
+                    <th>Rang</th>
+                    <th>Décalage</th>
+                    <th>Longueur</th>
+                    <th>GC (%)</th>
+                    <th>Séquence 5'→3'</th>
+                    <th>Locus</th>
+                    <th>ΔG duplex</th>
+                    <th>ΔG vs {{ ref_inner_domain }}</th>
+                    <th>ΔG ouverture</th>
+                    <th>Comp. 3' max (nt)</th>
+                    <th>Comp. 3' inv./homo (nt)</th>
+                    <th>Paires amplifiables (criblage)</th>
+                    <th>Dimères amplifiables (nM)</th>
+                    <th>Inter-panels (nM)</th>
+                    <th>Accès à l'initiation (min)</th>
+                    <th>Alertes mésamorçage</th>
+                    <th>Verdict</th>
+                    <th>Familles amplifiables</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in rows %}
+                <tr{% if row.is_reference %} class="ref-row"{% endif %}>
+                    <td><strong>{{ row.label }}</strong></td>
+                    <td>{{ "%+d"|format(row.shift) }}</td>
+                    <td>{{ row.length }}</td>
+                    <td>{{ "%.1f"|format(row.gc_percent) }} %</td>
+                    <td><code>{{ row.sequence }}</code></td>
+                    <td>{{ row.locus_start }}-{{ row.locus_end }} ({{ row.locus_strand }})</td>
+                    <td>{{ "%.2f"|format(row.dg_duplex) }}</td>
+                    <td>
+                        {%- if row.ddg_vs_ref is none -%}
+                            —
+                        {%- else -%}
+                            {{ "%+.2f"|format(row.ddg_vs_ref) }}
+                            {%- if row.more_stable_than_ref %} <span class="warn-flag">⚠️ &gt; {{ ref_inner_domain }}</span>{% endif -%}
+                        {%- endif -%}
+                    </td>
+                    <td>{{ "%.2f"|format(row.dg_open) }}</td>
+                    <td>
+                        {%- if row.max_3p_comp <= 0 -%}
+                            0
+                        {%- elif row.max_3p_partner -%}
+                            <span title="Partenaire : {{ row.max_3p_partner }}">{{ row.max_3p_comp }}</span>
+                        {%- else -%}
+                            {{ row.max_3p_comp }}
+                        {%- endif -%}
+                    </td>
+                    <td>
+                        {%- if row.max_rev_3p_partner -%}
+                            <span title="3' de {{ row.max_rev_3p_partner }} sur 5' du candidat">{{ row.max_rev_3p_comp }}</span> / {{ row.max_self_3p_comp }}
+                        {%- else -%}
+                            {{ row.max_rev_3p_comp }} / {{ row.max_self_3p_comp }}
+                        {%- endif -%}
+                    </td>
+                    <td>{{ row.n_amplifiable_pairs }}</td>
+                    <td>{{ "%.4f"|format(row.amplifiable_total_nm) }}</td>
+                    <td>{{ "%.4f"|format(row.amplifiable_inter_nm) }}</td>
+                    <td>{{ row.initiation_access_txt or "—" }}</td>
+                    <td>{{ row.mispriming_alerts }}</td>
+                    <td>
+                        {%- if row.verdict == "OK" -%}
+                            <span class="badge badge-ok">OK</span>
+                        {%- elif row.verdict == "WARNING" -%}
+                            <span class="badge badge-warning">WARNING</span>
+                        {%- elif row.verdict == "FAILURE" -%}
+                            <span class="badge badge-failure">FAILURE</span>
+                        {%- else -%}
+                            {{ row.verdict }}
+                        {%- endif -%}
+                    </td>
+                    <td>{{ row.families_txt }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+</body>
+</html>
