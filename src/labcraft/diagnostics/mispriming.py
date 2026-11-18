@@ -52,7 +52,7 @@ def detect_inter_target_mispriming(
     ddg_max: float = 4.0,
     primer_to_target: Optional[Dict[str, str]] = None,
     legitimate_loci: Optional[Dict[str, Any]] = None,
-    **backend_kwargs
+    **backend_kwargs: Any
 ) -> List[MisprimingRisk]:
     """Détecte les risques réels d'amorçage croisé illégitime dans une session ADN unique.
     Detects off-target mispriming risks within a single DNA parameter session.
@@ -76,7 +76,7 @@ def _detect_inter_target_mispriming_impl(
     ddg_max: float = 4.0,
     primer_to_target: Optional[Dict[str, str]] = None,
     legitimate_loci: Optional[Dict[str, Any]] = None,
-    **backend_kwargs
+    **backend_kwargs: Any
 ) -> List[MisprimingRisk]:
     """Détecte les risques réels d'amorçage croisé illégitime entre panels et cibles hétérologues.
     Detects off-target mispriming risks between primers and heterologous targets.

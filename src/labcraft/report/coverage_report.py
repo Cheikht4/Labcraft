@@ -1,7 +1,7 @@
 import json
 import math
 import os
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from jinja2 import Environment, FileSystemLoader
 
 from labcraft.lamp.coverage import StrainVerdict, SiteVerdict
@@ -15,7 +15,7 @@ def render_coverage_report(
     dg_threshold: Optional[float] = None,
     max_mismatches_count: int = 2,
     temperature_C: float = 65.0
-):
+) -> None:
     # Prepare data
     total_strains = len(verdicts)
     if total_strains == 0:
@@ -34,7 +34,7 @@ def render_coverage_report(
     divergences = [v for v in verdicts if not getattr(v, "is_indeterminate", False) and v.is_amplifiable_thermo != v.is_amplifiable_count]
     
     # Limiting primers thermo
-    limiting_counts = {}
+    limiting_counts: Dict[str, int] = {}
     for v in verdicts:
         if not getattr(v, "is_indeterminate", False) and not v.is_amplifiable_thermo and v.limiting_primer_thermo:
             limiting_counts[v.limiting_primer_thermo] = limiting_counts.get(v.limiting_primer_thermo, 0) + 1
@@ -43,11 +43,11 @@ def render_coverage_report(
     worst_primer = sorted_limiting[0][0] if sorted_limiting else None
     
     # Collect all unique primers across all evaluations for the matrix header
-    all_primers = set()
+    all_primers: set[str] = set()
     for v in verdicts:
         all_primers.update(v.evaluations.keys())
     role_order = {"F3": 0, "B3": 1, "FIP": 2, "BIP": 3, "LF": 4, "LB": 5}
-    def sort_key(p_name):
+    def sort_key(p_name: str) -> int:
         base = p_name.split("_")[0]
         return role_order.get(base, 99)
     sorted_primers = sorted(list(all_primers), key=sort_key)
@@ -61,7 +61,8 @@ def render_coverage_report(
     count_rate = round(covered_count / evaluable_strains * 100, 1) if evaluable_strains > 0 else 0.0
 
     json_path = output_path.replace(".html", ".json")
-    json_data = {
+    strains_list: List[Dict[str, Any]] = []
+    json_data: Dict[str, Any] = {
         "panel_name": panel_name,
         "total_strains": total_strains,
         "evaluable_strains": evaluable_strains,
@@ -74,19 +75,20 @@ def render_coverage_report(
         "dg_threshold": dg_threshold,
         "temperature_C": temperature_C,
         "worst_primer": worst_primer,
-        "strains": []
+        "strains": strains_list
     }
     for v in verdicts:
         is_indet = getattr(v, "is_indeterminate", False)
-        s_data = {
+        evals_map: Dict[str, Dict[str, Any]] = {}
+        s_data: Dict[str, Any] = {
             "strain_id": v.strain_id,
             "thermo": None if is_indet else v.is_amplifiable_thermo,
             "count": v.is_amplifiable_count,
             "indeterminate": is_indet,
-            "evals": {}
+            "evals": evals_map
         }
         for pname, ev in v.evaluations.items():
-            s_data["evals"][pname] = {
+            evals_map[pname] = {
                 "verdict": ev.verdict.value,
                 "dg": ev.dg_hyb,
                 "ddg": ev.ddg,
@@ -97,7 +99,7 @@ def render_coverage_report(
                 "position": ev.position,
                 "strand": ev.strand
             }
-        json_data["strains"].append(s_data)
+        strains_list.append(s_data)
         
     with open(json_path, 'w', encoding="utf-8") as f:
         json.dump(json_data, f, indent=2)

@@ -4,7 +4,7 @@ from labcraft.thermo.constants import R_GAS_KCAL_MOL_K
 Applique un décalage salin (ΔΔG) au ΔG natif de ViennaRNA en estimant
 l'enthalpie et l'entropie de la structure via le modèle du plus proche voisin.
 """
-from typing import Dict, Tuple
+from typing import Any, Dict, Tuple
 import math
 from .base import DuplexEnergyBackend, DuplexResult
 from .vienna import ViennaRNABackend
@@ -132,7 +132,7 @@ def estimate_helix_thermo(seq: str, structure: str, lna_positions: tuple[int, ..
     return dh_total, ds_total, n_bp, f_gc, ddH_lna, ddS_lna
 
 _MAX_SALT_CACHE_SIZE = 65536
-_SHARED_SALT_CACHE: Dict[Tuple, DuplexResult] = {}
+_SHARED_SALT_CACHE: Dict[Tuple[Any, ...], DuplexResult] = {}
 
 
 class ViennaSaltShiftBackend(DuplexEnergyBackend):
@@ -141,11 +141,11 @@ class ViennaSaltShiftBackend(DuplexEnergyBackend):
         self.salt_model = salt_model
         self.default_ct_molar = default_ct_molar
         if type(salt_model) is UnifiedSaltModel and default_ct_molar == 2e-6:
-            self._cache: Dict[Tuple, DuplexResult] = _SHARED_SALT_CACHE
+            self._cache: Dict[Tuple[Any, ...], DuplexResult] = _SHARED_SALT_CACHE
         else:
             self._cache = {}
         
-    def _apply_shift(self, res: DuplexResult, seq: str, ct_molar: float, kwargs: dict, lna_positions: tuple[int, ...] = ()) -> DuplexResult:
+    def _apply_shift(self, res: DuplexResult, seq: str, ct_molar: float, kwargs: dict[str, Any], lna_positions: tuple[int, ...] = ()) -> DuplexResult:
         if not res.structure or '(' not in res.structure:
             return res
             
@@ -205,7 +205,7 @@ class ViennaSaltShiftBackend(DuplexEnergyBackend):
             temperature_celsius=res.temperature_celsius
         )
 
-    def calc_heterodimer(self, seq1: str, seq2: str, *, temp_celsius: float = 65.0, **kwargs) -> DuplexResult:
+    def calc_heterodimer(self, seq1: str, seq2: str, *, temp_celsius: float = 65.0, **kwargs: Any) -> DuplexResult:
         cache_key = ("hetero", seq1, seq2, temp_celsius, tuple(sorted((k, tuple(v) if isinstance(v, (list, tuple)) else v) for k, v in kwargs.items())))
         if cache_key in self._cache:
             return self._cache[cache_key]
@@ -222,7 +222,7 @@ class ViennaSaltShiftBackend(DuplexEnergyBackend):
         self._cache[cache_key] = shifted
         return shifted
         
-    def calc_homodimer(self, seq: str, *, temp_celsius: float = 65.0, **kwargs) -> DuplexResult:
+    def calc_homodimer(self, seq: str, *, temp_celsius: float = 65.0, **kwargs: Any) -> DuplexResult:
         cache_key = ("homo", seq, temp_celsius, tuple(sorted((k, tuple(v) if isinstance(v, (list, tuple)) else v) for k, v in kwargs.items())))
         if cache_key in self._cache:
             return self._cache[cache_key]
@@ -237,7 +237,7 @@ class ViennaSaltShiftBackend(DuplexEnergyBackend):
         self._cache[cache_key] = shifted
         return shifted
         
-    def calc_hairpin(self, seq: str, *, temp_celsius: float = 65.0, **kwargs) -> DuplexResult:
+    def calc_hairpin(self, seq: str, *, temp_celsius: float = 65.0, **kwargs: Any) -> DuplexResult:
         cache_key = ("hairpin", seq, temp_celsius, tuple(sorted((k, tuple(v) if isinstance(v, (list, tuple)) else v) for k, v in kwargs.items())))
         if cache_key in self._cache:
             return self._cache[cache_key]
@@ -251,5 +251,5 @@ class ViennaSaltShiftBackend(DuplexEnergyBackend):
         self._cache[cache_key] = shifted
         return shifted
         
-    def calc_duplex(self, seq1: str, seq2: str, *, temp_celsius: float = 65.0, **kwargs) -> DuplexResult:
+    def calc_duplex(self, seq1: str, seq2: str, *, temp_celsius: float = 65.0, **kwargs: Any) -> DuplexResult:
         return self.calc_heterodimer(seq1, seq2, temp_celsius=temp_celsius, **kwargs)

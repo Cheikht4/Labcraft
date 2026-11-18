@@ -26,7 +26,7 @@ def generate_verdict(
     fractions: Dict[str, PrimerFractions], 
     target_occupations: Dict[str, Dict[str, float]],
     risks: List[RiskItem],
-    loop_primer_parents: set[str] = None,
+    loop_primer_parents: Optional[set[str]] = None,
     primer_to_panel: Optional[Dict[str, str]] = None,
     primer_to_target: Optional[Dict[str, str]] = None,
     unfolding_penalties: Optional[Dict[str, Any]] = None,

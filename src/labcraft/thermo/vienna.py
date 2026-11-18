@@ -6,7 +6,7 @@ Utiliser dna_params() / rna_params() / dna_session().
 """
 import contextlib
 import threading
-from typing import Optional
+from typing import Iterator, Optional
 
 try:
     import RNA
@@ -25,7 +25,7 @@ def _get_depth() -> int:
     """Retourne la profondeur d'imbrication courante du thread / Current thread nesting depth."""
     if not hasattr(_vienna_local, "depth"):
         _vienna_local.depth = 0
-    return _vienna_local.depth
+    return int(_vienna_local.depth)
 
 
 def _inc_depth() -> None:
@@ -52,7 +52,7 @@ def _ensure_vienna() -> None:
 
 
 @contextlib.contextmanager
-def dna_params(temp_celsius: float = 65.0, mon_molar: float | None = None):
+def dna_params(temp_celsius: float = 65.0, mon_molar: float | None = None) -> Iterator[None]:
     """Context manager pour charger les paramètres ADN et l'environnement.
     Context manager loading DNA parameters and reaction environment.
 
@@ -115,7 +115,7 @@ def dna_params(temp_celsius: float = 65.0, mon_molar: float | None = None):
 
 
 @contextlib.contextmanager
-def rna_params(temp_celsius: float = 37.0, mon_molar: float | None = None):
+def rna_params(temp_celsius: float = 37.0, mon_molar: float | None = None) -> Iterator[None]:
     """Context manager pour charger les paramètres ARN par défaut.
     Context manager loading default RNA parameters.
     """
@@ -170,7 +170,7 @@ def rna_params(temp_celsius: float = 37.0, mon_molar: float | None = None):
 
 
 @contextlib.contextmanager
-def dna_session(temp_celsius: float = 65.0, mon_molar: float | None = None):
+def dna_session(temp_celsius: float = 65.0, mon_molar: float | None = None) -> Iterator[None]:
     """Ouvre une session ADN unique si ViennaRNA est présent (no-op sinon).
     Opens a single-load DNA parameter session when ViennaRNA is available (no-op otherwise).
     """

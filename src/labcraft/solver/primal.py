@@ -81,15 +81,15 @@ def solve_primal(
 
     def obj_jac(y: np.ndarray) -> np.ndarray:
         y_safe = np.maximum(y, y_min)
-        return (dg_rt + ln_scale + np.log(y_safe)).astype(np.float64)
+        return np.asarray(dg_rt + ln_scale + np.log(y_safe), dtype=np.float64)
 
     # --- Constraints: A^T · y = x_total / scale ---
     # --- Contraintes : A^T · y = x_total / scale ---
     def mass_eq(y: np.ndarray) -> np.ndarray:
-        return a_mat.T @ y - xtot_scaled
+        return np.asarray(a_mat.T @ y - xtot_scaled, dtype=np.float64)
 
     def mass_jac(y: np.ndarray) -> np.ndarray:
-        return a_mat.T
+        return np.asarray(a_mat.T, dtype=np.float64)
 
     mass_constraint = {'type': 'eq', 'fun': mass_eq, 'jac': mass_jac}
     positivity_bounds = [(y_min, None) for _ in range(n_c)]

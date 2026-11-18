@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -50,6 +51,7 @@ class DuplexEnergyBackend(ABC):
         na_mm: float = 50.0, mg_mm: float = 0.0,
         k_mm: float = 0.0, tris_mm: float = 0.0, dntp_mm: float = 0.0,
         ct_molar: float | None = None,
+        **kwargs: Any,
     ) -> DuplexResult:
         """Compute heterodimer thermodynamics / Calcul thermodynamique d'un hétérodimère."""
         ...
@@ -60,6 +62,7 @@ class DuplexEnergyBackend(ABC):
         na_mm: float = 50.0, mg_mm: float = 0.0,
         k_mm: float = 0.0, tris_mm: float = 0.0, dntp_mm: float = 0.0,
         ct_molar: float | None = None,
+        **kwargs: Any,
     ) -> DuplexResult:
         """Compute homodimer thermodynamics / Calcul thermodynamique d'un homodimère."""
         ...
@@ -70,6 +73,7 @@ class DuplexEnergyBackend(ABC):
         na_mm: float = 50.0, mg_mm: float = 0.0,
         k_mm: float = 0.0, tris_mm: float = 0.0, dntp_mm: float = 0.0,
         ct_molar: float | None = None,
+        **kwargs: Any,
     ) -> DuplexResult:
         """Compute hairpin thermodynamics / Calcul thermodynamique d'une épingle à cheveux."""
         ...
@@ -80,6 +84,7 @@ class DuplexEnergyBackend(ABC):
         na_mm: float = 50.0, mg_mm: float = 0.0,
         k_mm: float = 0.0, tris_mm: float = 0.0, dntp_mm: float = 0.0,
         ct_molar: float | None = None,
+        **kwargs: Any,
     ) -> DuplexResult:
         """Compute perfect-match duplex thermodynamics.
         

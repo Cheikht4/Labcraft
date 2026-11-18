@@ -6,10 +6,11 @@ from __future__ import annotations
 
 import warnings
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from enum import Enum
 
 from labcraft.lamp.domains import PhysicalPrimer, PrimerRole, IUPAC_MATCHABLE
+from labcraft.thermo.backends.base import DuplexEnergyBackend
 from labcraft.thermo.backends.vienna_salt import ViennaSaltShiftBackend
 from labcraft.thermo.mismatch import calculate_hybridization_dg, three_prime_extensible
 from labcraft.thermo.vienna import dna_session
@@ -83,7 +84,7 @@ class CoverageAnalyzer:
         self,
         primers: List[PhysicalPrimer],
         fasta_dict: Dict[str, str],
-        backend: ViennaSaltShiftBackend,
+        backend: DuplexEnergyBackend,
         enzyme: PolymeraseProfile,
         temp_celsius: float = 65.0,
         ddg_max: float = 3.0,
@@ -121,7 +122,7 @@ class CoverageAnalyzer:
         self.tris_mm = tris_mm
         self.mg_mm = mg_mm
         self.dntp_mm = dntp_mm
-        self.backend_kwargs = {
+        self.backend_kwargs: Dict[str, Any] = {
             "na_mm": na_mm,
             "k_mm": k_mm,
             "tris_mm": tris_mm,
@@ -267,14 +268,14 @@ class CoverageAnalyzer:
             strand=strand
         )
 
-    def analyze_strains(self, csv_records: List[Dict]) -> List[StrainVerdict]:
+    def analyze_strains(self, csv_records: List[Dict[str, Any]]) -> List[StrainVerdict]:
         """Analyse l'ensemble des souches dans une session ADN unique.
         Analyzes all strains within a single DNA parameter session.
         """
         with dna_session(temp_celsius=self.temp_celsius):
             return self._analyze_strains_impl(csv_records)
 
-    def _analyze_strains_impl(self, csv_records: List[Dict]) -> List[StrainVerdict]:
+    def _analyze_strains_impl(self, csv_records: List[Dict[str, Any]]) -> List[StrainVerdict]:
         if not csv_records:
             return []
 
@@ -299,7 +300,7 @@ class CoverageAnalyzer:
 
         # Regrouper les enregistrements par souche
         # Group records by strain
-        records_by_strain: Dict[str, List[Dict]] = {}
+        records_by_strain: Dict[str, List[Dict[str, Any]]] = {}
         for r in csv_records:
             s_id = r["strain_id"]
             if s_id not in records_by_strain:

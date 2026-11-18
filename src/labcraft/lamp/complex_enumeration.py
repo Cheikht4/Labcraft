@@ -33,11 +33,11 @@ class ComplexInfo:
 def enumerate_complexes(
     primers: List[PhysicalPrimer],
     target_seq: Optional[Union[str, Dict[str, str]]] = None,
-    backend: DuplexEnergyBackend = None,
+    backend: Optional[DuplexEnergyBackend] = None,
     profile: Union[ConcentrationProfile, Dict[str, ConcentrationProfile]] = LAMP_DEFAULT_PROFILE,
     temp_celsius: float = 65.0,
     mon_molar: float | None = None,
-    buffer: dict | None = None,
+    buffer: dict[str, Any] | None = None,
     unfolding_window: int = 150,
     enzyme: Optional[PolymeraseProfile] = None,
     max_errors: int = 2,
@@ -69,11 +69,11 @@ def enumerate_complexes(
 def _enumerate_complexes_impl(
     primers: List[PhysicalPrimer],
     target_seq: Optional[Union[str, Dict[str, str]]] = None,
-    backend: DuplexEnergyBackend = None,
+    backend: Optional[DuplexEnergyBackend] = None,
     profile: Union[ConcentrationProfile, Dict[str, ConcentrationProfile]] = LAMP_DEFAULT_PROFILE,
     temp_celsius: float = 65.0,
     mon_molar: float | None = None,
-    buffer: dict | None = None,
+    buffer: dict[str, Any] | None = None,
     unfolding_window: int = 150,
     enzyme: Optional[PolymeraseProfile] = None,
     max_errors: int = 2,
@@ -93,6 +93,9 @@ def _enumerate_complexes_impl(
     """
     if enzyme is None:
         enzyme = get_enzyme("Bst2.0")
+    if backend is None:
+        from labcraft.thermo.backends.vienna import ViennaRNABackend
+        backend = ViennaRNABackend()
 
     backend_kwargs = {}
     if buffer:
@@ -196,7 +199,7 @@ def _enumerate_complexes_impl(
 
             # Évaluer chaque locus candidat pour retenir le meilleur site (extensible prioritaire, dG le plus favorable)
             # Evaluate each candidate locus to select the best site (extensible first, most favorable dG)
-            best_locus_eval = None
+            best_locus_eval: Optional[Dict[str, Any]] = None
             best_locus_key = None
 
             for (s0, e0, strand) in sorted(candidate_loci_set):

@@ -1,4 +1,6 @@
 """Folding energy cache / Cache des énergies de repliement."""
+from typing import Any
+
 
 class UnfoldingCache:
     """Cache simple pour éviter de recalculer pf() sur les mêmes fenêtres.
@@ -8,13 +10,13 @@ class UnfoldingCache:
     """
     
     def __init__(self, max_size: int = 10000):
-        self.cache: dict[tuple, float] = {}
+        self.cache: dict[tuple[Any, ...], float] = {}
         self.max_size = max_size
         
-    def get(self, key: tuple) -> float | None:
+    def get(self, key: tuple[Any, ...]) -> float | None:
         return self.cache.get(key)
         
-    def put(self, key: tuple, value: float) -> None:
+    def put(self, key: tuple[Any, ...], value: float) -> None:
         if len(self.cache) >= self.max_size:
             # Nettoyage arbitraire brutal si débordement (pour ne pas plomber la RAM)
             self.cache.clear()

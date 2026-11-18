@@ -1,6 +1,6 @@
 import csv
 from pathlib import Path
-from typing import Tuple, List
+from typing import Dict, Tuple, List
 
 def parse_lna_sequence(seq: str) -> Tuple[str, List[int]]:
     """
@@ -35,11 +35,11 @@ def parse_lna_sequence(seq: str) -> Tuple[str, List[int]]:
             
     return "".join(bare_seq), lna_positions
 
-_LNA_PARAMS_MXL = {}
-_LNA_PARAMS_XLN = {}
+_LNA_PARAMS_MXL: Dict[Tuple[str, str], Tuple[float, float]] = {}
+_LNA_PARAMS_XLN: Dict[Tuple[str, str], Tuple[float, float]] = {}
 _LNA_LOADED = False
 
-def load_lna_params():
+def load_lna_params() -> None:
     global _LNA_LOADED
     if _LNA_LOADED:
         return

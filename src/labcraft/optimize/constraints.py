@@ -2,11 +2,12 @@
 
 Filtres et contraintes pour l'optimisation des séquences.
 """
-from typing import List, Dict, Tuple, Any
+from typing import List, Dict, Tuple, Any, Optional
 import RNA
 
 from labcraft.diagnostics.amplifiable_dimer import is_amplifiable_dimer
 from labcraft.diagnostics.enzyme import PolymeraseProfile
+from labcraft.thermo.backends.base import DuplexEnergyBackend
 from labcraft.thermo.backends.native import _NN_PARAMS, _SEQ_TO_NN_KEY
 
 def calc_intrinsic_3p_dg(seq: str, window_3p: int = 6, temp_celsius: float = 63.0) -> float:
@@ -39,20 +40,45 @@ def _check_pair_both_orders(
     seq_2: str,
     enzyme: PolymeraseProfile,
     temp_celsius: float,
+    backend: Optional[DuplexEnergyBackend] = None,
+    **backend_kwargs: Any,
 ) -> Tuple[bool, float]:
     """Évalue une paire d'amorces dans les deux ordres de concaténation (1&2 et 2&1).
     Evaluates a primer pair in both concatenation orders (1&2 and 2&1).
     """
-    struct_ab, mfe_ab = RNA.cofold(f"{seq_1}&{seq_2}")
+    salt_kwargs = {
+        "na_mm": backend_kwargs.get("na_mm"),
+        "k_mm": backend_kwargs.get("k_mm", 0.0),
+        "tris_mm": backend_kwargs.get("tris_mm", 0.0),
+        "mg_mm": backend_kwargs.get("mg_mm", 0.0),
+        "dntp_mm": backend_kwargs.get("dntp_mm", 0.0),
+    }
+
+    if backend is not None and seq_1 == seq_2:
+        res_aa = backend.calc_homodimer(seq_1, temp_celsius=temp_celsius, **backend_kwargs)
+        struct_ab, mfe_ab = res_aa.structure, res_aa.dg_kcal
+    elif backend is not None:
+        res_ab = backend.calc_duplex(seq_1, seq_2, temp_celsius=temp_celsius, **backend_kwargs)
+        struct_ab, mfe_ab = res_ab.structure, res_ab.dg_kcal
+    else:
+        struct_ab, mfe_ab = RNA.cofold(f"{seq_1}&{seq_2}")
+
     is_amp_ab, dg_ab, _, _ = is_amplifiable_dimer(
-        seq_1, seq_2, struct_ab.replace('&', ''), mfe_ab, enzyme, temp_celsius=temp_celsius
+        seq_1, seq_2, struct_ab.replace('&', ''), mfe_ab, enzyme,
+        temp_celsius=temp_celsius, **salt_kwargs,
     )
     if seq_1 == seq_2:
         return is_amp_ab, dg_ab
 
-    struct_ba, mfe_ba = RNA.cofold(f"{seq_2}&{seq_1}")
+    if backend is not None:
+        res_ba = backend.calc_duplex(seq_2, seq_1, temp_celsius=temp_celsius, **backend_kwargs)
+        struct_ba, mfe_ba = res_ba.structure, res_ba.dg_kcal
+    else:
+        struct_ba, mfe_ba = RNA.cofold(f"{seq_2}&{seq_1}")
+
     is_amp_ba, dg_ba, _, _ = is_amplifiable_dimer(
-        seq_2, seq_1, struct_ba.replace('&', ''), mfe_ba, enzyme, temp_celsius=temp_celsius
+        seq_2, seq_1, struct_ba.replace('&', ''), mfe_ba, enzyme,
+        temp_celsius=temp_celsius, **salt_kwargs,
     )
     is_amp = is_amp_ab or is_amp_ba
     if is_amp_ab and is_amp_ba:
@@ -71,28 +97,34 @@ def evaluate_variant_dimers(
     original_primers: List[Dict[str, Any]],
     modified_idx: int,
     enzyme: PolymeraseProfile,
-    temp_celsius: float
+    temp_celsius: float,
+    backend: Optional[DuplexEnergyBackend] = None,
+    **backend_kwargs: Any,
 ) -> List[Tuple[int, float]]:
     """
     Évalue tous les dimères impliquant le variant (hétérodimères et homodimère).
+    Evaluates all dimers involving the variant (heterodimers and homodimer).
     
     Args:
-        variant_seq: La séquence mutée.
-        original_primers: Liste des amorces du panel (dict avec 'sequence').
-        modified_idx: Index de l'amorce modifiée dans original_primers.
-        enzyme: Profil de polymérase.
-        temp_celsius: Température d'évaluation.
+        variant_seq: La séquence mutée / Mutated sequence.
+        original_primers: Liste des amorces du panel (dict avec 'sequence') / Panel primers list.
+        modified_idx: Index de l'amorce modifiée dans original_primers / Modified primer index.
+        enzyme: Profil de polymérase / Polymerase profile.
+        temp_celsius: Température d'évaluation / Evaluation temperature.
+        backend: Backend thermodynamique optionnel (avec sel) / Optional salt-aware backend.
         
     Returns:
         Liste de (partner_idx, dg_3p) pour chaque dimère amplifiable trouvé.
     """
-    amplifiable = []
+    amplifiable: List[Tuple[int, float]] = []
     
-    # Doit être exécuté dans un contexte dna_params(temp_celsius)
-    # Must be executed inside a dna_params(temp_celsius) context
+    # Doit être exécuté dans un contexte dna_session / dna_params(temp_celsius)
+    # Must be executed inside a dna_session / dna_params(temp_celsius) context
     for j, p in enumerate(original_primers):
         seq_partner = variant_seq if j == modified_idx else p['sequence']
-        is_amp, min_dg_3p = _check_pair_both_orders(variant_seq, seq_partner, enzyme, temp_celsius)
+        is_amp, min_dg_3p = _check_pair_both_orders(
+            variant_seq, seq_partner, enzyme, temp_celsius, backend=backend, **backend_kwargs
+        )
         if is_amp:
             amplifiable.append((j, min_dg_3p))
             
@@ -103,19 +135,22 @@ def filter_no_new_artefacts(
     original_primers: List[Dict[str, Any]],
     modified_idx: int,
     enzyme: PolymeraseProfile,
-    temp_celsius: float
+    temp_celsius: float,
+    backend: Optional[DuplexEnergyBackend] = None,
+    **backend_kwargs: Any,
 ) -> Tuple[bool, float]:
     """
     Filtre un variant s'il possède un quelconque dimère amplifiable.
-    Retourne (is_valid, worst_dg_3p).
-    Si is_valid est True, worst_dg_3p est le pire dG_3p (le plus petit/négatif)
-    parmi les dimères (non amplifiables) évalués.
+    Filters out a variant if it forms any amplifiable dimer.
+    Retourne / Returns (is_valid, worst_dg_3p).
     """
     worst_dg_3p = 0.0
     
     for j, p in enumerate(original_primers):
         seq_partner = variant_seq if j == modified_idx else p['sequence']
-        is_amp, min_dg_3p = _check_pair_both_orders(variant_seq, seq_partner, enzyme, temp_celsius)
+        is_amp, min_dg_3p = _check_pair_both_orders(
+            variant_seq, seq_partner, enzyme, temp_celsius, backend=backend, **backend_kwargs
+        )
         
         if is_amp:
             return False, min_dg_3p

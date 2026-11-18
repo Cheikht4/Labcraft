@@ -90,3 +90,14 @@ disallow_incomplete_defs = true
 check_untyped_defs = true
 strict = true
 mypy_path = "src"
+
+[[tool.mypy.overrides]]
+module = [
+    "RNA",
+    "scipy",
+    "scipy.*",
+    "mpmath",
+    "regex",
+    "yaml",
+]
+ignore_missing_imports = true

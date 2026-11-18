@@ -20,12 +20,12 @@ def get_dangerous_dimers(
     temp_celsius: float, 
     backend: Any, 
     enzyme: Any,
-    **backend_kwargs
+    **backend_kwargs: Any
 ) -> set[str]:
-    dangerous = set()
+    dangerous: set[str] = set()
     primer_map = {p.name: p for p in primers}
     
-    pair_cache = {}
+    pair_cache: Dict[Tuple[str, ...], bool] = {}
     
     for c_idx, c_name in enumerate(complex_names):
         row = prob_template.stoichiometry[c_idx]
@@ -81,7 +81,7 @@ def optimize_concentrations(
     max_occ_drop_ratio: float = 0.20,
     min_tradeoff_factor: float = 2.0,
     min_dimer_reduction_ratio: float = 0.20,
-    **backend_kwargs
+    **backend_kwargs: Any
 ) -> Union[Dict[str, Any], List[Any]]:
     """Optimise les concentrations d'amorces dans une session ADN unique.
     Optimizes primer concentrations within a single DNA parameter session.
@@ -126,7 +126,7 @@ def _optimize_concentrations_impl(
     max_occ_drop_ratio: float = 0.20,
     min_tradeoff_factor: float = 2.0, # Gain relatif en dimères doit être >= N * Perte relative max en occupation
     min_dimer_reduction_ratio: float = 0.20, # Doit réduire les dimères d'au moins 20%
-    **backend_kwargs
+    **backend_kwargs: Any
 ) -> Union[Dict[str, Any], List[Any]]:
     
     # Identifier les dimères dangereux
@@ -185,7 +185,7 @@ def _optimize_concentrations_impl(
     panels = set(primer_to_panel.values())
     occ_floor_ref: Dict[str, float] = {}
     
-    def evaluate(c_candidats: np.ndarray) -> Tuple[float, dict]:
+    def evaluate(c_candidats: np.ndarray) -> Tuple[float, Dict[str, Any]]:
         prob = dataclasses.replace(prob_template, total_concentrations=c_candidats)
         try:
             res = solve_dual(prob)
@@ -194,7 +194,7 @@ def _optimize_concentrations_impl(
             
         score = 0.0
         
-        # 1. Dimères dangereux (normalisé)
+        # 1. Dimères dangereux (normalisé) / Normalized dangerous dimers
         total_primer_conc = np.sum(prob_template.total_concentrations)
         dang_frac = float(np.sum(res.concentrations[dangerous_indices]))
         normalized_dang = dang_frac / total_primer_conc if total_primer_conc > 0 else 0.0
@@ -202,9 +202,9 @@ def _optimize_concentrations_impl(
         
         # 2. Plancher d'amorçage (évalué par amorce parente / locus)
         # 2. Initiation floor (evaluated per parent primer / locus)
-        initiations = {}
-        target_occs_for_balance = {panel: {} for panel in panels}
-        free_fracs_for_balance = {}
+        initiations: Dict[str, float] = {}
+        target_occs_for_balance: Dict[str, Dict[str, float]] = {panel: {} for panel in panels}
+        free_fracs_for_balance: Dict[str, float] = {}
         
         floor_penalty = 0.0
         reg_penalty = 0.0

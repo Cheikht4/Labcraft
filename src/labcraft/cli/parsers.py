@@ -1,6 +1,6 @@
 """Parsers for LabCraft CLI inputs (FASTA, TXT)."""
 import warnings
-from typing import List, Tuple, Dict, Optional
+from typing import Any, List, Tuple, Dict, Optional
 from collections import defaultdict
 
 from labcraft.cli.config import PrimerConfig, PrimerSetConfig, PrimerDomains
@@ -84,17 +84,17 @@ def read_multi_fasta(filepath: str) -> List[Tuple[str, str]]:
     - Standard FASTA: >Header\nSequence
     - One-line format: >Header   Sequence
     """
-    records = []
-    seen_headers = set()
+    records: List[Tuple[str, str]] = []
+    seen_headers: set[str] = set()
     
     with open(filepath, 'r', encoding="utf-8") as f:
         lines = f.read().splitlines()
         
-    current_header = None
+    current_header: Optional[str] = None
     current_seq_parts: List[str] = []
     pending_header_rest: Optional[str] = None
     
-    def save_current():
+    def save_current() -> None:
         if current_header is not None:
             if current_header in seen_headers:
                 raise ParseError(f"Duplicate header found in {filepath}: '{current_header}'")
@@ -357,9 +357,9 @@ def parse_primer_file(
     records = read_multi_fasta(filepath)
     
     # Nested dict: PanelName -> Version -> {Role: Sequence}
-    panels = defaultdict(lambda: defaultdict(dict))
-    panel_concs = defaultdict(lambda: defaultdict(dict))
-    panel_raw_names = defaultdict(lambda: defaultdict(dict))
+    panels: Dict[str, Dict[str, Dict[str, str]]] = defaultdict(lambda: defaultdict(dict))
+    panel_concs: Dict[str, Dict[str, Dict[str, float]]] = defaultdict(lambda: defaultdict(dict))
+    panel_raw_names: Dict[str, Dict[str, Dict[str, str]]] = defaultdict(lambda: defaultdict(dict))
     
     for header, seq in records:
         name, header_conc = _parse_header_conc(header)
@@ -483,7 +483,7 @@ def build_config_from_cli(
     allow_unmatched_targets: bool = False
 ) -> PanelConfig:
     # 1. Load base config from YAML if provided
-    base_data = {}
+    base_data: Dict[str, Any] = {}
     if config_path:
         with open(config_path, "r", encoding="utf-8") as f:
             base_data = yaml.safe_load(f) or {}

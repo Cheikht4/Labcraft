@@ -48,7 +48,7 @@ def simulate_titration(
     dummy_profile = ConcentrationProfile(target=0, fip_bip=1e-6, f3_b3=1e-6, lf_lb=1e-6)
     
     prob_template, _, complexes, _ = enumerate_complexes(
-        primers, "", backend, profile=dummy_profile, temp_celsius=temp_celsius
+        list(primers), "", backend, profile=dummy_profile, temp_celsius=temp_celsius
     )
     
     n_primers = len(primers)

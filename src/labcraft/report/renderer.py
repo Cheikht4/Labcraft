@@ -1,7 +1,7 @@
 import jinja2
 import os
 from typing import Any, Dict, List
-from labcraft.metrics.verdict import PanelVerdict
+from labcraft.metrics.verdict import PanelVerdict, PrimerIssue
 from labcraft.metrics.fractions import PrimerFractions
 from labcraft.metrics.risk import RiskItem
 
@@ -9,7 +9,7 @@ def render_report(
     verdict: PanelVerdict,
     fractions: Dict[str, PrimerFractions],
     risks: List[RiskItem],
-    metadata: dict
+    metadata: Dict[str, Any]
 ) -> str:
     """
     Rend le rapport HTML à partir du template Jinja2.
@@ -23,14 +23,14 @@ def render_report(
     )
     
     # On ajoute un filtre pour formatter les pourcentages
-    def format_pct(value):
+    def format_pct(value: float) -> str:
         return f"{value * 100:.1f}%"
     env.filters['pct'] = format_pct
     
     template = env.get_template("report.html.j2")
     
     # Groupement des issues par cible
-    issues_by_target = {}
+    issues_by_target: Dict[str, List[PrimerIssue]] = {}
     for issue in verdict.issues:
         if issue.target_site not in issues_by_target:
             issues_by_target[issue.target_site] = []

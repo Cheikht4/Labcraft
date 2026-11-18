@@ -16,8 +16,8 @@ class RiskItem:
     delta_g: float = 0.0
     delta_g_3p: float = 0.0
     alignment_ascii: str = ""
-    alignment_columns: list = field(default_factory=list)
-    arrow_metrics: dict = field(default_factory=dict)
+    alignment_columns: List[Dict[str, Any]] = field(default_factory=list)
+    arrow_metrics: Dict[str, Any] = field(default_factory=dict)
     is_blocked_veto: bool = False
     parent_a: str = ""
     parent_b: str = ""
@@ -35,7 +35,7 @@ def evaluate_risks(
     concentrations: List[float], 
     amplifiable_flags: List[bool],
     is_warm_start: bool = False,
-    dimer_details: Optional[List[dict]] = None
+    dimer_details: Optional[List[Dict[str, Any]]] = None
 ) -> List[RiskItem]:
     """
     Évalue le risque d'artefacts basé sur la concentration et l'extensibilité.
@@ -150,7 +150,7 @@ def summarize_amplifiable_dimers(
         elif pan_a:
             intra_by_panel_nm[pan_a] = intra_by_panel_nm.get(pan_a, 0.0) + c_nm
 
-        key = tuple(sorted((pa, pb)))
+        key: Tuple[str, str] = (pa, pb) if pa <= pb else (pb, pa)
         if key not in fam_buckets:
             label = pa if not pb else f"{pa} × {pb}"
             fam_buckets[key] = {

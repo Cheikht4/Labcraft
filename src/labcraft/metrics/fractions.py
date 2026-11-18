@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Dict, List
+from typing import Dict, List, Optional, Tuple
 import numpy as np
 
 @dataclass
@@ -29,7 +29,7 @@ def compute_fractions(
     free_concentrations: np.ndarray,
     delta_g: np.ndarray,
     temp_celsius: float,
-    primer_to_panel: Dict[str, str] = None
+    primer_to_panel: Optional[Dict[str, str]] = None
 ) -> Dict[str, PrimerFractions]:
     """
     Calcule la décomposition en pourcentages de chaque amorce.
@@ -51,9 +51,9 @@ def compute_fractions(
     fractions = {}
     
     # Dictionnaires pour accumuler les contributions absolues par parent
-    parent_totals = {}
-    parent_contributions = {}
-    parent_dominant = {}
+    parent_totals: Dict[str, float] = {}
+    parent_contributions: Dict[str, Dict[str, float]] = {}
+    parent_dominant: Dict[str, List[Tuple[str, float]]] = {}
     
     # 1. Obtenir le nom parent
     def get_parent(name: str) -> str:

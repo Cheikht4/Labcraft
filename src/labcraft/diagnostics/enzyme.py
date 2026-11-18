@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Any, Dict, Union
 
 @dataclass
 class PolymeraseProfile:
@@ -99,7 +100,7 @@ def normalize_enzyme_name(name: str) -> str:
     # Retire les espaces, tirets et majuscules
     return name.lower().replace(" ", "").replace("-", "")
 
-def get_enzyme(spec) -> PolymeraseProfile:
+def get_enzyme(spec: Union[str, Dict[str, Any]]) -> PolymeraseProfile:
     """
     Récupère un profil de polymérase depuis une chaîne ou un dictionnaire.
     Permet de surcharger certains paramètres (dimer_dg_threshold, three_prime_window).

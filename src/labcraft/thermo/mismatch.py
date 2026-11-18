@@ -10,8 +10,9 @@ terminal, and consecutive symmetric internal loops) and 3' extensibility heurist
 import csv
 import math
 import os
-from typing import Tuple, Optional, Dict
+from typing import Any, Tuple, Optional, Dict
 from labcraft.diagnostics.enzyme import PolymeraseProfile
+from labcraft.thermo.backends.base import DuplexEnergyBackend
 from labcraft.thermo.backends.native import _NN_PARAMS, _SEQ_TO_NN_KEY, _INIT_AT, _INIT_GC
 from labcraft.thermo.constants import R_GAS_KCAL_MOL_K
 
@@ -32,7 +33,7 @@ _INTERNAL_LOOP_DG37_KCAL: Dict[int, float] = {
 _T37_KELVIN = 310.15
 _JACOBSON_STOCKMAYER_EXP = 1.75
 
-def _load_tables():
+def _load_tables() -> None:
     data_dir = os.path.join(os.path.dirname(__file__), "..", "data", "thermo")
     
     int_file = os.path.join(data_dir, "mismatch_nn_internal.csv")
@@ -309,7 +310,7 @@ def evaluate_primer_target_binding(
     max_mismatches: int, 
     dg_cutoff: float,
     temp_celsius: float = 65.0
-) -> dict:
+) -> Dict[str, Any]:
     """Évalue la liaison d'une amorce avec tolérance aux mésappariements."""
     # Le "bottom_under_top" est le brin cible inversé de gauche à droite.
     # The "bottom_under_top" is the target strand reversed from left to right.
@@ -344,9 +345,9 @@ def calculate_hybridization_dg(
     primer_seq: str,
     bottom_under_top: str,
     temp_celsius: float,
-    backend,
-    bd_lna=(),
-    **backend_kwargs
+    backend: DuplexEnergyBackend,
+    bd_lna: tuple[int, ...] = (),
+    **backend_kwargs: Any
 ) -> tuple[float, float]:
     """
     Calcule le dG d'hybridation en utilisant le backend par défaut pour un
@@ -365,7 +366,7 @@ def calculate_hybridization_dg(
     comp = {'A': 'T', 'T': 'A', 'C': 'G', 'G': 'C'}
     n_mismatches = sum(1 for a, b in zip(primer_seq, bottom_under_top, strict=True) if comp.get(a, '') != b)
 
-    def _revcomp(s):
+    def _revcomp(s: str) -> str:
         return "".join(comp.get(c, 'N') for c in reversed(s))
 
     if n_mismatches == 0:

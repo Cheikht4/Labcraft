@@ -112,7 +112,7 @@ def build_engine_from_config(
     config: PanelConfig, 
     targets: Dict[str, str],
     max_variants: int = 64
-) -> Tuple[List[PhysicalPrimer], Dict[str, str], DuplexEnergyBackend, Dict[str, Any], float, PolymeraseProfile, float, Dict[str, ConcentrationProfile]]:
+) -> Tuple[List[PhysicalPrimer], Dict[str, str], DuplexEnergyBackend, Dict[str, Any], Optional[float], PolymeraseProfile, float, Dict[str, ConcentrationProfile]]:
     """Construit les structures internes à partir d'une configuration.
     Builds internal engine components from a configuration.
     
@@ -130,7 +130,9 @@ def build_engine_from_config(
     
     # 1. Tampon Salin / Salt Buffer
     buffer_conf = config.experiment.buffer
-    backend_kwargs = {}
+    backend: DuplexEnergyBackend
+    backend_kwargs: Dict[str, Any] = {}
+    mon_molar: Optional[float]
     if buffer_conf:
         backend = ViennaSaltShiftBackend(UnifiedSaltModel())
         backend_kwargs = {
@@ -152,9 +154,9 @@ def build_engine_from_config(
     enzyme = get_enzyme(config.experiment.enzyme)
     
     # 3. Amorces et profils de concentration / Primers and concentration profiles
-    primers = []
-    primer_to_target = {}
-    profiles = {}
+    primers: List[PhysicalPrimer] = []
+    primer_to_target: Dict[str, str] = {}
+    profiles: Dict[str, ConcentrationProfile] = {}
     
     # Création du dictionnaire de copies par cible / Target copies dictionary
     target_copies = {t.id: t.copies_per_uL for t in config.targets}
@@ -169,7 +171,7 @@ def build_engine_from_config(
         
         # On garde une trace des concentrations pour le profile de cette cible
         # Track concentrations for this target's profile
-        conc_map = {}
+        conc_map: Dict[PrimerRole, float] = {}
         
         from labcraft.cli.parsers import validate_primer_sequence
         for role_name, p_data in p_dict.items():

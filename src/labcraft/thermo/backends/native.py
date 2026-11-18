@@ -8,7 +8,7 @@ from __future__ import annotations
 from labcraft.thermo.constants import R_GAS_KCAL_MOL_K
 
 import math
-from typing import Dict, Tuple
+from typing import Any, Dict, Tuple
 
 from .base import DuplexEnergyBackend, DuplexResult
 
@@ -168,7 +168,7 @@ class NativeBackend(DuplexEnergyBackend):
         na_mm: float = 50.0, mg_mm: float = 0.0,
         k_mm: float = 0.0, tris_mm: float = 0.0, dntp_mm: float = 0.0,
         ct_molar: float | None = None,
-        **kwargs
+        **kwargs: Any
     ) -> DuplexResult:
         """Compute heterodimer thermodynamics (must be perfect match)."""
         lna_positions = kwargs.get('lna_positions', ())
@@ -189,7 +189,8 @@ class NativeBackend(DuplexEnergyBackend):
         na_mm: float = 50.0, mg_mm: float = 0.0,
         k_mm: float = 0.0, tris_mm: float = 0.0, dntp_mm: float = 0.0,
         ct_molar: float | None = None,
-        lna_positions: tuple[int, ...] = ()
+        lna_positions: tuple[int, ...] = (),
+        **kwargs: Any,
     ) -> DuplexResult:
         """Compute homodimer thermodynamics (must be self-complementary)."""
         if not _is_self_complementary(seq):
@@ -202,6 +203,7 @@ class NativeBackend(DuplexEnergyBackend):
         na_mm: float = 50.0, mg_mm: float = 0.0,
         k_mm: float = 0.0, tris_mm: float = 0.0, dntp_mm: float = 0.0,
         ct_molar: float | None = None,
+        **kwargs: Any,
     ) -> DuplexResult:
         raise NotImplementedError("NativeBackend does not support hairpins.")
 
@@ -210,7 +212,7 @@ class NativeBackend(DuplexEnergyBackend):
         na_mm: float = 50.0, mg_mm: float = 0.0,
         k_mm: float = 0.0, tris_mm: float = 0.0, dntp_mm: float = 0.0,
         ct_molar: float | None = None,
-        **kwargs
+        **kwargs: Any
     ) -> DuplexResult:
         return self.calc_heterodimer(
             seq1, seq2, temp_celsius=temp_celsius, 

@@ -1,5 +1,5 @@
 import math
-from typing import Tuple, Dict, Optional
+from typing import Any, Tuple, Dict, Optional
 from labcraft.diagnostics.enzyme import PolymeraseProfile
 from labcraft.thermo.backends.base import DuplexEnergyBackend
 from labcraft.thermo.salt import sodium_equivalent_for_folding
@@ -34,7 +34,7 @@ def is_amplifiable_dimer(
     tris_mm: float = 0.0,
     mg_mm: float = 0.0,
     dntp_mm: float = 0.0
-) -> Tuple[bool, float, str, bool]:
+) -> Tuple[bool, float, Optional[str], bool]:
     """
     Détermine si un dimère (A + B) est amplifiable.
     Retourne (amplifiable, dg_3p).
@@ -96,7 +96,7 @@ def is_amplifiable_dimer(
             
         # 3. Calcul de l'énergie locale du 3'
         # Parcourt jusqu'à 6 paires contiguës depuis le 3' end
-        paired_indices = []
+        paired_indices: list[int] = []
         c_idx = idx_3p
         c_partner = partner_idx
         
@@ -252,8 +252,8 @@ def evaluate_pair_amplifiable(
     backend: DuplexEnergyBackend, 
     enzyme: PolymeraseProfile, 
     temp_celsius: float,
-    **backend_kwargs
-) -> Tuple[bool, float, Dict]:
+    **backend_kwargs: Any
+) -> Tuple[bool, float, Dict[str, Any]]:
     """Évalue un couple d'amorces dans les deux ordres de concaténation et
     renvoie le verdict combiné. Un dimère est amplifiable si l'un OU l'autre
     ordre révèle un 3' extensible.

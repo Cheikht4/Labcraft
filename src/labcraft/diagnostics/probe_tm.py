@@ -6,7 +6,7 @@ def check_probes_tm(
     primers: List[PhysicalPrimer],
     backend: DuplexEnergyBackend, # Keep signature but we will override it for Tm
     temp_celsius: float,
-    **backend_kwargs
+    **backend_kwargs: Any
 ) -> List[Dict[str, Any]]:
     """
     Calcule le Tm des amorces et sondes, et vérifie la règle de conception TaqMan :

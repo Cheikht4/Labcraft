@@ -9,6 +9,7 @@ from labcraft.thermo.constants import R_GAS_KCAL_MOL_K
 import math
 import warnings
 from abc import ABC, abstractmethod
+from typing import Any
 
 from .backends.base import DuplexEnergyBackend, DuplexResult
 from labcraft.buffer.magnesium import get_free_magnesium
@@ -251,7 +252,7 @@ class SaltCorrectedBackend(DuplexEnergyBackend):
         na_mm: float = 50.0, mg_mm: float = 0.0,
         k_mm: float = 0.0, tris_mm: float = 0.0, dntp_mm: float = 0.0,
         ct_molar: float | None = None,
-        **kwargs
+        **kwargs: Any
     ) -> DuplexResult:
         res_1m = self._backend.calc_heterodimer(
             seq1, seq2, temp_celsius=temp_celsius, 
@@ -268,7 +269,7 @@ class SaltCorrectedBackend(DuplexEnergyBackend):
         na_mm: float = 50.0, mg_mm: float = 0.0,
         k_mm: float = 0.0, tris_mm: float = 0.0, dntp_mm: float = 0.0,
         ct_molar: float | None = None,
-        **kwargs
+        **kwargs: Any
     ) -> DuplexResult:
         res_1m = self._backend.calc_homodimer(
             seq, temp_celsius=temp_celsius,
@@ -285,7 +286,7 @@ class SaltCorrectedBackend(DuplexEnergyBackend):
         na_mm: float = 50.0, mg_mm: float = 0.0,
         k_mm: float = 0.0, tris_mm: float = 0.0, dntp_mm: float = 0.0,
         ct_molar: float | None = None,
-        **kwargs
+        **kwargs: Any
     ) -> DuplexResult:
         res_1m = self._backend.calc_hairpin(
             seq, temp_celsius=temp_celsius,
@@ -302,7 +303,7 @@ class SaltCorrectedBackend(DuplexEnergyBackend):
         na_mm: float = 50.0, mg_mm: float = 0.0,
         k_mm: float = 0.0, tris_mm: float = 0.0, dntp_mm: float = 0.0,
         ct_molar: float | None = None,
-        **kwargs
+        **kwargs: Any
     ) -> DuplexResult:
         return self.calc_heterodimer(
             seq1, seq2, temp_celsius=temp_celsius,
@@ -338,4 +339,4 @@ def sodium_equivalent_for_folding(
         else:
             hi = mid
             
-    return (lo * hi) ** 0.5
+    return float((lo * hi) ** 0.5)

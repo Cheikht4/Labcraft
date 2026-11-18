@@ -82,9 +82,9 @@ def dotbracket_to_alignment(seq_a: str, seq_b: str, struct: str) -> str:
     # On trim les espaces à droite pour la propreté
     return f"5' {out_a} 3'\n   {out_lines}\n3' {out_b} 5'"
 
-from typing import List, Dict, Optional
+from typing import Any, List, Dict, Optional
 
-def get_alignment_columns(seq_a: str, seq_b: str, struct: str, extensible_strand: Optional[str] = None) -> List[Dict]:
+def get_alignment_columns(seq_a: str, seq_b: str, struct: str, extensible_strand: Optional[str] = None) -> List[Dict[str, Any]]:
     """
     Construit une liste de colonnes pour le rendu graphique de l'alignement.
     Si extensible_strand ('a' ou 'b') est fourni, annote le 3' extensible et la matrice.
@@ -110,7 +110,7 @@ def get_alignment_columns(seq_a: str, seq_b: str, struct: str, extensible_strand
     
     # 2. Alignement
     while idx_a < l_a or idx_b >= l_a:
-        col = {"top": "-", "bottom": "-", "paired": False, "role": "", "idx_a": None, "idx_b": None, "is_truncation": False}
+        col: Dict[str, Any] = {"top": "-", "bottom": "-", "paired": False, "role": "", "idx_a": None, "idx_b": None, "is_truncation": False}
         if idx_a < l_a and idx_b >= l_a and pairs.get(idx_a) == idx_b:
             col["top"] = seq_a[idx_a]
             col["bottom"] = seq_b[idx_b - l_a]

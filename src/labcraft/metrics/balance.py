@@ -1,15 +1,15 @@
 """Multiplex balance metrics / Métriques d'équilibre et de balance multiplexe.
 """
-from typing import Dict, Tuple, Optional
+from typing import Any, Dict, Tuple, Optional
 import numpy as np
 
 def calculate_multiplex_balance(
     primer_to_panel: Dict[str, str],
     target_occupations: Dict[str, Dict[str, float]],
     free_fractions: Dict[str, float],
-    loop_primer_parents: set[str] = None,
+    loop_primer_parents: Optional[set[str]] = None,
     primer_to_target: Optional[Dict[str, str]] = None
-) -> Tuple[Dict[str, dict], Optional[float]]:
+) -> Tuple[Dict[str, Dict[str, Any]], Optional[float]]:
     """
     Calcule la balance des panels en multiplexe.
     Utilise l'occupation côté SITE des amorces d'INITIATION (F3, B3, FIP, BIP).
@@ -87,7 +87,7 @@ def calculate_multiplex_balance(
             else:
                 mean_occ = float(np.mean(list(initiation_occs.values())))
                 min_occ = float(min(initiation_occs.values()))
-                limiting_primer = min(initiation_occs, key=initiation_occs.get)
+                limiting_primer = min(initiation_occs, key=lambda k: initiation_occs[k])
 
             panel_summaries[panel] = {
                 "mean_occupation": mean_occ,

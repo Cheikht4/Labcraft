@@ -1,7 +1,6 @@
 import typer
 import hashlib
 import time
-import importlib.metadata
 import os
 import sys
 
@@ -16,15 +15,17 @@ if not sys.stdout.isatty() and (
 
 from labcraft import __version__
 from labcraft.lamp.domains import PrimerRole
-from labcraft.lamp.complex_enumeration import enumerate_complexes
-from labcraft.solver.dual import solve_dual
-from labcraft.metrics.fractions import compute_fractions
-from labcraft.diagnostics.amplifiable_dimer import evaluate_pair_amplifiable
-from labcraft.diagnostics.probe_tm import check_probes_tm
-from labcraft.metrics.risk import evaluate_risks, summarize_amplifiable_dimers
-from labcraft.metrics.verdict import generate_verdict
 from labcraft.report.renderer import render_report
-from labcraft.cli.config import build_engine_from_config
+from labcraft.report.json_export import write_analyze_json
+from labcraft.cli.config import PanelConfig, build_engine_from_config
+from labcraft.pipeline.analysis import (
+    EmptyPanelError,
+    TargetFileError,
+    evaluate_dimer_complexes as _evaluate_dimer_complexes,
+    load_targets_from_config,
+    run_single_panel_analysis,
+    split_colliding_panel_configs,
+)
 from labcraft.thermo.vienna import dna_session
 from pydantic import ValidationError
 
@@ -35,7 +36,7 @@ from labcraft.cli.parsers import (
     validate_target_sequence,
     ParseError,
 )
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 app = typer.Typer(help="LabCraft CLI - Thermodynamic multiplex primer panel design engine.")
 
@@ -60,98 +61,9 @@ def main_callback(
     """LabCraft CLI entry point."""
 
 
-def _evaluate_dimer_complexes(
-    prob,
-    res,
-    complexes: List[str],
-    primers,
-    backend,
-    enzyme,
-    temp_celsius: float,
-    backend_kwargs: dict,
-    primer_to_panel_map: Dict[str, str],
-) -> Tuple[List[bool], List[float], List[dict]]:
-    """Évalue chaque complexe dimérique sans cible dans une session ADN unique.
-    Evaluates each target-free dimer complex within a single DNA parameter session.
-    """
-    with dna_session(temp_celsius=temp_celsius):
-        return _evaluate_dimer_complexes_impl(
-            prob, res, complexes, primers, backend, enzyme,
-            temp_celsius, backend_kwargs, primer_to_panel_map,
-        )
+# Ré-exporté pour compatibilité interne / Re-exported for internal compatibility
+__all__ = ["app", "_evaluate_dimer_complexes"]
 
-
-def _evaluate_dimer_complexes_impl(
-    prob,
-    res,
-    complexes: List[str],
-    primers,
-    backend,
-    enzyme,
-    temp_celsius: float,
-    backend_kwargs: dict,
-    primer_to_panel_map: Dict[str, str],
-) -> Tuple[List[bool], List[float], List[dict]]:
-    """Évalue chaque complexe dimérique sans cible pour l'extensibilité 3' et la décomposition.
-    Evaluates each target-free dimer complex for 3' extensibility and panel decomposition.
-    """
-    from labcraft.report.alignment import dotbracket_to_alignment, get_alignment_columns
-
-    amplifiable_flags: List[bool] = []
-    concs: List[float] = []
-    dimer_details: List[dict] = []
-
-    for i, _c_name in enumerate(complexes):
-        conc = res.concentrations[i]
-        concs.append(conc)
-
-        is_amp = False
-        details: dict = {}
-        has_target = any(k >= len(primers) and val > 0 for k, val in enumerate(prob.stoichiometry[i]))
-
-        if not has_target:
-            p_counts = {
-                k: prob.stoichiometry[i][k]
-                for k, val in enumerate(prob.stoichiometry[i])
-                if val > 0 and k < len(primers)
-            }
-            if sum(p_counts.values()) == 2:
-                ks = list(p_counts.keys())
-                p_a = primers[ks[0]]
-                p_b = primers[ks[0]] if len(ks) == 1 else primers[ks[1]]
-                is_amp, _dg_3p, details = evaluate_pair_amplifiable(
-                    p_a, p_b, backend, enzyme, temp_celsius, **backend_kwargs
-                )
-                pa_par = details.get("parent_a") or p_a.name.split("#")[0]
-                pb_par = details.get("parent_b") or p_b.name.split("#")[0]
-                details["panel_a"] = primer_to_panel_map.get(pa_par, primer_to_panel_map.get(p_a.name, ""))
-                details["panel_b"] = primer_to_panel_map.get(pb_par, primer_to_panel_map.get(p_b.name, ""))
-
-                if details and "alignment" not in details:
-                    details["alignment"] = dotbracket_to_alignment(
-                        details["seq_a"], details["seq_b"], details["structure"]
-                    )
-                if details and "alignment_columns" not in details:
-                    cols = get_alignment_columns(
-                        details["seq_a"], details["seq_b"], details["structure"], details.get("extensible_strand")
-                    )
-                    details["alignment_columns"] = cols
-                    three_prime_idx = next((idx for idx, c in enumerate(cols) if c.get("role") == "three_prime"), -1)
-                    template_count = sum(1 for c in cols if c.get("role") == "template")
-                    before_arrow = (
-                        sum(1 for c in cols[:three_prime_idx] if not c.get("is_truncation"))
-                        if three_prime_idx != -1
-                        else 0
-                    )
-                    details["arrow_metrics"] = {
-                        "show": three_prime_idx != -1 and template_count > 0,
-                        "margin_cols": before_arrow,
-                        "width_cols": template_count,
-                    }
-        amplifiable_flags.append(is_amp)
-        dimer_details.append(details)
-
-    return amplifiable_flags, concs, dimer_details
 
 def hash_file(filepath: str) -> str:
     hasher = hashlib.sha256()
@@ -185,7 +97,7 @@ def analyze(
     dimer_conc_max: float = typer.Option(0.23, "--dimer-conc-max", help="Seuil maximal de concentration totale de dimères amplifiables en nM déclenchant FAILURE (provisoire, calibré sur 5 cas de paillasse, marge d'un facteur 2,3)."),
     separate_targets: bool = typer.Option(False, "--separate-targets", "--per-target", help="Solve targets independently instead of joint multi-target equilibrium."),
     force_joint: bool = typer.Option(False, "--force-joint", help="Force joint analysis of multiple panels for the same target.")
-):
+) -> None:
     """
     Analyzes a multiplex primer panel and generates a comprehensive thermodynamic diagnostic report.
     """
@@ -261,10 +173,10 @@ def analyze(
 def _run_analyze_with_config(
     *,
     config: Optional[str],
-    config_obj,
+    config_obj: PanelConfig,
     output: str,
     start_time: float,
-    inputs_fp: dict,
+    inputs_fp: Dict[str, Any],
     file_hash: str,
     max_variants: int,
     errors: int,
@@ -274,423 +186,76 @@ def _run_analyze_with_config(
     separate_targets: bool,
     force_joint: bool,
 ) -> None:
-    # 1. Parse Targets
-    targets_dict = {}
-    target_warnings: List[str] = []
-    for t in config_obj.targets:
-        try:
-            records = read_multi_fasta(t.sequence_file)
-            for h, seq in records:
-                t_id = h.split()[0]
-                # In build_config_from_cli, we might have multiple targets in one file.
-                # If we parsed it via CLI -t, they are all inside config_obj.targets.
-                # We can just match the one we need, or collect them all.
-                if t_id == t.id or not config: # if not config, we just collect them all
-                    if t_id in targets_dict:
-                        continue
-                    clean_seq, w_msg = validate_target_sequence(t_id, seq, warn_dashes=True)
-                    targets_dict[t_id] = clean_seq
-                    if w_msg:
-                        typer.echo(f"Avertissement : {w_msg}")
-                        target_warnings.append(w_msg)
-        except Exception as e:
-            typer.echo(f"Erreur lors de la lecture du fichier cible {t.sequence_file}:\n{e}")
-            raise typer.Exit(code=1) from e
-        
-    if not targets_dict:
-        targets_dict = {"Compétition Sans Cible": ""}
-        
-    has_true_target = any(k != "Compétition Sans Cible" for k in targets_dict.keys())
+    """Délègue l'orchestration scientifique au module `labcraft.pipeline.analysis` et écrit les rapports.
+    Delegates scientific orchestration to `labcraft.pipeline.analysis` and writes HTML/JSON reports.
+    """
+    try:
+        targets_dict, target_warnings = load_targets_from_config(
+            config_obj,
+            explicit_config=bool(config),
+            progress_callback=typer.echo,
+        )
+    except TargetFileError as e:
+        typer.echo(f"Erreur lors de la lecture du fichier cible {e.filepath}:\n{e.cause}")
+        raise typer.Exit(code=1) from e
 
-    target_to_panels = {}
-    for pset in config_obj.primer_sets:
-        target_to_panels.setdefault(pset.target, []).append(pset)
-    
-    has_collisions = any(len(panels) > 1 for panels in target_to_panels.values())
-    config_list = []
-    if has_collisions and not force_joint:
-        typer.echo("Attention: Plusieurs panels alternatifs ciblant la même séquence ont été détectés.")
+    config_list, had_collisions = split_colliding_panel_configs(
+        config_obj, force_joint=force_joint
+    )
+    if had_collisions:
+        typer.echo(
+            "Attention: Plusieurs panels alternatifs ciblant la même séquence ont été détectés."
+        )
         typer.echo("Analyse séparée des panels...")
-        import copy
-        for pset in config_obj.primer_sets:
-            new_config = copy.deepcopy(config_obj)
-            new_config.primer_sets = [pset]
-            config_list.append(new_config)
-    else:
-        config_list.append(config_obj)
-        
+
     for i_cfg, current_config in enumerate(config_list):
         if len(config_list) > 1:
             panel_n = current_config.primer_sets[0].panel_name or str(i_cfg)
-            current_output = output.replace('.html', f'_{panel_n}.html')
-            typer.echo(f'--- Analyse du panel {panel_n} ---')
+            current_output = output.replace(".html", f"_{panel_n}.html")
+            typer.echo(f"--- Analyse du panel {panel_n} ---")
         else:
+            panel_n = None
             current_output = output
-            
-        # 2. & 3. Build Internal Engine Components
-        # Construire les composants internes et la table primer_to_target
+
         try:
-            primers, primer_to_target, backend, backend_kwargs, mon_molar, enzyme, temp_celsius, profiles = build_engine_from_config(current_config, targets_dict, max_variants=max_variants)
+            panel_res = run_single_panel_analysis(
+                current_config,
+                targets_dict,
+                panel_label=panel_n,
+                target_warnings=target_warnings,
+                inputs_fp=inputs_fp,
+                file_hash=file_hash,
+                max_variants=max_variants,
+                errors=errors,
+                strict_3prime=strict_3prime,
+                strict_3prime_tolerate=strict_3prime_tolerate,
+                dimer_conc_max=dimer_conc_max,
+                separate_targets=separate_targets,
+                progress_callback=typer.echo,
+            )
+        except EmptyPanelError as e:
+            typer.echo(str(e))
+            raise typer.Exit(code=1) from e
         except (ParseError, ValueError) as e:
             typer.echo(f"Erreur de validation des séquences :\n{e}")
             raise typer.Exit(code=1) from e
 
-        primer_to_panel = primer_to_target
-        primer_to_panel_map: Dict[str, str] = {}
-        for ps in current_config.primer_sets:
-            panel_id = ps.panel_name if ps.panel_name else ps.target
-            for role_name in ps.primers:
-                primer_to_panel_map[f"{role_name}_{panel_id}"] = panel_id
-        for p in primers:
-            p_par = p.parent_name or p.name.split("#")[0]
-            if p_par in primer_to_panel_map:
-                primer_to_panel_map[p.name] = primer_to_panel_map[p_par]
-            elif p.name not in primer_to_panel_map:
-                primer_to_panel_map[p.name] = primer_to_target.get(p.name, "")
-
-        buf_cfg = current_config.experiment.buffer
-        if buf_cfg:
-            typer.echo(
-                f"Conditions utilisées : T={temp_celsius:.1f} °C, Enzyme={enzyme.name}, "
-                f"Na={buf_cfg.na_mM} mM, Mg={buf_cfg.mg_mM} mM, dNTP={buf_cfg.dntp_mM} mM"
-            )
-        else:
-            typer.echo(f"Conditions utilisées : T={temp_celsius:.1f} °C, Enzyme={enzyme.name}, Référence (1.0 M Na+, 0 mM Mg2+)")
-        
-        if not primers:
-            typer.echo("Erreur : Le panel d'amorces est vide. Veuillez définir au moins un jeu d'amorces (primer_sets).")
-            raise typer.Exit(code=1)
-
-        # Concentration effective de chaque amorce (somme des variants dégénérés), en µM
-        # Effective concentration of each primer (sum over degenerate variants), in uM
-        effective_concs_uM: Dict[str, float] = {}
-        for p in primers:
-            p_par = p.parent_name or p.name.split("#")[0]
-            effective_concs_uM[p_par] = effective_concs_uM.get(p_par, 0.0) + float(p.nominal_concentration) * 1e6
-        typer.echo("Concentrations effectives par amorce (µM) : " + ", ".join(
-            f"{n}={v:.3g}" for n, v in effective_concs_uM.items()
-        ))
-        
-        # 4. Simulation
-        target_occupations = {}
-        all_fractions = {}
-        all_risks = []
-        max_residual_global = 0.0
-        all_unfolding_penalties = {}
-        interaction_matrix = {}
-        
-        prob = None
-        strands = None
-        complexes = None
-        
-        import warnings
-        with warnings.catch_warnings(record=True) as captured_warnings:
-            warnings.simplefilter("always")
-            
-            if not separate_targets and len(targets_dict) > 1:
-                # Mode CONJOINT (par défaut en multiplexe multi-cibles)
-                # JOINT mode (default in multi-target multiplex)
-                typer.echo(f"Building joint complex network and solving coupled thermodynamic equilibrium for {len(targets_dict)} targets ({', '.join(targets_dict.keys())})...")
-                
-                prob, strands, complexes, unfolding_penalties = enumerate_complexes(
-                    primers,
-                    targets_dict if has_true_target else None,
-                    backend,
-                    profile=profiles,
-                    temp_celsius=temp_celsius,
-                    mon_molar=mon_molar,
-                    buffer=config_obj.experiment.buffer.model_dump() if config_obj.experiment.buffer else None,
-                    enzyme=enzyme,
-                    max_errors=errors,
-                    strict_3prime_len=strict_3prime,
-                    strict_3prime_tolerate=strict_3prime_tolerate,
-                    primer_to_target=primer_to_target
-                )
-                
-                res = solve_dual(prob)
-                max_residual_global = res.max_residual
-                
-                # Diagnostics
-                amplifiable_flags, concs, dimer_details = _evaluate_dimer_complexes(
-                    prob, res, complexes, primers, backend, enzyme, temp_celsius, backend_kwargs, primer_to_panel_map
-                )
-                    
-                risks = evaluate_risks(complexes, concs, amplifiable_flags, is_warm_start=enzyme.warm_start, dimer_details=dimer_details)
-                fractions = compute_fractions(strands, complexes, prob.stoichiometry, res.free_concentrations, prob.delta_g, temp_celsius, primer_to_panel)
-                
-                all_risks = risks
-                all_fractions = fractions
-                
-                for t_id in targets_dict.keys():
-                    target_occupations[t_id] = {}
-                    
-                for s in strands:
-                    if s.endswith("_site"):
-                        idx = strands.index(s)
-                        occ = (prob.total_concentrations[idx] - res.free_concentrations[idx]) / prob.total_concentrations[idx] if prob.total_concentrations[idx] > 0 else 0.0
-                        if "@" in s:
-                            p_part, rest_part = s.split("@", 1)
-                            t_part = rest_part.replace("_site", "")
-                            if t_part in target_occupations:
-                                target_occupations[t_part][s] = occ
-                                target_occupations[t_part][f"{p_part}_site"] = occ
-                        else:
-                            for t_id in targets_dict.keys():
-                                target_occupations[t_id][s] = occ
-                                
-                if isinstance(unfolding_penalties, dict) and any(isinstance(v, dict) for v in unfolding_penalties.values()):
-                    all_unfolding_penalties = unfolding_penalties
-                else:
-                    for t_id in targets_dict.keys():
-                        all_unfolding_penalties[t_id] = unfolding_penalties
-            else:
-                # Mode Séparé (ou cible unique)
-                # Separate mode (or single target)
-                for t_id, t_seq in targets_dict.items():
-                    typer.echo(f"Solving for target {t_id}...")
-                    profile = profiles.get(t_id)
-                    if profile is None and profiles:
-                        profile = next(iter(profiles.values()))
-                        
-                    prob, strands, complexes, unfolding_penalties = enumerate_complexes(
-                        primers,
-                        t_seq if t_seq else None,
-                        backend,
-                        profile=profile,
-                        temp_celsius=temp_celsius,
-                        mon_molar=mon_molar,
-                        buffer=config_obj.experiment.buffer.model_dump() if config_obj.experiment.buffer else None,
-                        enzyme=enzyme,
-                        max_errors=errors,
-                        strict_3prime_len=strict_3prime,
-                        strict_3prime_tolerate=strict_3prime_tolerate,
-                        primer_to_target=primer_to_target
-                    )
-                    
-                    res = solve_dual(prob)
-                    max_residual_global = max(max_residual_global, res.max_residual)
-                    
-                    # Diagnostics
-                    amplifiable_flags, concs, dimer_details = _evaluate_dimer_complexes(
-                        prob, res, complexes, primers, backend, enzyme, temp_celsius, backend_kwargs, primer_to_panel_map
-                    )
-                        
-                    risks = evaluate_risks(complexes, concs, amplifiable_flags, is_warm_start=enzyme.warm_start, dimer_details=dimer_details)
-                    fractions = compute_fractions(strands, complexes, prob.stoichiometry, res.free_concentrations, prob.delta_g, temp_celsius, primer_to_panel)
-                    
-                    for r in risks:
-                        if not any(ar.complex_name == r.complex_name for ar in all_risks):
-                            all_risks.append(r)
-                            
-                    target_occupations[t_id] = {}
-                    for s in strands:
-                        if s.endswith("_site"):
-                            idx = strands.index(s)
-                            occ = (prob.total_concentrations[idx] - res.free_concentrations[idx]) / prob.total_concentrations[idx] if prob.total_concentrations[idx] > 0 else 0.0
-                            target_occupations[t_id][s] = occ
-                            
-                    all_fractions.update(fractions)
-                    if t_id not in all_unfolding_penalties:
-                        all_unfolding_penalties[t_id] = unfolding_penalties
-                
-            # Matrice d'interaction globale pour la heatmap
-            def get_parent(name: str) -> str:
-                return name.split('#')[0] if '#' in name else name
-                
-            unique_parents = list(dict.fromkeys(get_parent(p.name) for p in primers))
-            
-            for parent1 in unique_parents:
-                interaction_matrix[parent1] = {}
-                for parent2 in unique_parents:
-                    interaction_matrix[parent1][parent2] = 0.0
-                    
-            if complexes and prob is not None:
-                for i_c, c_name in enumerate(complexes):
-                    if "_on_" in c_name or "_free" in c_name:
-                        continue
-                    dg = float(prob.delta_g[i_c])
-                    stoich = prob.stoichiometry[i_c]
-                    p_indices = [k for k, val in enumerate(stoich) if val > 0 and k < len(primers)]
-                    if len(p_indices) == 1:
-                        k = p_indices[0]
-                        par = get_parent(primers[k].name)
-                        if interaction_matrix[par][par] == 0.0 or dg < interaction_matrix[par][par]:
-                            interaction_matrix[par][par] = dg
-                    elif len(p_indices) == 2:
-                        k1, k2 = p_indices
-                        par1 = get_parent(primers[k1].name)
-                        par2 = get_parent(primers[k2].name)
-                        if interaction_matrix[par1][par2] == 0.0 or dg < interaction_matrix[par1][par2]:
-                            interaction_matrix[par1][par2] = dg
-                            interaction_matrix[par2][par1] = dg
-                        
-        # 5. Verdict
-        def get_parent(name: str) -> str:
-            return name.split('#')[0] if '#' in name else name
-    
-        loop_primer_parents = {get_parent(p.name) for p in primers if p.role in (PrimerRole.LF, PrimerRole.LB)}
-        
-        verdict = generate_verdict(all_fractions, target_occupations, all_risks, loop_primer_parents=loop_primer_parents, primer_to_panel=primer_to_target, primer_to_target=primer_to_target, unfolding_penalties=all_unfolding_penalties, dimer_conc_max_nm=dimer_conc_max)
-        
-        dimer_decomposition = summarize_amplifiable_dimers(all_risks, primer_to_panel=primer_to_panel_map)
-        if dimer_decomposition["total_nm"] > 0.0:
-            def _f_nm(v: float) -> str:
-                return f"{v:.4f}" if 0.0 < v < 0.01 else f"{v:.2f}"
-
-            dom_f = dimer_decomposition["dominant_family"]
-            dom_txt = f" | Famille dominante : {dom_f['label']} ({_f_nm(dom_f['conc_nm'])} nM)" if dom_f else ""
-            if dimer_decomposition["is_multiplex"]:
-                intra_txt = ", ".join(
-                    f"{pan}={_f_nm(val)} nM" for pan, val in dimer_decomposition["intra_by_panel_nm"].items()
-                )
-                typer.echo(
-                    f"Dimères amplifiables : {_f_nm(dimer_decomposition['total_nm'])} nM "
-                    f"(intra : {intra_txt} ; inter-panels : {_f_nm(dimer_decomposition['inter_nm'])} nM{dom_txt})"
-                )
-            else:
-                typer.echo(f"Dimères amplifiables : {_f_nm(dimer_decomposition['total_nm'])} nM{dom_txt}")
-
-        # Recommandations
-        from labcraft.optimize.recommendations import generate_recommendations
-        recommendations = generate_recommendations(verdict, risks=all_risks, primer_to_panel=primer_to_panel_map)
-        
-        # Contrôle des Sondes TaqMan : déclenché par la présence de sondes, pas par la chimie
-        # TaqMan probe check: triggered by presence of probes, not by chemistry field
-        probe_tm_results = []
-        has_probes = any(p.role == PrimerRole.PROBE for p in primers)
-        if has_probes:
-            probe_tm_results = check_probes_tm(primers, backend, temp_celsius, **backend_kwargs)
-            
-        # Optimisation des concentrations
-        optimization_results = []
-        # On n'optimise que si le génome est présent et qu'il y a un vrai problème
-        # Mais le rapport peut toujours afficher les résultats.
-        # We need the last `prob`, `complexes`, `strands`
-        # Let's run it.
-        from labcraft.optimize.concentrations import optimize_concentrations
-        free_fractions = {p: f.free for p, f in all_fractions.items()}
-        if prob and complexes and strands:
-            optimization_results = optimize_concentrations(
-                prob_template=prob,
-                species_names=strands,
-                primers=primers,
-                target_dict=targets_dict,
-                primer_to_panel=primer_to_panel,
-                original_free_fractions=free_fractions,
-                original_target_occupations={},
-                complex_names=complexes,
-                temp_celsius=temp_celsius,
-                backend=backend,
-                enzyme=enzyme,
-                **backend_kwargs
-            )
-        
-        
-        # 5.5 Multiplex Balance & Mispriming
-        from labcraft.metrics.balance import calculate_multiplex_balance
-        from labcraft.diagnostics.mispriming import detect_inter_target_mispriming
-        
-        panel_summaries, balance_cv = {}, None
-        if target_occupations:
-            panel_summaries, balance_cv = calculate_multiplex_balance(primer_to_target, target_occupations, free_fractions, loop_primer_parents=loop_primer_parents, primer_to_target=primer_to_target)
-        
-        mispriming_risks = []
-        if has_true_target and targets_dict:
-            mispriming_risks = detect_inter_target_mispriming(
-                primers,
-                primer_to_target,
-                targets_dict,
-                backend,
-                enzyme,
-                temp_celsius,
-                primer_to_target=primer_to_target,
-                legitimate_loci=all_unfolding_penalties,
-                **backend_kwargs
-            )
-        
-        
-        # 6. Generate Report
         typer.echo("Generating HTML report...")
-        
-        try:
-            pkg_version = importlib.metadata.version("labcraft")
-        except importlib.metadata.PackageNotFoundError:
-            pkg_version = "0.0.1"
-
-        metadata = {
-            "version": pkg_version,
-            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime()),
-            "file_hash": file_hash,
-            "max_residual": max_residual_global,
-            "temperature": temp_celsius,
-            "buffer": config_obj.experiment.buffer.model_dump() if config_obj.experiment.buffer else "Reference conditions (1.0 M Na+, 0 mM Mg2+)",
-            "enzyme": enzyme.name,
-            "dimer_dg_threshold": enzyme.dimer_dg_threshold,
-            "concentrations_fip_bip": "Per target (check config)",
-            "concentrations_target": "Per target (check config)",
-            "interaction_matrix": interaction_matrix,
-            "primer_names": list(interaction_matrix.keys()),
-            "unfolding_penalties": all_unfolding_penalties,
-            "target_occupations": target_occupations,
-            "has_true_target": has_true_target,
-            "primer_to_panel": primer_to_panel,
-            "panel_summaries": panel_summaries,
-            "balance_cv": balance_cv,
-            "mispriming_risks": mispriming_risks,
-            "chemistry": config_obj.experiment.chemistry,
-            "optimization_results": optimization_results,
-            "probe_tm_results": probe_tm_results,
-            "recommendations": recommendations,
-            "loop_primer_parents": list(loop_primer_parents),
-            "primers_parent": primers,
-            "has_lna": any(len(p.lna_positions) > 0 for p in primers),
-            "dimer_decomposition": dimer_decomposition,
-            "primer_concentrations_uM": effective_concs_uM,
-            "multiplex_mode": "Conjoint (joint multi-target equilibrium)" if not separate_targets else "Séparé (cible par cible)",
-            "warnings": target_warnings + [str(w.message) for w in captured_warnings]
-        }
-        
-        html = render_report(verdict, all_fractions, all_risks, metadata)
-        
+        html = render_report(
+            panel_res.verdict,
+            panel_res.fractions,
+            panel_res.risks,
+            panel_res.metadata,
+        )
         with open(current_output, "w", encoding="utf-8") as f:
             f.write(html)
 
         # Sortie machine JSON à côté du HTML / Machine-readable JSON next to the HTML
-        from labcraft.report.json_export import build_analyze_json_payload, write_analyze_json
-        conditions_json = {
-            "temperature_C": temp_celsius,
-            "enzyme": enzyme.name,
-            "buffer": buf_cfg.model_dump() if buf_cfg else None,
-            "dimer_conc_max_nm": dimer_conc_max,
-            "dimer_dg_threshold": enzyme.dimer_dg_threshold,
-            "max_variants": max_variants,
-            "seeding": {
-                "errors": errors,
-                "strict_3prime": strict_3prime,
-                "strict_3prime_tolerate": strict_3prime_tolerate,
-            },
-            "multiplex_mode": metadata["multiplex_mode"],
-            "target_copies_per_uL": {t.id: t.copies_per_uL for t in current_config.targets},
-        }
-        payload = build_analyze_json_payload(
-            version=metadata["version"],
-            timestamp=metadata["timestamp"],
-            inputs=inputs_fp,
-            conditions=conditions_json,
-            primer_concentrations_uM=effective_concs_uM,
-            fractions=all_fractions,
-            unfolding_penalties=all_unfolding_penalties,
-            target_occupations=target_occupations,
-            risks=all_risks,
-            dimer_decomposition=dimer_decomposition,
-            mispriming_risks=mispriming_risks,
-            verdict=verdict,
-            panel_summaries=panel_summaries,
-        )
-        json_out = write_analyze_json(current_output, payload)
+        json_out = write_analyze_json(current_output, panel_res.json_payload)
         typer.echo(f"JSON saved to {json_out}.")
-            
-        typer.echo(f"Analysis complete in {time.time() - start_time:.2f}s. Report saved to {current_output}.")
+        typer.echo(
+            f"Analysis complete in {time.time() - start_time:.2f}s. Report saved to {current_output}."
+        )
         
 
 
@@ -713,7 +278,7 @@ def coverage(
     strict_3prime: int = typer.Option(3, "--strict-3prime", help="Length of strict 3' zone for seeding."),
     strict_3prime_tolerate: int = typer.Option(2, "--strict-3prime-tolerate", help="Number of tolerated substitutions in strict 3' zone for seeding."),
     export_sites: Optional[str] = typer.Option(None, "--export-sites", help="Export candidate sites to CSV.")
-):
+) -> None:
     """Analyse de la couverture thermodynamique multi-souches."""
     import csv
     import time
@@ -731,9 +296,10 @@ def coverage(
             typer.echo(f"Erreur de fichier introuvable : {fpath}")
             raise typer.Exit(code=1)
 
+    first_strain_path: Optional[str] = None
     try:
         print("Lecture des entrées...")
-        fasta_list = []
+        fasta_list: List[Tuple[str, str]] = []
         for name, seq in read_multi_fasta(fasta):
             name = name.split()[0]
             clean_seq, w_msg = validate_target_sequence(name, seq, warn_dashes=True)
@@ -742,7 +308,6 @@ def coverage(
             fasta_list.append((name, clean_seq))
         fasta_dict = {name: seq for name, seq in fasta_list}
         
-        first_strain_path = None
         if fasta_list:
             with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False, suffix=".fasta") as tmp:
                 tmp.write(f">{fasta_list[0][0]}\n{fasta_list[0][1]}\n")
@@ -768,6 +333,13 @@ def coverage(
     except ValidationError as e:
         typer.echo(f"Erreur de validation de la configuration :\n{e}")
         raise typer.Exit(code=1) from e
+    finally:
+        # Nettoyage du fichier temporaire de première souche / Clean up temporary first-strain FASTA
+        if first_strain_path and os.path.exists(first_strain_path):
+            try:
+                os.remove(first_strain_path)
+            except OSError:
+                pass
     
     # Sélection du panel si plusieurs sont présents
     if panel:
@@ -871,7 +443,7 @@ def redesign(
     copies: Optional[float] = typer.Option(None, "--copies", help="Target copies per uL."),
     max_variants: int = typer.Option(64, "--max-variants", help="Maximum variants allowed per degenerate primer."),
     dimer_conc_max: float = typer.Option(0.23, "--dimer-conc-max", help="Amplifiable dimer threshold in nM (same as analyze)."),
-):
+) -> None:
     """Propose des séquences de remplacement pour une amorce externe ou de boucle.
     Proposes replacement sequences for an outer or loop primer.
     """
@@ -1006,7 +578,7 @@ def redesign(
     )
     partners = [p for p in engine_primers if (p.parent_name or p.name.split("#")[0]) != internal_name]
     role_enum = PrimerRole[role_name.upper()]
-    pair_cache: Dict[Tuple[object, ...], Tuple[bool, float, dict]] = {}
+    pair_cache: Dict[Tuple[Any, ...], Tuple[bool, float, Dict[str, Any]]] = {}
     buf_dump = config_obj.experiment.buffer.model_dump() if config_obj.experiment.buffer else None
 
     with dna_session(temp_celsius=temp_celsius):

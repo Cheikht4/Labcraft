@@ -5,13 +5,16 @@ Solveur à précision étendue pour les problèmes d'équilibre.
 from __future__ import annotations
 from labcraft.thermo.constants import R_GAS_KCAL_MOL_K
 
+from typing import Any
 import numpy as np
 from .types import EquilibriumProblem, EquilibriumResult, SolverMethod, ConvergenceError
 
+mpmath: Any
 try:
-    import mpmath
+    import mpmath as _mpmath
+    mpmath = _mpmath
 except ImportError:
-    mpmath = None  # type: ignore[assignment]
+    mpmath = None
 
 
 def solve_extended(

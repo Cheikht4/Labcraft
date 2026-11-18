@@ -24,7 +24,7 @@ def enumerate_variants(sequence: str, max_mutations: int = 2, window_3p: int = 6
     start_idx = len(sequence) - window_3p
     bases = ['A', 'C', 'G', 'T']
     
-    variants = []
+    variants: List[Tuple[str, List[Tuple[int, str, str]]]] = []
     
     # 0 mutations (original)
     variants.append((sequence, []))

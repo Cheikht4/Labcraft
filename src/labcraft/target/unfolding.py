@@ -59,7 +59,7 @@ def calc_unfolding_penalty(
         _, g_constrained = fc_constrained.pf()
         
     # ΔG_unfolding = G_constrained - G_free
-    dg_unfolding = g_constrained - g_free
+    dg_unfolding = float(g_constrained - g_free)
     
     # Plancher à 0 avec une légère tolérance numérique (bruit de float)
     if dg_unfolding < 0.0 and dg_unfolding > -1e-2:
