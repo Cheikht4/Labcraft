@@ -1,17 +1,36 @@
 """Thermodynamique des mésappariements et règle du 3'.
+Mismatch thermodynamics and 3' enzymatic extension rules.
 
 Fournit le calcul d'énergie pour des duplexes avec mésappariements
+(internes isolés, terminaux et boucles internes symétriques consécutives)
 et l'heuristique d'extensibilité du 3'.
+Provides energy calculation for duplexes with mismatches (single internal,
+terminal, and consecutive symmetric internal loops) and 3' extensibility heuristics.
 """
 import csv
+import math
 import os
 from typing import Tuple, Optional, Dict
 from labcraft.diagnostics.enzyme import PolymeraseProfile
 from labcraft.thermo.backends.native import _NN_PARAMS, _SEQ_TO_NN_KEY, _INIT_AT, _INIT_GC
+from labcraft.thermo.constants import R_GAS_KCAL_MOL_K
 
-# (dH, dS) par clé
+# (dH, dS) par clé / (dH, dS) per dinucleotide step key
 _MISMATCH_INTERNAL: Dict[str, Tuple[float, float]] = {}
 _MISMATCH_TERMINAL: Dict[str, Tuple[float, float]] = {}
+
+# Initiation entropique des boucles internes ADN à 37 °C en kcal/mol (SantaLucia & Hicks 2004, Table 5 ;
+# identique à la table `internal_loop` de Mathews 2004 dans ViennaRNA).
+# Entropic DNA internal loop initiation at 37 °C in kcal/mol (SantaLucia & Hicks 2004, Table 5;
+# identical to the Mathews 2004 `internal_loop` table in ViennaRNA).
+_INTERNAL_LOOP_DG37_KCAL: Dict[int, float] = {
+    4: 3.1, 5: 3.5, 6: 3.9, 7: 4.1, 8: 4.2, 9: 4.3, 10: 4.5,
+    11: 4.6, 12: 4.6, 13: 4.7, 14: 4.8, 15: 4.9, 16: 5.0, 17: 5.0,
+    18: 5.1, 19: 5.1, 20: 5.2, 21: 5.3, 22: 5.3, 23: 5.3, 24: 5.4,
+    25: 5.4, 26: 5.5, 27: 5.5, 28: 5.6, 29: 5.6, 30: 5.6,
+}
+_T37_KELVIN = 310.15
+_JACOBSON_STOCKMAYER_EXP = 1.75
 
 def _load_tables():
     data_dir = os.path.join(os.path.dirname(__file__), "..", "data", "thermo")
@@ -38,103 +57,196 @@ def _load_tables():
 
 _load_tables()
 
+def _internal_loop_entropy_cal(loop_nt_count: int) -> float:
+    """Calcule l'entropie ΔS (cal/mol·K, négative) d'une boucle interne symétrique de taille `loop_nt_count` >= 4.
+    Computes entropy ΔS (cal/mol·K, negative) for a symmetric internal loop of size `loop_nt_count` >= 4.
+
+    Référence / Reference:
+    SantaLucia & Hicks (2004), Annu. Rev. Biophys. Biomol. Struct. 33:415-440, Eq. 5 & Table 5
+    (extrapolation de Jacobson-Stockmayer au-delà de 30 nt).
+    """
+    if loop_nt_count < 4:
+        return 0.0
+    if loop_nt_count <= 30:
+        dg37 = _INTERNAL_LOOP_DG37_KCAL[loop_nt_count]
+    else:
+        dg37 = _INTERNAL_LOOP_DG37_KCAL[30] + (
+            _JACOBSON_STOCKMAYER_EXP * R_GAS_KCAL_MOL_K * _T37_KELVIN * math.log(loop_nt_count / 30.0)
+        )
+    # Boucle interne modélisée comme purement entropique (ΔH = 0, ΔG°_37 = -T_37 * ΔS)
+    # Internal loop initiation modeled as purely entropic (ΔH = 0, ΔG°_37 = -T_37 * ΔS)
+    return -(dg37 * 1000.0) / _T37_KELVIN
+
+
+def classify_mismatch_pair(primer_base: str, template_base: str) -> str:
+    """Qualifie chimiquement une paire (amorce, matrice) selon Kwok et al. (1990).
+    Chemically classifies a (primer, template) base pair following Kwok et al. (1990).
+
+    Returns:
+        'match' | 'wobble' | 'purine_purine' | 'pyrimidine_pyrimidine' | 'transversion_other'
+    """
+    comp = {'A': 'T', 'T': 'A', 'C': 'G', 'G': 'C'}
+    a = primer_base.upper()
+    b = template_base.upper()
+    if comp.get(a, '') == b:
+        return "match"
+    if (a, b) in (('G', 'T'), ('T', 'G')):
+        return "wobble"
+    purines = {'A', 'G'}
+    pyrimidines = {'C', 'T'}
+    if a in purines and b in purines:
+        return "purine_purine"
+    if a in pyrimidines and b in pyrimidines:
+        return "pyrimidine_pyrimidine"
+    return "transversion_other"
+
+
 def nn_duplex_energy(
     top_5to3: str, 
     bottom_under_top: str,
     temp_celsius: float = 65.0,
     include_init: bool = True
 ) -> Tuple[float, float, float]:
-    """Calcule l'énergie NN d'un duplexe avec tolérance aux mismatches internes.
+    """Calcule l'énergie NN d'un duplexe (mésappariements internes, terminaux et consécutifs).
+    Computes NN duplex energy handling single internal, terminal, and consecutive mismatches.
+
+    Modèle / Model:
+    - Pas Watson-Crick : SantaLucia (1998)
+    - Mésappariement interne isolé (1×1) : Allawi & SantaLucia (1997-1998), Peyret (1999)
+    - Mésappariements terminaux (5' ou 3') : SantaLucia & Hicks (2004), Table 4 (`_MISMATCH_TERMINAL`)
+    - Mésappariements internes consécutifs (k×k, k >= 2) : SantaLucia & Hicks (2004), Eq. 5 & Table 5
+      (empilements terminaux fermants + entropie de boucle interne symétrique).
     
     Args:
         top_5to3: Séquence du brin haut (5'->3').
         bottom_under_top: Séquence du brin bas, antiparallèle, alignée sous le brin haut.
         temp_celsius: Température.
-        include_init: Si True, inclut les pénalités d'initiation terminales et de symétrie.
+        include_init: Si True, inclut les pénalités d'initiation terminales sur les paires WC fermantes.
         
     Returns:
         (dH_kcal, dS_cal, dG_kcal)
     """
     if len(top_5to3) != len(bottom_under_top):
         raise ValueError("Les deux brins doivent avoir la même longueur.")
-        
+
+    n = len(top_5to3)
+    if n == 0:
+        return 0.0, 0.0, 0.0
+
     top = top_5to3.upper()
     bottom = bottom_under_top.upper()
-    
+    complement = {'A': 'T', 'T': 'A', 'C': 'G', 'G': 'C'}
+
+    is_wc = [complement.get(top[i], '') == bottom[i] for i in range(n)]
+    wc_indices = [i for i, ok in enumerate(is_wc) if ok]
+
+    temp_k = temp_celsius + 273.15
+
+    # Aucun appariement Watson-Crick dans tout l'alignement : aucun duplexe stable formé
+    # No Watson-Crick base pair anywhere in the alignment: no stable duplex formed
+    if not wc_indices:
+        if include_init:
+            dh_unb = 2.0 * _INIT_AT[0]
+            ds_unb = 2.0 * _INIT_AT[1]
+            return dh_unb, ds_unb, dh_unb - temp_k * (ds_unb / 1000.0)
+        return 0.0, 0.0, 0.0
+
+    first_wc = wc_indices[0]
+    last_wc = wc_indices[-1]
+
     dh_total = 0.0
     ds_total = 0.0
-    
+
     if include_init:
-        # Initiation penalties (basées sur les paires terminales de l'alignement)
-        for i in (0, -1):
-            pair = (top[i], bottom[i])
-            if pair in [('G', 'C'), ('C', 'G')]:
+        # Pénalités d'initiation sur les vraies paires Watson-Crick fermantes du cœur apparié
+        # Initiation penalties on the actual closing Watson-Crick base pairs of the paired core
+        for idx in (first_wc, last_wc):
+            if (top[idx], bottom[idx]) in (('G', 'C'), ('C', 'G')):
                 dh_total += _INIT_GC[0]
                 ds_total += _INIT_GC[1]
-            elif pair in [('A', 'T'), ('T', 'A')]:
-                dh_total += _INIT_AT[0]
-                ds_total += _INIT_AT[1]
             else:
-                # Si mismatch terminal, les tables terminales seraient appelées en principe,
-                # mais dans notre cas d'usage, on évalue surtout des liaisons cible-amorce.
-                # L'initiation AT pénalise par défaut les terminaisons non-GC.
                 dh_total += _INIT_AT[0]
                 ds_total += _INIT_AT[1]
-                
-        # Note: on n'applique pas de pénalité de symétrie ici car nn_duplex_energy
-        # est utilisé pour évaluer la liaison amorce-cible (hétérodimère de brins distincts).
-            
-    complement = {'A': 'T', 'T': 'A', 'C': 'G', 'G': 'C'}
-            
-    for i in range(len(top) - 1):
-        dinuc_top = top[i:i+2]
-        dinuc_bot = bottom[i:i+2]
-        
-        # Test 1: Native parfait
-        is_perfect = (complement.get(dinuc_top[0], '') == dinuc_bot[0] and 
-                      complement.get(dinuc_top[1], '') == dinuc_bot[1])
-                      
-        found = False
-        if is_perfect:
-            try:
-                key = _SEQ_TO_NN_KEY[dinuc_top]
+
+    # Mésappariement terminal côté 5' du brin haut (adjacent à first_wc)
+    # 5'-end terminal mismatch on top strand (immediately adjacent to first_wc)
+    if first_wc >= 1:
+        # Rotation antiparallèle à 180° : la paire WC (first_wc) passe à gauche, le mismatch (first_wc-1) à droite
+        # 180° antiparallel rotation: WC pair (first_wc) on the left, terminal mismatch (first_wc-1) on the right
+        tmm_left = f"{bottom[first_wc]}{bottom[first_wc - 1]}/{top[first_wc]}{top[first_wc - 1]}"
+        if tmm_left in _MISMATCH_TERMINAL:
+            dh, ds = _MISMATCH_TERMINAL[tmm_left]
+            dh_total += dh
+            ds_total += ds
+
+    # Mésappariement terminal côté 3' du brin haut (adjacent à last_wc)
+    # 3'-end terminal mismatch on top strand (immediately adjacent to last_wc)
+    if last_wc <= n - 2:
+        tmm_right = f"{top[last_wc:last_wc + 2]}/{bottom[last_wc:last_wc + 2]}"
+        if tmm_right in _MISMATCH_TERMINAL:
+            dh, ds = _MISMATCH_TERMINAL[tmm_right]
+            dh_total += dh
+            ds_total += ds
+
+    # Parcours du cœur apparié [first_wc .. last_wc]
+    # Traverse paired core [first_wc .. last_wc]
+    i = first_wc
+    while i < last_wc:
+        if is_wc[i] and is_wc[i + 1]:
+            key = _SEQ_TO_NN_KEY.get(top[i:i + 2])
+            if key is not None:
                 dh, ds = _NN_PARAMS[key]
                 dh_total += dh
                 ds_total += ds
-                found = True
-            except KeyError:
-                pass
-                
-        if not found:
-            # Test 2: Mismatch interne
-            key_fwd = f"{dinuc_top}/{dinuc_bot}"
-            # Reverse key: le dinucléotide lu de l'autre brin de 5' vers 3'
-            # dinuc_bot est lu 3'->5'. Le 5'->3' du brin bas est donc le reverse de dinuc_bot.
-            # Le complément de dinuc_bot correspond à l'autre côté.
-            # En notation Biopython: XY/WZ veut dire top=XY, bot=WZ(antiparallel).
-            # Le symétrique est de lire depuis l'autre brin: le haut devient le reverse(WZ), le bas le reverse(XY).
-            key_rev = f"{dinuc_bot[::-1]}/{dinuc_top[::-1]}"
-            
-            if key_fwd in _MISMATCH_INTERNAL:
-                dh, ds = _MISMATCH_INTERNAL[key_fwd]
-                dh_total += dh
-                ds_total += ds
-                found = True
-            elif key_rev in _MISMATCH_INTERNAL:
-                dh, ds = _MISMATCH_INTERNAL[key_rev]
-                dh_total += dh
-                ds_total += ds
-                found = True
-                
-        if not found:
-            # Fallback ou erreur (ici on ignore la pénalité pour simplifier, 
-            # mais dans un vrai solveur on mettrait NaN).
-            # Pour la validation, le prompt assure que les mismatches seront couverts.
-            pass
+            i += 1
+        else:
+            # Bloc de k_mm >= 1 mésappariements internes consécutifs entre deux paires WC (i et j)
+            # Run of k_mm >= 1 consecutive internal mismatches bounded by WC pairs at i and j
+            j = i + 1
+            while j < last_wc and not is_wc[j]:
+                j += 1
+            k_mm = j - (i + 1)
 
-    temp_k = temp_celsius + 273.15
+            if k_mm == 1:
+                # Mésappariement interne simple (1×1) : somme des deux pas `_MISMATCH_INTERNAL`
+                # Single internal mismatch (1×1): sum of the two flanking `_MISMATCH_INTERNAL` steps
+                for pos in (i, i + 1):
+                    dinuc_top = top[pos:pos + 2]
+                    dinuc_bot = bottom[pos:pos + 2]
+                    key_fwd = f"{dinuc_top}/{dinuc_bot}"
+                    key_rev = f"{dinuc_bot[::-1]}/{dinuc_top[::-1]}"
+                    if key_fwd in _MISMATCH_INTERNAL:
+                        dh, ds = _MISMATCH_INTERNAL[key_fwd]
+                        dh_total += dh
+                        ds_total += ds
+                    elif key_rev in _MISMATCH_INTERNAL:
+                        dh, ds = _MISMATCH_INTERNAL[key_rev]
+                        dh_total += dh
+                        ds_total += ds
+                    else:
+                        # Repli défensif (ex. caractère ambigu résiduel) : demi-boucle entropique
+                        # Defensive fallback (e.g. residual ambiguous base): half internal loop penalty
+                        ds_total += 0.5 * _internal_loop_entropy_cal(4)
+            else:
+                # Boucle interne symétrique k_mm × k_mm (k_mm >= 2) :
+                # Empilement fermant gauche + empilement fermant droit + initiation entropique Table 5
+                # Symmetric k_mm × k_mm internal loop (k_mm >= 2):
+                # Left closing stack + right closing stack + Table 5 entropic loop initiation
+                left_stack = f"{top[i:i + 2]}/{bottom[i:i + 2]}"
+                right_stack = f"{bottom[j - 1:j + 1][::-1]}/{top[j - 1:j + 1][::-1]}"
+                if left_stack in _MISMATCH_TERMINAL:
+                    dh, ds = _MISMATCH_TERMINAL[left_stack]
+                    dh_total += dh
+                    ds_total += ds
+                if right_stack in _MISMATCH_TERMINAL:
+                    dh, ds = _MISMATCH_TERMINAL[right_stack]
+                    dh_total += dh
+                    ds_total += ds
+                ds_total += _internal_loop_entropy_cal(2 * k_mm)
+
+            i = j
+
     dg_kcal = dh_total - temp_k * (ds_total / 1000.0)
-    
     return dh_total, ds_total, dg_kcal
 
 
@@ -142,45 +254,49 @@ def three_prime_extensible(
     primer_5to3: str, 
     template_under_primer: str, 
     enzyme: PolymeraseProfile,
-    window: Optional[int] = None
+    window: Optional[int] = None,
+    allow_penultimate_wobble: Optional[bool] = None,
 ) -> Tuple[bool, Optional[int], Optional[str]]:
-    """Évalue l'extensibilité du 3' selon la présence de mésappariements.
+    """Évalue l'extensibilité du 3' selon la présence et la chimie des mésappariements.
+    Evaluates 3' extensibility based on mismatch position and base-pair chemistry.
     
     Cette fonction implémente le veto cinétique basé sur le modèle ARMS
-    (Newton et al. 1989, NAR 17(7):2503-2516).
+    (Newton et al. 1989, NAR 17(7):2503-2516) et la qualification wobble G·T
+    (Kwok et al. 1990, NAR 18(4):999-1005).
     
     Returns:
         (extensible, first_bad_pos, severity)
         - first_bad_pos est la position (1-indexé depuis le 3') du premier mismatch fautif,
           ou None si tout est OK.
-        - severity peut valoir "block" (zone absolue, ext bloquée), "weak" (zone pénalisée),
-          ou None.
+        - severity peut valoir "block" (zone absolue, ext bloquée), "wobble_weak" (wobble G·T
+          toléré en position -2 si activé), "weak" (zone pénalisée), ou None.
     """
-    complement = {'A': 'T', 'T': 'A', 'C': 'G', 'G': 'C'}
-    
     if window is None:
         window = enzyme.three_prime_window
+    if allow_penultimate_wobble is None:
+        allow_penultimate_wobble = getattr(enzyme, "allow_penultimate_gt_wobble", False)
         
     p = primer_5to3.upper()
     t = template_under_primer.upper()
     
     # Parcours depuis le 3' (position terminale = 1)
+    # Scan from 3' end (terminal nucleotide = position 1)
     for pos_from_3p in range(1, window + 1):
         idx = len(p) - pos_from_3p
         if idx < 0:
             break
             
-        p_base = p[idx]
-        t_base = t[idx]
-        
-        is_match = complement.get(p_base, '') == t_base
-        
-        if not is_match:
+        pair_class = classify_mismatch_pair(p[idx], t[idx])
+        if pair_class != "match":
             if pos_from_3p <= enzyme.three_prime_absolute_window:
-                # Blocage absolu selon ARMS
+                # Si l'option wobble G·T pénultième (-2) est activée, un wobble G·T non-terminal fuit
+                # If penultimate (-2) G·T wobble tolerance is enabled, a non-terminal G·T wobble leaks
+                if allow_penultimate_wobble and pos_from_3p == 2 and pair_class == "wobble":
+                    return True, pos_from_3p, "wobble_weak"
                 return False, pos_from_3p, "block"
             else:
                 # Pénalité forte mais extension possible (fuite ARMS)
+                # Strong penalty but leaky extension possible (ARMS)
                 return True, pos_from_3p, "weak"
             
     return True, None, None

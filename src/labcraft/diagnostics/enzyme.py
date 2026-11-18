@@ -20,6 +20,9 @@ class PolymeraseProfile:
     # - Amorces 7f/7g (pos 7) : effet fuyant
     three_prime_window: int = 3  # Fenêtre de forte pénalité (jusqu'à la position 3)
     three_prime_absolute_window: int = 2  # Fenêtre de blocage absolu de l'extension (pos 1 et 2)
+    # Option cinétique (Kwok et al. 1990) : tolérer un wobble G:T / T:G en position pénultième (-2)
+    # Kinetic option (Kwok et al. 1990): tolerate a G:T / T:G wobble at penultimate position (-2)
+    allow_penultimate_gt_wobble: bool = False
 
 # Profils standards de polymérases
 BST = PolymeraseProfile(
@@ -124,10 +127,11 @@ def get_enzyme(spec) -> PolymeraseProfile:
             
         base_profile = ENZYME_REGISTRY[name_key]
         
-        # Surcharges optionnelles
+        # Surcharges optionnelles / Optional overrides
         dg_thresh = spec.get("dimer_dg_threshold", base_profile.dimer_dg_threshold)
         tp_window = spec.get("three_prime_window", base_profile.three_prime_window)
         tp_abs_window = spec.get("three_prime_absolute_window", base_profile.three_prime_absolute_window)
+        allow_wobble = spec.get("allow_penultimate_gt_wobble", base_profile.allow_penultimate_gt_wobble)
         
         return PolymeraseProfile(
             name=base_profile.name,
@@ -135,7 +139,8 @@ def get_enzyme(spec) -> PolymeraseProfile:
             warm_start=base_profile.warm_start,
             dimer_dg_threshold=float(dg_thresh),
             three_prime_window=int(tp_window),
-            three_prime_absolute_window=int(tp_abs_window)
+            three_prime_absolute_window=int(tp_abs_window),
+            allow_penultimate_gt_wobble=bool(allow_wobble),
         )
         
     else:
