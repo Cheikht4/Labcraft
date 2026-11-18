@@ -612,8 +612,13 @@ def _run_analyze_with_config(
         # 6. Generate Report
         typer.echo("Generating HTML report...")
         
+        try:
+            pkg_version = importlib.metadata.version("labcraft")
+        except importlib.metadata.PackageNotFoundError:
+            pkg_version = "0.0.1"
+
         metadata = {
-            "version": importlib.metadata.version("labcraft") if importlib.metadata.version else "0.0.1",
+            "version": pkg_version,
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime()),
             "file_hash": file_hash,
             "max_residual": max_residual_global,

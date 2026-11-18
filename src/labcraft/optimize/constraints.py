@@ -34,6 +34,38 @@ def calc_intrinsic_3p_dg(seq: str, window_3p: int = 6, temp_celsius: float = 63.
     temp_k = temp_celsius + 273.15
     return dh_total - temp_k * (ds_total / 1000.0)
 
+def _check_pair_both_orders(
+    seq_1: str,
+    seq_2: str,
+    enzyme: PolymeraseProfile,
+    temp_celsius: float,
+) -> Tuple[bool, float]:
+    """Évalue une paire d'amorces dans les deux ordres de concaténation (1&2 et 2&1).
+    Evaluates a primer pair in both concatenation orders (1&2 and 2&1).
+    """
+    struct_ab, mfe_ab = RNA.cofold(f"{seq_1}&{seq_2}")
+    is_amp_ab, dg_ab, _, _ = is_amplifiable_dimer(
+        seq_1, seq_2, struct_ab.replace('&', ''), mfe_ab, enzyme, temp_celsius=temp_celsius
+    )
+    if seq_1 == seq_2:
+        return is_amp_ab, dg_ab
+
+    struct_ba, mfe_ba = RNA.cofold(f"{seq_2}&{seq_1}")
+    is_amp_ba, dg_ba, _, _ = is_amplifiable_dimer(
+        seq_2, seq_1, struct_ba.replace('&', ''), mfe_ba, enzyme, temp_celsius=temp_celsius
+    )
+    is_amp = is_amp_ab or is_amp_ba
+    if is_amp_ab and is_amp_ba:
+        worst_dg = min(dg_ab, dg_ba)
+    elif is_amp_ab:
+        worst_dg = dg_ab
+    elif is_amp_ba:
+        worst_dg = dg_ba
+    else:
+        worst_dg = min(dg_ab, dg_ba)
+    return is_amp, worst_dg
+
+
 def evaluate_variant_dimers(
     variant_seq: str,
     original_primers: List[Dict[str, Any]],
@@ -57,18 +89,10 @@ def evaluate_variant_dimers(
     amplifiable = []
     
     # Doit être exécuté dans un contexte dna_params(temp_celsius)
+    # Must be executed inside a dna_params(temp_celsius) context
     for j, p in enumerate(original_primers):
         seq_partner = variant_seq if j == modified_idx else p['sequence']
-        
-        # cofold
-        seq_concat = f"{variant_seq}&{seq_partner}"
-        structure, mfe = RNA.cofold(seq_concat)
-        struct_clean = structure.replace('&', '')
-        
-        is_amp, min_dg_3p = is_amplifiable_dimer(
-            variant_seq, seq_partner, struct_clean, mfe, enzyme, temp_celsius=temp_celsius
-        )
-        
+        is_amp, min_dg_3p = _check_pair_both_orders(variant_seq, seq_partner, enzyme, temp_celsius)
         if is_amp:
             amplifiable.append((j, min_dg_3p))
             
@@ -91,14 +115,7 @@ def filter_no_new_artefacts(
     
     for j, p in enumerate(original_primers):
         seq_partner = variant_seq if j == modified_idx else p['sequence']
-        
-        seq_concat = f"{variant_seq}&{seq_partner}"
-        structure, mfe = RNA.cofold(seq_concat)
-        struct_clean = structure.replace('&', '')
-        
-        is_amp, min_dg_3p, _, _ = is_amplifiable_dimer(
-            variant_seq, seq_partner, struct_clean, mfe, enzyme, temp_celsius=temp_celsius
-        )
+        is_amp, min_dg_3p = _check_pair_both_orders(variant_seq, seq_partner, enzyme, temp_celsius)
         
         if is_amp:
             return False, min_dg_3p

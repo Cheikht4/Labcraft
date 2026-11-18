@@ -78,7 +78,17 @@ class PanelConfig(BaseModel):
         if self.experiment.buffer:
             mg = self.experiment.buffer.mg_mM
             dntp = self.experiment.buffer.dntp_mM
-            if dntp > 0 and (mg / dntp) < 3.0:
+            # Vérifier d'abord la chélation totale (Mg <= dNTP) avant le ratio < 3.0
+            # Check complete chelation (Mg <= dNTP) first before the < 3.0 ratio warning
+            if dntp > 0 and mg <= dntp:
+                import warnings
+                warnings.warn(
+                    f"Chélation complète du Mg2+ par les dNTP ({mg:.1f} mM <= {dntp:.1f} mM) : "
+                    "concentration en Mg2+ libre nulle (0.0 mM), activité polymérase compromise.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+            elif dntp > 0 and (mg / dntp) < 3.0:
                 import warnings
                 warnings.warn(
                     f"Rapport Mg/dNTP faible ({mg:.1f} mM / {dntp:.1f} mM = {mg/dntp:.2f} < 3.0). "
@@ -86,9 +96,6 @@ class PanelConfig(BaseModel):
                     UserWarning,
                     stacklevel=2,
                 )
-            elif mg <= dntp:
-                import warnings
-                warnings.warn("mg_mM is less than or equal to dntp_mM.", UserWarning, stacklevel=2)
         return self
 
 from typing import Tuple
@@ -182,6 +189,7 @@ def build_engine_from_config(
                 0.2e-6 if role_name.upper() in ("F3", "B3", "PROBE") else
                 0.8e-6
             )
+            conc_map[role_enum] = total_conc
             
             # Gestion du blocage 3' / Handle 3' blocking
             is_blocked = p_data.blocked_3prime

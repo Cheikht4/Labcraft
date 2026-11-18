@@ -181,7 +181,11 @@ def is_amplifiable_dimer(
         passed_veto = True
         for k in range(window):
             idx_k = idx_3p - k
-            expected_partner_k = partner_idx + k if is_primer_a else partner_idx - k
+            # Dans la concaténation 5'->3' (A + B), reculer depuis le 3' (idx_3p - k)
+            # impose d'avancer en 5'->3' sur le partenaire antiparallèle (partner_idx + k) pour A comme pour B.
+            # In the 5'->3' concatenation (A + B), stepping upstream from 3' (idx_3p - k)
+            # requires stepping 5'->3' along the antiparallel partner (partner_idx + k) for both A and B.
+            expected_partner_k = partner_idx + k
             
             # Limites
             if is_primer_a and idx_k < 0:

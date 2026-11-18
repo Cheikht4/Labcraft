@@ -5,10 +5,12 @@ def dotbracket_to_alignment(seq_a: str, seq_b: str, struct: str) -> str:
     Brin du haut (A) : 5' -> 3'
     Brin du bas (B)  : 3' -> 5'
     """
-    # 1. Extraction des paires
+    # 1. Extraction des paires (nettoyage éventuel du séparateur '&')
+    # 1. Pair extraction (strip optional '&' separator)
     stack = []
     pairs = {}
-    for i, c in enumerate(struct):
+    struct_clean = struct.replace('&', '')
+    for i, c in enumerate(struct_clean):
         if c == '(': 
             stack.append(i)
         elif c == ')':

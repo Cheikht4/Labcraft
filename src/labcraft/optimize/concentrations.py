@@ -1,5 +1,6 @@
 from typing import List, Dict, Any, Tuple, Union
 import dataclasses
+import logging
 import numpy as np
 
 from labcraft.solver.types import EquilibriumProblem, ConvergenceError
@@ -8,6 +9,8 @@ from labcraft.lamp.domains import PhysicalPrimer, PrimerRole
 from labcraft.metrics.balance import calculate_multiplex_balance
 from labcraft.diagnostics.amplifiable_dimer import evaluate_pair_amplifiable
 from labcraft.thermo.vienna import dna_session
+
+logger = logging.getLogger(__name__)
 
 def get_dangerous_dimers(
     prob_template: EquilibriumProblem,
@@ -140,26 +143,47 @@ def _optimize_concentrations_impl(
             par = p.parent_name or (p.name.split('#')[0] if '#' in p.name else p.name)
             parent_to_primers.setdefault(par, []).append(p)
 
-    # Trouver les complexes d'initiation : uniquement pour les amorces non dégénérées (sans '#')
-    # ayant leur propre site exact `f"{p.name}_on_{p.name}_site"`, conformément au modèle d'origine.
-    # Find initiation complexes: only for non-degenerate primers (without '#')
-    # having their own exact site `f"{p.name}_on_{p.name}_site"`, matching the original model.
-    parent_initiation_info: Dict[str, Tuple[int, List[int]]] = {}
+    # Trouver les complexes d'initiation pour toutes les amorces d'initiation (F3, B3, FIP, BIP, FWD, REV),
+    # y compris dégénérées (#1..#k) et multi-cibles ({par}@{t_id}_site), en excluant les boucles (LF, LB, PROBE).
+    # Find initiation complexes for all initiation primers (F3, B3, FIP, BIP, FWD, REV),
+    # including degenerate (#1..#k) and multi-target ({par}@{t_id}_site) loci, excluding loops (LF, LB, PROBE).
+    init_roles = {
+        PrimerRole.F3, PrimerRole.B3, PrimerRole.FIP, PrimerRole.BIP,
+        PrimerRole.FWD, PrimerRole.REV,
+    }
+    parent_initiation_info: Dict[str, List[Tuple[str, int, List[int]]]] = {}
     for par_name, p_list in parent_to_primers.items():
-        if len(p_list) == 1:
-            p = p_list[0]
-            c_name = f"{p.name}_on_{p.name}_site"
-            site_name = f"{p.name}_site"
-            if c_name in complex_names and site_name in species_names:
-                parent_initiation_info[par_name] = (
-                    species_names.index(site_name),
-                    [complex_names.index(c_name)]
-                )
+        if p_list[0].role not in init_roles:
+            continue
+        par_p_indices = {primer_idx[p.name] for p in p_list if p.name in primer_idx}
+        matched_sites: List[Tuple[str, int, List[int]]] = []
+        for s_idx, s_name in enumerate(species_names):
+            if not s_name.endswith("_site"):
+                continue
+            is_named_for_par = (
+                s_name == f"{par_name}_site"
+                or s_name.startswith(f"{par_name}@")
+            )
+            c_indices = [
+                c_i for c_i, c_n in enumerate(complex_names)
+                if "_on_" in c_n
+                and prob_template.stoichiometry[c_i, s_idx] > 0
+                and any(prob_template.stoichiometry[c_i, p_i] > 0 for p_i in par_p_indices)
+            ]
+            if c_indices and (is_named_for_par or not matched_sites):
+                matched_sites.append((s_name, s_idx, c_indices))
+        if matched_sites:
+            parent_initiation_info[par_name] = matched_sites
                 
     dangerous_indices = [i for i, c in enumerate(complex_names) if c in dangerous_complexes]
+    loop_primer_parents = {
+        par_name for par_name, p_list in parent_to_primers.items()
+        if p_list[0].role in (PrimerRole.LF, PrimerRole.LB)
+    }
     
     # Prépare mapping panel inverse
     panels = set(primer_to_panel.values())
+    occ_floor_ref: Dict[str, float] = {}
     
     def evaluate(c_candidats: np.ndarray) -> Tuple[float, dict]:
         prob = dataclasses.replace(prob_template, total_concentrations=c_candidats)
@@ -195,19 +219,32 @@ def _optimize_concentrations_impl(
 
         for par_name, p_list in parent_to_primers.items():
             if par_name in parent_initiation_info:
-                site_idx, c_indices = parent_initiation_info[par_name]
-                site_conc = c_candidats[site_idx]
-                bound_conc = float(np.sum(res.concentrations[c_indices]))
-                occ = bound_conc / site_conc if site_conc > 0 else 0.0
-                initiations[par_name] = occ
-                
+                sites_list = parent_initiation_info[par_name]
                 panel = primer_to_panel.get(par_name) or primer_to_panel.get(p_list[0].name)
-                if panel and panel in target_occs_for_balance:
-                    target_occs_for_balance[panel][f"{par_name}_site"] = occ
+                for s_name, site_idx, c_indices in sites_list:
+                    site_conc = c_candidats[site_idx]
+                    bound_conc = float(np.sum(res.concentrations[c_indices]))
+                    occ = bound_conc / site_conc if site_conc > 0 else 0.0
+                    init_key = par_name if len(sites_list) == 1 else s_name.removesuffix("_site")
+                    initiations[init_key] = occ
                     
-                if occ < min_initiation_occupation:
-                    deficit = (min_initiation_occupation - occ) / min_initiation_occupation
-                    floor_penalty += (deficit ** 2)
+                    if panel and panel in target_occs_for_balance:
+                        target_occs_for_balance[panel][s_name] = occ
+                        target_occs_for_balance[panel][f"{par_name}_site"] = occ
+                        
+                    # Plancher d'initiation : strict (`min_initiation_occupation`) sur les amorces internes
+                    # principales (FIP, BIP, FWD, REV) ; plafonné à l'occupation initiale sur les externes
+                    # diluées (F3, B3 à 0,2 µM) pour ne pas bloquer l'optimisation des autres rôles sur génome entier.
+                    # Initiation floor: strict (`min_initiation_occupation`) on primary inner primers
+                    # (FIP, BIP, FWD, REV); capped at initial occupation on dilute outer primers (F3, B3)
+                    # so pre-existing genomic folding barriers do not block optimizing other roles.
+                    if p_list[0].role in (PrimerRole.F3, PrimerRole.B3):
+                        eff_floor = min(min_initiation_occupation, occ_floor_ref.get(init_key, occ))
+                    else:
+                        eff_floor = min_initiation_occupation
+                    if eff_floor > 0.0 and occ < eff_floor:
+                        deficit = (eff_floor - occ) / eff_floor
+                        floor_penalty += (deficit ** 2)
 
             c_origine_par = sum(prob_template.total_concentrations[primer_idx[p.name]] for p in p_list)
             c_candidat_par = sum(c_candidats[primer_idx[p.name]] for p in p_list)
@@ -221,7 +258,8 @@ def _optimize_concentrations_impl(
         # 3. CV Balance inter-panels
         cv = 0.0
         _, calc_cv = calculate_multiplex_balance(
-            primer_to_panel, target_occs_for_balance, free_fracs_for_balance
+            primer_to_panel, target_occs_for_balance, free_fracs_for_balance,
+            loop_primer_parents=loop_primer_parents,
         )
         if calc_cv is not None:
             cv = calc_cv
@@ -256,9 +294,10 @@ def _optimize_concentrations_impl(
     best_score, best_metrics = evaluate(c_current)
     stopped_on_max = True
     
-    # État initial de référence pour le calcul cumulé du gain et du compromis
-    # Initial reference state for cumulative gain and tradeoff calculation
+    # État initial de référence pour le calcul cumulé du gain, du plancher et du compromis
+    # Initial reference state for cumulative gain, floor, and tradeoff calculation
     occ_initial = best_metrics['initiations']
+    occ_floor_ref.update(occ_initial)
     initial_metrics = best_metrics
     
     for _iteration in range(max_iter):
@@ -368,7 +407,7 @@ def _optimize_concentrations_impl(
     _, final_metrics = evaluate(c_current)
     
     if stopped_on_max:
-        print(f"Optimize concentrations stopped on max_iter={max_iter}")
+        logger.debug("Optimize concentrations stopped on max_iter=%d", max_iter)
         
     for par_name, p_list in parent_to_primers.items():
         par_indices = [primer_idx[p.name] for p in p_list]

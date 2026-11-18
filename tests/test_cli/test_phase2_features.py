@@ -229,7 +229,12 @@ def test_analyze_json_matches_html_five_cases(
 
     html_total_nm = _sum_amplifiable_families_nm(html)
     js_total_nm = js["totals"]["amplifiable_dimers_total_nm"]
-    assert abs(js_total_nm - html_total_nm) < 1e-4, f"{case_id}: JSON {js_total_nm} vs HTML {html_total_nm}"
+    # Borne exacte d'arrondi pour la somme de K familles affichées à 10^-4 : K * 0,5e-4
+    # Exact rounding bound when summing K family cells formatted at 1e-4: K * 0.5e-4
+    rounding_tol = max(1e-4, len(js["totals"]["families"]) * 5e-5)
+    assert abs(js_total_nm - html_total_nm) <= rounding_tol, (
+        f"{case_id}: JSON {js_total_nm} vs HTML {html_total_nm} (tol={rounding_tol})"
+    )
     assert (js["verdict"] == "FAILURE") == expect_failure
     if ref_nm == 0.0:
         assert js_total_nm == 0.0

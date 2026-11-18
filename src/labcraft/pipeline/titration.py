@@ -113,9 +113,10 @@ def simulate_titration(
                                 worst_val = c_val
                                 worst_c = c_name
                     if worst_c:
-                        # Calculer le % de séquestration
+                        # Calculer le % de séquestration sur l'amorce courante _p
+                        # Compute sequestration percentage on the current primer _p
                         pct = (worst_val / c_tot_dil[i]) * 100.0 if c_tot_dil[i] > 0 else 0
-                        dom_complexes[p.name] = f"{worst_c} ({pct:.1f}%)"
+                        dom_complexes[_p.name] = f"{worst_c} ({pct:.1f}%)"
                         
     return TitrationResult(
         dilution_factors=dilutions,
