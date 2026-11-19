@@ -20,8 +20,10 @@ from __future__ import annotations
 from labcraft.thermo.constants import R_GAS_KCAL_MOL_K
 
 import logging
+from typing import Any
 
 import numpy as np
+import numpy.typing as npt
 import scipy.linalg
 
 from .types import ConvergenceError, EquilibriumProblem, EquilibriumResult, SolverMethod
@@ -33,10 +35,10 @@ _R_KCAL_MOL_K: float = R_GAS_KCAL_MOL_K
 
 
 def _compute_complex_concentrations(
-    u: np.ndarray,
-    a_mat: np.ndarray,
-    dg_over_rt: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray, bool]:
+    u: npt.NDArray[Any],
+    a_mat: npt.NDArray[Any],
+    dg_over_rt: npt.NDArray[Any],
+) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64], bool]:
     """Compute complex concentrations from free-strand log-concentrations.
 
     Calcule les concentrations de complexes à partir des log-concentrations
@@ -61,26 +63,27 @@ def _compute_complex_concentrations(
     overflow : bool
         True if any log_c > 500 (would cause exp overflow).
     """
-    log_c = -dg_over_rt + a_mat @ u
+    log_c = np.asarray(-dg_over_rt + a_mat @ u, dtype=np.float64)
     
-    # Check for overflow
+    # Check for overflow / Vérification du débordement numérique
     overflow = bool(np.any(log_c > 500.0))
     
     if overflow:
         # Cap only to prevent actual floating point exception,
         # but the caller is informed that the point is invalid.
+        # Plafonner uniquement pour éviter l'exception flottante, en signalant l'overflow.
         log_c_safe = np.clip(log_c, a_min=None, a_max=500.0)
-        c_conc = np.exp(log_c_safe)
+        c_conc = np.asarray(np.exp(log_c_safe), dtype=np.float64)
     else:
-        c_conc = np.exp(log_c)
+        c_conc = np.asarray(np.exp(log_c), dtype=np.float64)
         
     return log_c, c_conc, overflow
 
 
 def _build_result(
-    u: np.ndarray,
-    c_conc: np.ndarray,
-    g: np.ndarray,
+    u: npt.NDArray[Any],
+    c_conc: npt.NDArray[Any],
+    g: npt.NDArray[Any],
     max_res: float,
     n_iterations: int,
 ) -> EquilibriumResult:

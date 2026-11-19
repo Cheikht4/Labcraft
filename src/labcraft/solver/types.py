@@ -3,7 +3,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+from typing import Any
+
 import numpy as np
+import numpy.typing as npt
 
 
 class ConvergenceError(Exception):
@@ -40,9 +43,9 @@ class EquilibriumProblem:
     """
     n_strands: int
     n_complexes: int
-    stoichiometry: np.ndarray  # shape (n_complexes, n_strands)
-    delta_g: np.ndarray  # shape (n_complexes,), kcal/mol
-    total_concentrations: np.ndarray  # shape (n_strands,), mol/L
+    stoichiometry: npt.NDArray[Any]  # shape (n_complexes, n_strands)
+    delta_g: npt.NDArray[Any]  # shape (n_complexes,), kcal/mol
+    total_concentrations: npt.NDArray[Any]  # shape (n_strands,), mol/L
     temperature_kelvin: float
     max_complex_size: int = 2
 
@@ -113,10 +116,10 @@ class EquilibriumResult:
     
     Résultat du calcul d'équilibre.
     """
-    concentrations: np.ndarray  # shape (n_complexes,), mol/L
-    free_concentrations: np.ndarray  # shape (n_strands,), mol/L
-    log_free_concentrations: np.ndarray  # shape (n_strands,), ln([x_i]_libre)
-    residuals: np.ndarray  # shape (n_strands,), mass conservation residual
+    concentrations: npt.NDArray[Any]  # shape (n_complexes,), mol/L
+    free_concentrations: npt.NDArray[Any]  # shape (n_strands,), mol/L
+    log_free_concentrations: npt.NDArray[Any]  # shape (n_strands,), ln([x_i]_libre)
+    residuals: npt.NDArray[Any]  # shape (n_strands,), mass conservation residual
     max_residual: float  # max absolute relative residual
     n_iterations: int
     method: SolverMethod

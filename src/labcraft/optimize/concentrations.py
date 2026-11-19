@@ -2,6 +2,7 @@ from typing import List, Dict, Any, Tuple, Union
 import dataclasses
 import logging
 import numpy as np
+import numpy.typing as npt
 
 from labcraft.solver.types import EquilibriumProblem, ConvergenceError
 from labcraft.solver.dual import solve_dual
@@ -185,7 +186,7 @@ def _optimize_concentrations_impl(
     panels = set(primer_to_panel.values())
     occ_floor_ref: Dict[str, float] = {}
     
-    def evaluate(c_candidats: np.ndarray) -> Tuple[float, Dict[str, Any]]:
+    def evaluate(c_candidats: npt.NDArray[Any]) -> Tuple[float, Dict[str, Any]]:
         prob = dataclasses.replace(prob_template, total_concentrations=c_candidats)
         try:
             res = solve_dual(prob)

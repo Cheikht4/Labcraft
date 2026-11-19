@@ -1,6 +1,7 @@
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
+import numpy.typing as npt
 
 @dataclass
 class PrimerFractions:
@@ -25,9 +26,9 @@ class PrimerFractions:
 def compute_fractions(
     primer_names: List[str],
     complex_names: List[str],
-    stoichiometry: np.ndarray,
-    free_concentrations: np.ndarray,
-    delta_g: np.ndarray,
+    stoichiometry: npt.NDArray[Any],
+    free_concentrations: npt.NDArray[Any],
+    delta_g: npt.NDArray[Any],
     temp_celsius: float,
     primer_to_panel: Optional[Dict[str, str]] = None
 ) -> Dict[str, PrimerFractions]:

@@ -2,7 +2,8 @@ from __future__ import annotations
 from labcraft.thermo.constants import R_GAS_KCAL_MOL_K
 
 import numpy as np
-from typing import Sequence
+import numpy.typing as npt
+from typing import Any, Sequence
 from dataclasses import dataclass
 
 from labcraft.lamp.domains import PhysicalPrimer
@@ -14,7 +15,7 @@ from labcraft.solver.dual import solve_dual
 class TitrationResult:
     dilution_factors: list[float]
     primer_names: list[str]
-    free_fractions: np.ndarray # shape (n_dilutions, n_primers)
+    free_fractions: npt.NDArray[Any]  # shape (n_dilutions, n_primers)
     dominant_complexes: dict[str, str] # primer_name -> dominant complex name at 1x
     complex_concentrations_1x: dict[str, float]
 

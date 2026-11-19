@@ -11,8 +11,10 @@ from __future__ import annotations
 from labcraft.thermo.constants import R_GAS_KCAL_MOL_K
 
 import logging
+from typing import Any
 
 import numpy as np
+import numpy.typing as npt
 import scipy.optimize
 
 from .types import ConvergenceError, EquilibriumProblem, EquilibriumResult, SolverMethod
@@ -75,20 +77,20 @@ def solve_primal(
 
     # --- Objective (scaled): G(scale·y) / scale = Σ_c y_c · (ΔG°_c/RT + ln(scale) + ln(y_c) - 1) ---
     # --- Objectif normalisé : G(scale·y) / scale = Σ_c y_c · (ΔG°_c/RT + ln(scale) + ln(y_c) - 1) ---
-    def obj_fun(y: np.ndarray) -> float:
+    def obj_fun(y: npt.NDArray[Any]) -> float:
         y_safe = np.maximum(y, y_min)
         return float(np.sum(y_safe * (dg_rt + ln_scale + np.log(y_safe) - 1.0)))
 
-    def obj_jac(y: np.ndarray) -> np.ndarray:
+    def obj_jac(y: npt.NDArray[Any]) -> npt.NDArray[np.float64]:
         y_safe = np.maximum(y, y_min)
         return np.asarray(dg_rt + ln_scale + np.log(y_safe), dtype=np.float64)
 
     # --- Constraints: A^T · y = x_total / scale ---
     # --- Contraintes : A^T · y = x_total / scale ---
-    def mass_eq(y: np.ndarray) -> np.ndarray:
+    def mass_eq(y: npt.NDArray[Any]) -> npt.NDArray[np.float64]:
         return np.asarray(a_mat.T @ y - xtot_scaled, dtype=np.float64)
 
-    def mass_jac(y: np.ndarray) -> np.ndarray:
+    def mass_jac(y: npt.NDArray[Any]) -> npt.NDArray[np.float64]:
         return np.asarray(a_mat.T, dtype=np.float64)
 
     mass_constraint = {'type': 'eq', 'fun': mass_eq, 'jac': mass_jac}
