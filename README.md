@@ -9,7 +9,8 @@ LabCraft is an open-source thermodynamic simulation engine designed for multiple
 ## Features
 - Thermodynamic calculations for various duplexes (ViennaRNA + Owczarzy salt corrections)
 - Coupled multi-target thermodynamic equilibrium and dimer/mispriming diagnostics
-- Amplifiable dimer failure threshold (`--dimer-conc-max`): default `0.23 nM` (provisoire, calibré sur 5 cas de paillasse, marge d'un facteur 2,3)
+- Local 3'-end dimer amplifiability thresholds (`dimer_dg_threshold`, evaluated at reaction temperature and buffer salt without initiation penalty over ≤ 6 contiguous 3' bp): `-2.0 kcal/mol` for `Bst`, `Bst 2.0`, `Bst 2.0 WarmStart`, and `GspSSD`; `-1.5 kcal/mol` for `Bst 3.0`; `-3.0 kcal/mol` for `Taq` (heuristique non calibrée ; les données de paillasse actuelles ne permettent pas de discriminer entre -2.0 et -3.5 / uncalibrated heuristic; current wet-lab data do not discriminate between -2.0 and -3.5)
+- Amplifiable dimer failure threshold (`--dimer-conc-max`): default `0.23 nM` (provisoire, calibré sur 5 cas de paillasse ; intervalle de séparation réel : `0.154 – 0.336 nM` ; `duplex_half` et `duplex_full` sont le même panel à deux concentrations donc non indépendants, et la séparation repose sur une seule paire inter-panels : `FIP_Nunes_YFV × F3_ParidaD4`)
 - Multi-strain thermodynamic coverage evaluation (`labcraft coverage`)
 
 ## Installation

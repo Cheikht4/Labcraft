@@ -3,67 +3,104 @@ from typing import Any, Dict, Union
 
 @dataclass
 class PolymeraseProfile:
-    """Profil enzymatique pour le diagnostic des dimères.
+    """Profil enzymatique pour le diagnostic des dimères et du veto 3'.
+    Enzymatic profile for dimer diagnostics and 3'-end extension veto.
     
     Attributes:
-        name: Nom de la polymérase (ex: Bst 2.0).
-        strand_displacement: Vrai si l'enzyme a une forte activité de déplacement de brin.
-        warm_start: Vrai si l'enzyme est inhibée à température ambiante.
-        dimer_dg_threshold: Seuil de ΔG pour qu'un dimère 3'-apparié soit classé amplifiable (kcal/mol).
+        name: Nom de la polymérase (ex: Bst 2.0) / Polymerase name.
+        strand_displacement: Vrai si forte activité de déplacement de brin / Strand-displacement activity.
+        warm_start: Vrai si inhibée à température ambiante / Inhibited at ambient temperature.
+        dimer_dg_threshold: Seuil heuristique interne de ΔG_3' local (kcal/mol, évalué à la température
+            et au sel de réaction sans pénalité d'initiation sur <= 6 pb contiguës en 3') en dessous
+            duquel un dimère 3'-apparié avec matrice 5' est classé amplifiable.
+            Internal heuristic local ΔG_3' threshold (kcal/mol, evaluated at reaction temperature and
+            salt without initiation penalty over <= 6 contiguous 3' bp) below which a 3'-paired dimer
+            with 5' template overhang is classified as amplifiable.
     """
     name: str
     strand_displacement: bool
     warm_start: bool
     dimer_dg_threshold: float
     # Modèle du Veto 3' selon ARMS (Newton et al. 1989, NAR 17(7):2503-2516)
-    # - Amorces 7b/7c (pos 3) : effet fort
-    # - Amorces 8b/8c (pos 4) : effet marginal
-    # - Amorces 7f/7g (pos 7) : effet fuyant
-    three_prime_window: int = 3  # Fenêtre de forte pénalité (jusqu'à la position 3)
-    three_prime_absolute_window: int = 2  # Fenêtre de blocage absolu de l'extension (pos 1 et 2)
+    # 3' Veto model following ARMS (Newton et al. 1989, NAR 17(7):2503-2516)
+    # - Amorces 7b/7c (pos 3) : effet fort / strong effect
+    # - Amorces 8b/8c (pos 4) : effet marginal / marginal effect
+    # - Amorces 7f/7g (pos 7) : effet fuyant / leaky effect
+    three_prime_window: int = 3  # Fenêtre de forte pénalité (jusqu'à la position 3) / Strong-penalty window
+    three_prime_absolute_window: int = 2  # Fenêtre de blocage absolu de l'extension (pos 1 et 2) / Absolute block window
     # Option cinétique (Kwok et al. 1990) : tolérer un wobble G:T / T:G en position pénultième (-2)
     # Kinetic option (Kwok et al. 1990): tolerate a G:T / T:G wobble at penultimate position (-2)
     allow_penultimate_gt_wobble: bool = False
 
-# Profils standards de polymérases
+
+# NOTE SUR L'ORIGINE DES SEUILS `dimer_dg_threshold` (HEURISTIQUE NON CALIBRÉE) :
+# Aucune publication biochimique ne fournit de seuil universel de ΔG_3' propre à Bst, Bst 2.0,
+# Bst 3.0, GspSSD ou Taq à 63–65 °C. Dans LabCraft, `local_dg` est évalué à la température réelle
+# de réaction et au sel du tampon sans pénalité d'initiation sur <= 6 pb contiguës en 3'
+# (`amplifiable_dimer.py`) : entre (37 °C, 1 M Na+) et (63 °C, tampon LAMP standard 50 mM Na+,
+# 10 mM K+, 20 mM Tris, 6 mM Mg2+, 1,4 mM dNTP), ΔG_3' remonte de +1,50 kcal/mol sur 3 pb
+# (`5'-GGA-3'`, -3,14 -> -1,64), +2,37 sur 4 pb (`5'-GCAT-3'`, -4,56 -> -2,20), +3,16 sur 5 pb
+# (`5'-GCATG-3'`, -6,02 -> -2,86) et +4,00 kcal/mol sur 6 pb (`5'-GCATGC-3'`, -8,26 -> -4,26).
+# Les valeurs ci-dessous (-2.0 pour Bst / Bst 2.0 / GspSSD, -1.5 pour Bst 3.0, -3.0 pour Taq)
+# constituent une heuristique non calibrée ; les données de paillasse actuelles ne permettent pas
+# de discriminer entre -2.0 et -3.5 kcal/mol sur les 5 cas de référence.
+#
+# NOTE ON `dimer_dg_threshold` PROVENANCE (UNCALIBRATED HEURISTIC):
+# No peer-reviewed biochemical study publishes a universal polymerase-specific ΔG_3' cutoff for
+# Bst, Bst 2.0, Bst 3.0, GspSSD, or Taq at 63–65 °C. In LabCraft, `local_dg` is evaluated at the
+# actual reaction temperature and buffer salt without initiation penalty over <= 6 contiguous 3' bp
+# (`amplifiable_dimer.py`): going from (37 °C, 1 M Na+) to (63 °C, standard LAMP buffer 50 mM Na+,
+# 10 mM K+, 20 mM Tris, 6 mM Mg2+, 1.4 mM dNTP) shifts ΔG_3' upward by +1.50 kcal/mol on 3 bp
+# (`5'-GGA-3'`, -3.14 -> -1.64), +2.37 on 4 bp (`5'-GCAT-3'`, -4.56 -> -2.20), +3.16 on 5 bp
+# (`5'-GCATG-3'`, -6.02 -> -2.86), and +4.00 kcal/mol on 6 bp (`5'-GCATGC-3'`, -8.26 -> -4.26).
+# The values below (-2.0 for Bst / Bst 2.0 / GspSSD, -1.5 for Bst 3.0, -3.0 for Taq) are an
+# uncalibrated heuristic; current wet-lab data do not discriminate between -2.0 and -3.5 kcal/mol
+# across the 5 reference cases.
+
+# Profils standards de polymérases / Standard polymerase profiles
 BST = PolymeraseProfile(
     name="Bst",
     strand_displacement=True,
     warm_start=False,
-    dimer_dg_threshold=-2.0
+    dimer_dg_threshold=-2.0,  # Heuristique interne non publiée / Unpublished internal heuristic
 )
 
 BST_2_0 = PolymeraseProfile(
     name="Bst 2.0",
     strand_displacement=True,
     warm_start=False,
-    dimer_dg_threshold=-2.0
+    dimer_dg_threshold=-2.0,  # Heuristique interne non publiée / Unpublished internal heuristic
 )
 
 BST_2_0_WARM_START = PolymeraseProfile(
     name="Bst 2.0 WarmStart",
     strand_displacement=True,
     warm_start=True,
-    dimer_dg_threshold=-2.0 # Le seuil reste le même, la physique à 65°C ne change pas
+    # Même seuil heuristique (-2.0) : l'aptamère WarmStart n'agit qu'à froid, pas à 63–65 °C
+    # Same heuristic threshold (-2.0): WarmStart aptamer only inhibits below ~45 °C, not at 63–65 °C
+    dimer_dg_threshold=-2.0,
 )
 
 TAQ = PolymeraseProfile(
     name="Taq",
     strand_displacement=False,
     warm_start=False,
-    dimer_dg_threshold=-3.0 # Moins agressive sur l'extension de structures complexes
+    # Heuristique interne non publiée (absence de déplacement de brin isotherme)
+    # Unpublished internal heuristic (no isothermal strand displacement)
+    dimer_dg_threshold=-3.0,
 )
 
-# La Bst 3.0 est plus agressive, avec une activité transcriptase inverse et déplacement de brin
-# renforcée. Elle tolère des appariements 3' plus faibles.
-# Le seuil de -1.5 kcal/mol est une valeur PROVISOIRE à calibrer expérimentalement.
-# Des amplifications non spécifiques avec Bst 3.0 sont rapportées dans la littérature 
-# (e.g. Lopez-Jimena 2018), nécessitant un seuil moins strict que Bst 2.0.
+# Bst 3.0 : activité transcriptase inverse et déplacement de brin renforcés ; des amplifications
+# non spécifiques accrues sont rapportées (p. ex. Lopez-Jimena et al. 2018), mais la valeur -1.5
+# kcal/mol est une heuristique interne provisoire non issue d'une mesure enzymatique publiée.
+# Bst 3.0: stronger reverse-transcriptase and strand-displacement activity; higher non-specific
+# background is reported (e.g. Lopez-Jimena et al. 2018), but -1.5 kcal/mol is a provisional
+# internal heuristic not derived from a published enzymatic measurement.
 BST_3_0 = PolymeraseProfile(
     name="Bst 3.0",
     strand_displacement=True,
     warm_start=False,
-    dimer_dg_threshold=-1.5
+    dimer_dg_threshold=-1.5,
 )
 
 # GspSSD (polymérase des kits Optigene, ex: ISO-004) :

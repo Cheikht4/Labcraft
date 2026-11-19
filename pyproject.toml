@@ -68,6 +68,7 @@ packages = ["src/labcraft"]
 testpaths = ["tests"]
 markers = [
     "nupack: tests requiring NUPACK (deselect with '-m not nupack')",
+    "regression: non-normative regression snapshot locking current heuristic behavior (update upon recalibration)",
 ]
 
 [tool.ruff]

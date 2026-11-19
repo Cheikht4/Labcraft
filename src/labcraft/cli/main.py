@@ -72,6 +72,20 @@ def hash_file(filepath: str) -> str:
         hasher.update(buf)
     return hasher.hexdigest()
 
+_ENZYME_HELP = (
+    "Profil enzymatique / Enzyme profile (bst2.0 [défaut], bst, bst2.0ws, gspssd : "
+    "ΔG3' = -2.0 kcal/mol ; bst3.0 : -1.5 kcal/mol ; taq : -3.0 kcal/mol — "
+    "heuristique non calibrée ; les données de paillasse actuelles ne permettent pas "
+    "de discriminer entre -2.0 et -3.5)."
+)
+_DIMER_CONC_MAX_HELP = (
+    "Seuil maximal de concentration totale de dimères amplifiables en nM déclenchant FAILURE "
+    "(provisoire, calibré sur 5 cas de paillasse ; intervalle de séparation réel : 0.154 – 0.336 nM ; "
+    "duplex_half et duplex_full sont deux dilutions du même panel donc non indépendants, et la "
+    "séparation repose sur une seule paire inter-panels : FIP_Nunes_YFV × F3_ParidaD4)."
+)
+
+
 @app.command()
 def analyze(
     config: Optional[str] = typer.Option(None, "-c", "--config", help="Path to the YAML panel configuration file."),
@@ -79,7 +93,7 @@ def analyze(
     targets: Optional[str] = typer.Option(None, "-t", "--targets", help="Path to targets FASTA/TXT file."),
     output: str = typer.Option("report.html", "-o", "--output", help="Output HTML report path."),
     temperature: Optional[float] = typer.Option(None, "--temperature", help="Experiment temperature in Celsius."),
-    enzyme: Optional[str] = typer.Option(None, "--enzyme", help="Enzyme name (e.g. bst2.0)."),
+    enzyme: Optional[str] = typer.Option(None, "--enzyme", help=_ENZYME_HELP),
     na: Optional[float] = typer.Option(None, "--na", help="Na+ concentration in mM."),
     k: Optional[float] = typer.Option(None, "--k", help="K+ concentration in mM."),
     tris: Optional[float] = typer.Option(None, "--tris", help="Tris concentration in mM."),
@@ -94,7 +108,7 @@ def analyze(
     errors: int = typer.Option(2, "--errors", help="Max errors for candidate site seeding outside 3' zone."),
     strict_3prime: int = typer.Option(3, "--strict-3prime", help="Length of strict 3' zone for candidate site seeding."),
     strict_3prime_tolerate: int = typer.Option(2, "--strict-3prime-tolerate", help="Number of tolerated substitutions in strict 3' zone for seeding."),
-    dimer_conc_max: float = typer.Option(0.23, "--dimer-conc-max", help="Seuil maximal de concentration totale de dimères amplifiables en nM déclenchant FAILURE (provisoire, calibré sur 5 cas de paillasse, marge d'un facteur 2,3)."),
+    dimer_conc_max: float = typer.Option(0.23, "--dimer-conc-max", help=_DIMER_CONC_MAX_HELP),
     separate_targets: bool = typer.Option(False, "--separate-targets", "--per-target", help="Solve targets independently instead of joint multi-target equilibrium."),
     force_joint: bool = typer.Option(False, "--force-joint", help="Force joint analysis of multiple panels for the same target.")
 ) -> None:
@@ -267,7 +281,7 @@ def coverage(
     output: str = typer.Option("coverage_report.html", "-o", "--output", help="Output HTML report path."),
     panel: Optional[str] = typer.Option(None, "--panel", help="Panel name to analyze if multiple panels are present in primers file."),
     temperature: float = typer.Option(65.0, "--temperature", help="Experiment temperature in Celsius."),
-    enzyme: Optional[str] = typer.Option(None, "--enzyme", help="Enzyme name (e.g. bst2.0)."),
+    enzyme: Optional[str] = typer.Option(None, "--enzyme", help=_ENZYME_HELP),
     na: float = typer.Option(50.0, "--na", help="Na+ concentration in mM."),
     mg: float = typer.Option(8.0, "--mg", help="Mg2+ concentration in mM."),
     dntp: float = typer.Option(1.4, "--dntp", help="dNTP concentration in mM."),
@@ -430,7 +444,7 @@ def redesign(
     top: int = typer.Option(5, "--top", help="Number of best candidates re-evaluated by the full coupled equilibrium."),
     output: str = typer.Option("redesign_report.html", "-o", "--output", help="Output HTML report path (JSON written alongside)."),
     temperature: Optional[float] = typer.Option(None, "--temperature", help="Experiment temperature in Celsius."),
-    enzyme: Optional[str] = typer.Option(None, "--enzyme", help="Enzyme name (e.g. bst2.0)."),
+    enzyme: Optional[str] = typer.Option(None, "--enzyme", help=_ENZYME_HELP),
     na: Optional[float] = typer.Option(None, "--na", help="Na+ concentration in mM."),
     k: Optional[float] = typer.Option(None, "--k", help="K+ concentration in mM."),
     tris: Optional[float] = typer.Option(None, "--tris", help="Tris concentration in mM."),
@@ -442,7 +456,7 @@ def redesign(
     conc: Optional[List[str]] = typer.Option(None, "--conc", metavar="NOM=µM", help="Per-primer concentration in uM (NAME=VALUE). Repeatable."),  # noqa: B008
     copies: Optional[float] = typer.Option(None, "--copies", help="Target copies per uL."),
     max_variants: int = typer.Option(64, "--max-variants", help="Maximum variants allowed per degenerate primer."),
-    dimer_conc_max: float = typer.Option(0.23, "--dimer-conc-max", help="Amplifiable dimer threshold in nM (same as analyze)."),
+    dimer_conc_max: float = typer.Option(0.23, "--dimer-conc-max", help=_DIMER_CONC_MAX_HELP),
 ) -> None:
     """Propose des séquences de remplacement pour une amorce externe ou de boucle.
     Proposes replacement sequences for an outer or loop primer.

@@ -251,7 +251,8 @@ def test_phase1_version_metadata_and_help() -> None:
     help_clean = " ".join(res_help.stdout.replace("│", " ").split())
     assert "0.23" in help_clean
     assert "calibré sur 5 cas de paillasse" in help_clean
-    assert "facteur 2,3" in help_clean
+    assert "0.154 – 0.336 nM" in help_clean
+    assert "FIP_Nunes_YFV × F3_ParidaD4" in help_clean
 
     citation = (REPO_ROOT / "CITATION.cff").read_text(encoding="utf-8")
     pyproject = (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
