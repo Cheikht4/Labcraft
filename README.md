@@ -102,4 +102,4 @@ If you use LabCraft, please cite our forthcoming publication.
 ## Availability & Requirements
 - **Python:** ≥ 3.10
 - **License:** MIT License
-- **Note:** `primer3-py` (GPLv2) is a runtime dependency.
+- **Note:** `primer3-py` (GPL-2.0) is an optional `dev` dependency used only for reference cross-validation in tests (not required at runtime).

@@ -1,10 +1,8 @@
 """Abstract base class for duplex energy backends.
 
-Classe abstraite pour les backends de calcul d'énergie de duplexes.
-Trois implémentations : NativeBackend (NN pur, sans GPL),
-Primer3Backend (référence, GPLv2), ViennaRNABackend (cofold, sans GPL).
-Sélectionnable via --duplex-backend.
-Aucun module métier n'importe primer3 directement.
+Classe abstraite pour les backends de calcul d'énergie de duplexes :
+NativeBackend (NN pur), ViennaRNABackend (cofold) et ViennaSaltShiftBackend (Owczarzy + LNA).
+Aucun module de `src/labcraft` n'importe `primer3`.
 """
 
 from __future__ import annotations
