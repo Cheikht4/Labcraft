@@ -176,10 +176,12 @@ def _evaluate_dimer_complexes_impl(
                     p_a, p_b, backend, enzyme, temp_celsius, **backend_kwargs
                 )
                 if is_amp or conc > 1e-9:
-                    # Enrichir les dimères rapportés avec la probabilité de Boltzmann 3' (pf_cofold)
-                    # Enrich reported dimers with Boltzmann 3' pairing probability (pf_cofold)
+                    # Enrichir les dimères rapportés avec la probabilité de Boltzmann 3' conditionnelle
+                    # (informatif uniquement pour le rapport HTML/JSON, n'entre pas dans le verdict)
+                    # Enrich reported dimers with conditional Boltzmann 3' probability
+                    # (informational only for HTML/JSON report, never enters the verdict)
                     enrich_dimer_boltzmann_3p(
-                        details, p_a, p_b, is_amp, temp_celsius, **backend_kwargs
+                        details, p_a, p_b, is_amp, temp_celsius, enzyme=enzyme, **backend_kwargs
                     )
                 pa_par = str(details.get("parent_a") or _get_parent_name(p_a.name))
                 pb_par = str(details.get("parent_b") or _get_parent_name(p_b.name))

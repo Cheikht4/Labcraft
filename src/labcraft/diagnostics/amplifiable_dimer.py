@@ -7,8 +7,41 @@ from labcraft.thermo.salt import sodium_equivalent_for_folding
 from labcraft.thermo.vienna import dna_params
 from labcraft.buffer.monovalent import get_total_monovalent
 
+from labcraft.thermo.constants import R_GAS_KCAL_MOL_K
+
 _MAX_PF_3P_CACHE_SIZE = 16384
 _SHARED_PF_3P_CACHE: Dict[Tuple[Any, ...], Dict[str, Any]] = {}
+
+# Seuil heuristique non calibré (10 %) signalant dans le rapport HTML/JSON qu'un dimère classé
+# non amplifiable au MFE possède néanmoins une sous-population Boltzmann 3' intermoléculaire notable.
+# N'intervient JAMAIS dans `is_amplifiable`, `total_amp_dimer_conc_nm`, ni dans le verdict du panel.
+# Uncalibrated heuristic threshold (10%) flagging in HTML/JSON reports that a dimer classified as
+# non-amplifiable at MFE still carries a notable intermolecular 3' Boltzmann sub-population.
+# NEVER enters `is_amplifiable`, `total_amp_dimer_conc_nm`, or the panel verdict.
+SUBOPTIMAL_3P_PROB_THRESHOLD_HEURISTIC = 0.10
+
+_WC_STRICT_PAIRS = frozenset({("A", "T"), ("T", "A"), ("C", "G"), ("G", "C")})
+_WC_OR_WOBBLE_PAIRS = frozenset({("A", "T"), ("T", "A"), ("C", "G"), ("G", "C"), ("G", "T"), ("T", "G")})
+
+
+def _is_valid_3p_stem_pair(
+    b_3p: str,
+    b_tpl: str,
+    offset_from_3p: int,
+    *,
+    abs_window: int = 2,
+    allow_penultimate_wobble: bool = False,
+) -> bool:
+    """Vérifie la compatibilité d'appariement et l'absence de veto ARMS à `offset_from_3p` (0 = base 3' terminale).
+    Checks base-pair compatibility and absence of ARMS block at `offset_from_3p` (0 = strict 3' terminal base).
+    """
+    pair = (b_3p.upper(), b_tpl.upper())
+    pos_1based = offset_from_3p + 1
+    if pos_1based <= abs_window:
+        if allow_penultimate_wobble and pos_1based == 2 and pair in (("G", "T"), ("T", "G")):
+            return True
+        return pair in _WC_STRICT_PAIRS
+    return pair in _WC_OR_WOBBLE_PAIRS
 
 
 def calc_boltzmann_3p_pairing(
@@ -18,22 +51,49 @@ def calc_boltzmann_3p_pairing(
     blocked_a: bool = False,
     blocked_b: bool = False,
     mon_molar: Optional[float] = None,
+    *,
+    min_3p_bp: int = 3,
+    enzyme: Optional[PolymeraseProfile] = None,
 ) -> Dict[str, Any]:
-    """Calcule la probabilité de Boltzmann d'appariement 3' extensible via la fonction de partition bimoléculaire.
-    Computes Boltzmann 3' extensible base-pairing probability via ViennaRNA's bimolecular partition function.
+    """Calcule les probabilités de Boltzmann d'appariement 3' en séparant strictement :
+    1. La probabilité INTERMOLÉCULAIRE conditionnelle P(3' >= `min_3p_bp` pb contiguës avec matrice 5' | >= 1 paire A:B),
+       évaluée analytiquement via `pf_dimer()` (`FAB` connecté) et fonctions de partition contraintes (`hc_add_bp`),
+       en excluant les états dissociés sans paire entre A et B ainsi que tout auto-repliement intramoléculaire.
+    2. La probabilité INTRAMOLÉCULAIRE `prob_3p_intra_{a,b}` d'épingle auto-amorçante sur chaque monomère isolé.
+
+    Note : cet indicateur est purement informatif (rapport HTML et JSON) et n'entre pas dans le verdict.
+
+    Computes Boltzmann 3'-end pairing probabilities while strictly separating:
+    1. Conditional INTERMOLECULAR probability P(3' >= `min_3p_bp` contiguous bp with 5' template | >= 1 A:B pair),
+       evaluated analytically via `pf_dimer()` (connected `FAB`) and hard-constrained partition functions (`hc_add_bp`),
+       excluding unbound A&B states and intramolecular self-hairpins.
+    2. Separate INTRAMOLECULAR self-priming hairpin probabilities `prob_3p_intra_{a,b}` on each isolated monomer.
+
+    Note: this indicator is purely informational (HTML and JSON reports) and never enters the panel verdict.
     """
+    if min_3p_bp < 2:
+        raise ValueError("min_3p_bp doit être >= 2 pour exclure les contacts isolés d'une seule base en 3'.")
+
     l_a = len(primer_a)
     l_b = len(primer_b)
     if l_a == 0 or l_b == 0:
         return {
             "prob_3p_paired_a": 0.0,
             "prob_3p_paired_b": 0.0,
+            "prob_3p_inter_a": 0.0,
+            "prob_3p_inter_b": 0.0,
             "prob_3p_extensible_a": 0.0,
             "prob_3p_extensible_b": 0.0,
+            "prob_3p_intra_a": 0.0,
+            "prob_3p_intra_b": 0.0,
             "boltzmann_3p_prob": 0.0,
+            "connected_dimer_dg_kcal": None,
             "ensemble_dg_kcal": 0.0,
+            "min_3p_bp": min_3p_bp,
         }
 
+    abs_win = enzyme.three_prime_absolute_window if enzyme is not None else 2
+    allow_wob = bool(getattr(enzyme, "allow_penultimate_gt_wobble", False)) if enzyme is not None else False
     salt_key = round(mon_molar, 6) if mon_molar is not None else None
     cache_key: Tuple[Any, ...] = (
         primer_a,
@@ -42,62 +102,111 @@ def calc_boltzmann_3p_pairing(
         blocked_a,
         blocked_b,
         salt_key,
+        min_3p_bp,
+        abs_win,
+        allow_wob,
     )
     if cache_key in _SHARED_PF_3P_CACHE:
         return dict(_SHARED_PF_3P_CACHE[cache_key])
 
-    with dna_params(temp_celsius=temp_celsius, mon_molar=mon_molar):
-        fc = RNA.fold_compound(f"{primer_a}&{primer_b}")
-        _, dg_ensemble = fc.pf()
-        bpp = fc.bpp()
+    rt = R_GAS_KCAL_MOL_K * (temp_celsius + 273.15)
+    hc_flags = RNA.CONSTRAINT_CONTEXT_ALL_LOOPS | RNA.CONSTRAINT_CONTEXT_ENFORCE
 
-    n_tot = l_a + l_b
-    idx_3p_a = l_a          # Indice 1-based du 3' de A / 1-based index of A's 3' end
-    idx_3p_b = l_a + l_b    # Indice 1-based du 3' de B / 1-based index of B's 3' end
+    def _inter_conditional_3p(s_ext: str, s_tpl: str) -> Tuple[float, float, float]:
+        """Retourne (P_inter(3' de s_ext | s_ext:s_tpl connecté), FAB_conn, F0AB_total) dans l'ordre `s_ext&s_tpl`.
+        Placer `s_ext` juste avant '&' garantit que l'hélice 3' `(l1 - r, k + r)` est sans pseudonœud
+        vis-à-vis de toute tige intermoléculaire additionnelle en amont.
+        """
+        l1, l2 = len(s_ext), len(s_tpl)
+        fc = RNA.fold_compound(f"{s_ext}&{s_tpl}")
+        _st, _fa, _fb, fab_conn_raw, f0ab_raw = fc.pf_dimer()
+        fab_conn = float(fab_conn_raw)
+        f0ab = float(f0ab_raw)
+        if fab_conn >= 900.0 or l1 < min_3p_bp or l2 < min_3p_bp + 1 or rt <= 0.0:
+            return 0.0, fab_conn, f0ab
 
-    def _pair_prob(i1: int, j1: int) -> float:
-        if i1 == j1:
+        prob = 0.0
+        # k (1-based dans s_ext&s_tpl) apparié à la base 3' terminale `l1` de s_ext :
+        # k >= l1 + 2 impose au moins 1 nt de matrice 5' sur s_tpl (dont le 5' est à l1 + 1).
+        for k in range(l1 + 2, l1 + l2 - min_3p_bp + 2):
+            if not all(
+                _is_valid_3p_stem_pair(
+                    s_ext[l1 - 1 - r],
+                    s_tpl[(k - l1 - 1) + r],
+                    r,
+                    abs_window=abs_win,
+                    allow_penultimate_wobble=allow_wob,
+                )
+                for r in range(min_3p_bp)
+            ):
+                continue
+            fc_k = RNA.fold_compound(f"{s_ext}&{s_tpl}")
+            for r in range(min_3p_bp):
+                fc_k.hc_add_bp(l1 - r, k + r, hc_flags)
+            _stk, _fak, _fbk, fab_k_raw, _f0k = fc_k.pf_dimer()
+            fab_k = float(fab_k_raw)
+            if fab_k < 900.0:
+                prob += math.exp(-(fab_k - fab_conn) / rt)
+        return min(1.0, max(0.0, prob)), fab_conn, f0ab
+
+    def _intra_monomer_3p(seq_m: str) -> float:
+        """Retourne P_intra(3' >= min_3p_bp pb contiguës avec matrice 5') sur le monomère isolé `seq_m`."""
+        lm = len(seq_m)
+        # Boucle d'épingle interne >= 3 nt entre `k + min_3p_bp - 1` et `lm - min_3p_bp + 1`, et `k >= 2`
+        if lm < 2 * min_3p_bp + 4 or rt <= 0.0:
             return 0.0
-        lo, hi = (i1, j1) if i1 < j1 else (j1, i1)
-        return float(bpp[lo][hi])
+        fc_m = RNA.fold_compound(seq_m)
+        _, gm_raw = fc_m.pf()
+        gm = float(gm_raw)
+        prob = 0.0
+        for k in range(2, lm - 2 * min_3p_bp):
+            if not all(
+                _is_valid_3p_stem_pair(
+                    seq_m[lm - 1 - r],
+                    seq_m[(k - 1) + r],
+                    r,
+                    abs_window=abs_win,
+                    allow_penultimate_wobble=allow_wob,
+                )
+                for r in range(min_3p_bp)
+            ):
+                continue
+            fc_mk = RNA.fold_compound(seq_m)
+            for r in range(min_3p_bp):
+                fc_mk.hc_add_bp(k + r, lm - r, hc_flags)
+            _, gmk_raw = fc_mk.pf()
+            gmk = float(gmk_raw)
+            if gmk < 900.0:
+                prob += math.exp(-(gmk - gm) / rt)
+        return min(1.0, max(0.0, prob))
 
-    prob_paired_a = sum(_pair_prob(idx_3p_a, k) for k in range(1, n_tot + 1) if k != idx_3p_a)
-    prob_paired_b = sum(_pair_prob(idx_3p_b, k) for k in range(1, n_tot + 1) if k != idx_3p_b)
+    with dna_params(temp_celsius=temp_celsius, mon_molar=mon_molar):
+        prob_inter_a, fab_ab, f0_ab = _inter_conditional_3p(primer_a, primer_b)
+        if primer_a == primer_b:
+            prob_inter_b, fab_ba, f0_ba = prob_inter_a, fab_ab, f0_ab
+        else:
+            prob_inter_b, fab_ba, f0_ba = _inter_conditional_3p(primer_b, primer_a)
+        prob_intra_a = _intra_monomer_3p(primer_a)
+        prob_intra_b = prob_intra_a if primer_a == primer_b else _intra_monomer_3p(primer_b)
 
-    # Un appariement 3' offre une matrice 5' à copier si le partenaire n'est pas l'extrémité 5' stricte du brin cible :
-    # - pour A (idx_3p_a = l_a) : k > l_a + 1 sur B (5' de B à l_a + 1), ou 1 < k < l_a sur A (5' de A à 1).
-    # - pour B (idx_3p_b = l_a + l_b) : 1 < k <= l_a sur A (5' de A à 1), ou l_a + 1 < k < idx_3p_b sur B.
-    # A 3' base pair provides a 5' template overhang when the partner is not the strict 5' nucleotide of its strand:
-    # - for A (idx_3p_a = l_a): k > l_a + 1 on B (B's 5' is l_a + 1), or 1 < k < l_a on A (A's 5' is 1).
-    # - for B (idx_3p_b = l_a + l_b): 1 < k <= l_a on A (A's 5' is 1), or l_a + 1 < k < idx_3p_b on B.
-    if blocked_a:
-        prob_ext_a = 0.0
-    else:
-        prob_ext_a = (
-            sum(_pair_prob(idx_3p_a, k) for k in range(l_a + 2, n_tot + 1))
-            + sum(_pair_prob(k, idx_3p_a) for k in range(2, idx_3p_a))
-        )
+    prob_ext_a = 0.0 if blocked_a else prob_inter_a
+    prob_ext_b = 0.0 if blocked_b else prob_inter_b
+    fab_best = min(fab_ab, fab_ba)
+    f0_best = min(f0_ab, f0_ba)
 
-    if blocked_b:
-        prob_ext_b = 0.0
-    else:
-        prob_ext_b = (
-            sum(_pair_prob(k, idx_3p_b) for k in range(2, l_a + 1))
-            + sum(_pair_prob(k, idx_3p_b) for k in range(l_a + 2, idx_3p_b))
-        )
-
-    prob_paired_a = min(1.0, max(0.0, prob_paired_a))
-    prob_paired_b = min(1.0, max(0.0, prob_paired_b))
-    prob_ext_a = min(1.0, max(0.0, prob_ext_a))
-    prob_ext_b = min(1.0, max(0.0, prob_ext_b))
-
-    result = {
-        "prob_3p_paired_a": prob_paired_a,
-        "prob_3p_paired_b": prob_paired_b,
+    result: Dict[str, Any] = {
+        "prob_3p_paired_a": prob_inter_a,
+        "prob_3p_paired_b": prob_inter_b,
+        "prob_3p_inter_a": prob_inter_a,
+        "prob_3p_inter_b": prob_inter_b,
         "prob_3p_extensible_a": prob_ext_a,
         "prob_3p_extensible_b": prob_ext_b,
+        "prob_3p_intra_a": prob_intra_a,
+        "prob_3p_intra_b": prob_intra_b,
         "boltzmann_3p_prob": max(prob_ext_a, prob_ext_b),
-        "ensemble_dg_kcal": float(dg_ensemble),
+        "connected_dimer_dg_kcal": fab_best if fab_best < 900.0 else None,
+        "ensemble_dg_kcal": f0_best,
+        "min_3p_bp": min_3p_bp,
     }
     if len(_SHARED_PF_3P_CACHE) >= _MAX_PF_3P_CACHE_SIZE:
         _SHARED_PF_3P_CACHE.clear()
@@ -352,11 +461,18 @@ def enrich_dimer_boltzmann_3p(
     is_amplifiable: bool,
     temp_celsius: float,
     *,
-    suboptimal_3p_prob_threshold: float = 0.10,
+    suboptimal_3p_prob_threshold: float = SUBOPTIMAL_3P_PROB_THRESHOLD_HEURISTIC,
+    min_3p_bp: int = 3,
+    enzyme: Optional[PolymeraseProfile] = None,
     **backend_kwargs: Any,
 ) -> Dict[str, Any]:
-    """Enrichit le dictionnaire de métadonnées d'un dimère avec les probabilités de Boltzmann 3'.
-    Enriches a dimer metadata dictionary with Boltzmann 3' base-pairing probabilities.
+    """Enrichit les métadonnées de rapport d'un dimère avec les probabilités de Boltzmann 3'
+    intermoléculaires conditionnelles et intramoléculaires séparées (sans modifier le verdict).
+    Le seuil `suboptimal_3p_prob_threshold = 0.10` (10 %) est une heuristique non calibrée.
+
+    Enriches dimer report metadata with conditional intermolecular and separated intramolecular
+    Boltzmann 3' probabilities (never alters the verdict). The `0.10` (10%) cutoff for
+    `suboptimal_3p_masked` is an uncalibrated heuristic.
     """
     na_mm = backend_kwargs.get("na_mm")
     k_mm = float(backend_kwargs.get("k_mm", 0.0) or 0.0)
@@ -378,20 +494,36 @@ def enrich_dimer_boltzmann_3p(
         blk1, blk2 = p_a.blocked_3prime, p_b.blocked_3prime
 
     pf_info = calc_boltzmann_3p_pairing(
-        s1, s2, temp_celsius=temp_celsius, blocked_a=blk1, blocked_b=blk2, mon_molar=mon_molar
+        s1,
+        s2,
+        temp_celsius=temp_celsius,
+        blocked_a=blk1,
+        blocked_b=blk2,
+        mon_molar=mon_molar,
+        min_3p_bp=min_3p_bp,
+        enzyme=enzyme,
     )
     if order == "b&a":
         prob_a = pf_info["prob_3p_extensible_b"]
         prob_b = pf_info["prob_3p_extensible_a"]
+        intra_a = pf_info["prob_3p_intra_b"]
+        intra_b = pf_info["prob_3p_intra_a"]
     else:
         prob_a = pf_info["prob_3p_extensible_a"]
         prob_b = pf_info["prob_3p_extensible_b"]
+        intra_a = pf_info["prob_3p_intra_a"]
+        intra_b = pf_info["prob_3p_intra_b"]
 
     max_prob = float(pf_info["boltzmann_3p_prob"])
     details["prob_3p_extensible_a"] = float(prob_a)
     details["prob_3p_extensible_b"] = float(prob_b)
+    details["prob_3p_intra_a"] = float(intra_a)
+    details["prob_3p_intra_b"] = float(intra_b)
     details["boltzmann_3p_prob"] = max_prob
+    details["connected_dimer_dg_kcal"] = pf_info["connected_dimer_dg_kcal"]
     details["ensemble_dg_kcal"] = float(pf_info["ensemble_dg_kcal"])
+    # Heuristique non calibrée (seuil 10 %) : informatif uniquement, n'entre pas dans le verdict
+    # Uncalibrated heuristic (10% threshold): informational only, does not enter the verdict
     details["suboptimal_3p_masked"] = bool(
         (not is_amplifiable) and (max_prob >= suboptimal_3p_prob_threshold)
     )
@@ -483,6 +615,7 @@ def evaluate_pair_amplifiable(
                 is_amp,
                 temp_celsius,
                 suboptimal_3p_prob_threshold=suboptimal_3p_prob_threshold,
+                enzyme=enzyme,
                 **salt_kwargs,
             )
         return is_amp, dg_3p, details
@@ -609,6 +742,7 @@ def evaluate_pair_amplifiable(
             is_amplifiable,
             temp_celsius,
             suboptimal_3p_prob_threshold=suboptimal_3p_prob_threshold,
+            enzyme=enzyme,
             **salt_kwargs,
         )
     return is_amplifiable, worst_dg, details

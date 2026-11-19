@@ -173,6 +173,114 @@ def test_analyze_json_exports_boltzmann_3p_fields(tmp_path: Path) -> None:
     assert hetero["boltzmann_3p_prob"] is not None
     assert hetero["boltzmann_3p_prob"] > 0.10
     assert hetero["suboptimal_3p_masked"] is True
+    assert hetero["prob_3p_intra_a"] is not None
+    assert hetero["prob_3p_intra_b"] is not None
+    html_text = out_html.read_text(encoding="utf-8")
+    assert "heuristique non calibré" in html_text
+    assert "sans effet sur le verdict" in html_text
+
+
+def test_point3_boltzmann_3p_inter_vs_intra_contiguous_and_connected() -> None:
+    """Vérifie la définition corrigée de `calc_boltzmann_3p_pairing` (Point 3) :
+    (a) rejet des contacts isolés d'1 seule paire en 3' (`min_3p_bp >= 2`, défaut 3) et respect du veto ARMS ;
+    (b) séparation stricte entre épingle auto-amorçante intramoléculaire (`prob_3p_intra_*`) et dimère A:B ;
+    (c) conditionnement exact sur l'existence d'au moins une paire intermoléculaire entre A et B (`FAB`).
+
+    Verifies the corrected definition of `calc_boltzmann_3p_pairing` (Point 3):
+    (a) single-base 3' contacts rejected (`min_3p_bp >= 2`, default 3) and ARMS veto enforced;
+    (b) strict separation of intramolecular self-priming hairpins (`prob_3p_intra_*`) from A:B dimers;
+    (c) exact conditioning on >= 1 intermolecular pair between A and B (`FAB`).
+    """
+    import math
+    import pytest
+    import RNA
+    from labcraft.diagnostics.enzyme import get_enzyme
+    from labcraft.thermo.constants import R_GAS_KCAL_MOL_K
+
+    with pytest.raises(ValueError, match="min_3p_bp"):
+        calc_boltzmann_3p_pairing("ATGCATGC", "GCATGCAT", min_3p_bp=1)
+
+    with dna_session(temp_celsius=63.0):
+        # (a1) Contact 3' d'une seule base malgré une forte tige 5' : rejeté (prob == 0.0)
+        # (a1) Lone 1-bp 3' contact alongside a strong 5' stem: rejected (prob == 0.0)
+        pf_1bp = calc_boltzmann_3p_pairing("GCATGCATAAAAAAC", "ATGCATGCTGTGAAA", temp_celsius=63.0)
+        assert pf_1bp["boltzmann_3p_prob"] == 0.0
+
+        # (a2) Wobble G·T en position pénultième (-2) : bloqué en ARMS strict, autorisé si activé sur l'enzyme
+        # (a2) Penultimate (-2) G·T wobble: blocked under strict ARMS, allowed when enabled on enzyme
+        # A 3' = ... G(-3) T(-2) C(-1) ; B 5'->3' = AAAA G(+1 vs C) G(+2 wobble vs T) C(+3 vs G) AAAA
+        pf_wob_strict = calc_boltzmann_3p_pairing(
+            "AAAAAAAAAGTC", "AAAAGGCAAAAA", temp_celsius=50.0, enzyme=BST_2_0
+        )
+        bst_wob = get_enzyme({"name": "bst2.0", "allow_penultimate_gt_wobble": True})
+        pf_wob_loose = calc_boltzmann_3p_pairing(
+            "AAAAAAAAAGTC", "AAAAGGCAAAAA", temp_celsius=50.0, enzyme=bst_wob
+        )
+        assert pf_wob_strict["prob_3p_inter_a"] == 0.0
+        assert pf_wob_loose["prob_3p_inter_a"] > 0.10
+
+        # (b) Épingle auto-amorçante sur A face à un brin B sans complémentarité 3' :
+        #     `boltzmann_3p_prob` (intermoléculaire) vaut 0.0 tandis que `prob_3p_intra_a` > 0.80
+        # (b) Self-priming hairpin on A paired with strand B lacking 3' complementarity:
+        #     intermolecular `boltzmann_3p_prob` is 0.0 while `prob_3p_intra_a` > 0.80
+        pf_hp = calc_boltzmann_3p_pairing("AAAAAGCATGCTTTTGCATGC", "CCCCCCCCCCCCCCC", temp_celsius=63.0)
+        assert pf_hp["prob_3p_inter_a"] == 0.0
+        assert pf_hp["prob_3p_inter_b"] == 0.0
+        assert pf_hp["boltzmann_3p_prob"] == 0.0
+        assert pf_hp["prob_3p_intra_a"] > 0.80
+        assert pf_hp["prob_3p_intra_b"] == 0.0
+
+        # (c1) Deux brins sans aucune paire intermoléculaire possible : `connected_dimer_dg_kcal` est None
+        # (c1) Two strands with zero possible intermolecular pairs: `connected_dimer_dg_kcal` is None
+        pf_unb = calc_boltzmann_3p_pairing("AAATATAATTTTTATTATAAA", "CCCCCCCCCCCCCCC", temp_celsius=37.0)
+        assert pf_unb["connected_dimer_dg_kcal"] is None
+        assert pf_unb["boltzmann_3p_prob"] == 0.0
+
+        # (c2) Accord analytique exact avec l'énumération exhaustive des structures connectées sur un 8-mer
+        # (c2) Exact analytical agreement against brute-force enumeration of connected structures on an 8-mer
+        sa, sb = "AAAAAGGC", "AAAGCCAA"
+        pf_8 = calc_boltzmann_3p_pairing(sa, sb, temp_celsius=63.0, min_3p_bp=3)
+        fc_ref = RNA.fold_compound(f"{sa}&{sb}")
+        rt = R_GAS_KCAL_MOL_K * (63.0 + 273.15)
+        seq_cat = sa + sb
+        allowed_pairs = {("A", "T"), ("T", "A"), ("C", "G"), ("G", "C"), ("G", "T"), ("T", "G")}
+        memo: dict[tuple[int, int], list[str]] = {}
+
+        def _enum(i: int, j: int) -> list[str]:
+            if i > j:
+                return [""]
+            if (i, j) in memo:
+                return memo[(i, j)]
+            out = ["." + s for s in _enum(i + 1, j)]
+            for k in range(i + 1, j + 1):
+                same = (i < 8 and k < 8) or (i >= 8 and k >= 8)
+                if same and (k - i - 1) < 3:
+                    continue
+                if (seq_cat[i], seq_cat[k]) in allowed_pairs:
+                    for inside in _enum(i + 1, k - 1):
+                        for right in _enum(k + 1, j):
+                            out.append("(" + inside + ")" + right)
+            memo[(i, j)] = out
+            return out
+
+        z_conn = 0.0
+        z_3p = 0.0
+        for st in _enum(0, len(seq_cat) - 1):
+            stk: list[int] = []
+            prs: dict[int, int] = {}
+            for idx1, ch in enumerate(st, 1):
+                if ch == "(":
+                    stk.append(idx1)
+                elif ch == ")":
+                    j1 = stk.pop()
+                    prs[j1] = idx1
+                    prs[idx1] = j1
+            if any(u <= 8 < v for u, v in prs.items()):
+                w = math.exp(-fc_ref.eval_structure(st) / rt)
+                z_conn += w
+                if prs.get(8) == 12 and prs.get(7) == 13 and prs.get(6) == 14:
+                    z_3p += w
+        assert pf_8["prob_3p_inter_a"] == pytest.approx(z_3p / z_conn, abs=0.005)
 
 
 def test_point2_santalucia_hicks_2004_table4_exact_values_and_default_equilibrium_dg() -> None:

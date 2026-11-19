@@ -104,6 +104,12 @@ def build_analyze_json_payload(
             "boltzmann_3p_prob": (
                 float(r.boltzmann_3p_prob) if r.boltzmann_3p_prob is not None else None
             ),
+            "prob_3p_intra_a": (
+                float(r.prob_3p_intra_a) if r.prob_3p_intra_a is not None else None
+            ),
+            "prob_3p_intra_b": (
+                float(r.prob_3p_intra_b) if r.prob_3p_intra_b is not None else None
+            ),
             "suboptimal_3p_masked": bool(r.suboptimal_3p_masked),
         })
 

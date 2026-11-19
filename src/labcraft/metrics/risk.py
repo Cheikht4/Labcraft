@@ -28,6 +28,8 @@ class RiskItem:
     boltzmann_3p_prob: Optional[float] = None
     prob_3p_extensible_a: Optional[float] = None
     prob_3p_extensible_b: Optional[float] = None
+    prob_3p_intra_a: Optional[float] = None
+    prob_3p_intra_b: Optional[float] = None
     suboptimal_3p_masked: bool = False
 
     @property
@@ -97,6 +99,8 @@ def evaluate_risks(
                 boltzmann_3p_prob=details.get("boltzmann_3p_prob"),
                 prob_3p_extensible_a=details.get("prob_3p_extensible_a"),
                 prob_3p_extensible_b=details.get("prob_3p_extensible_b"),
+                prob_3p_intra_a=details.get("prob_3p_intra_a"),
+                prob_3p_intra_b=details.get("prob_3p_intra_b"),
                 suboptimal_3p_masked=bool(details.get("suboptimal_3p_masked", False)),
             ))
             

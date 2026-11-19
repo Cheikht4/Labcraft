@@ -947,6 +947,9 @@
                 <div><strong>Concentration:</strong> {{ "%.2e"|format(risk.concentration) }} M</div>
                 <div><strong>ΔG global:</strong> {{ "%.2f"|format(risk.delta_g) }} kcal/mol</div>
                 <div><strong>ΔG (3'-end):</strong> {{ "%.2f"|format(risk.delta_g_3p) }} kcal/mol</div>
+                {% if risk.boltzmann_3p_prob is not none %}
+                <div><strong>P<sub>Boltzmann</sub>(3' inter &ge; 3 pb | lié):</strong> {{ "%.1f"|format(risk.boltzmann_3p_prob * 100) }} % <small style="color: var(--color-muted);">(informatif)</small></div>
+                {% endif %}
             </div>
             
             {% if risk.alignment_columns %}
@@ -1033,10 +1036,16 @@
                 {% if risk.is_blocked_veto %}
                 <br><strong style="color: var(--color-warning-text); font-size: 12px;">⚠️ Ce dimère aurait été amplifiable, mais n'est pas amplifiable : 3' bloqué.</strong>
                 {% endif %}
+                {% if risk.suboptimal_3p_masked and risk.boltzmann_3p_prob is not none %}
+                <br><strong style="color: var(--color-warning-text); font-size: 12px;">ℹ️ Conformation 3' intermoléculaire sous-optimale masquée au MFE : P<sub>Boltzmann</sub>(3' &ge; 3 pb | dimère lié) = {{ "%.1f"|format(risk.boltzmann_3p_prob * 100) }} % &ge; 10 % (seuil heuristique non calibré ; indicateur informatif sans effet sur le verdict).</strong>
+                {% endif %}
             </p>
             <div class="artefact-stats">
                 <div><strong>Concentration:</strong> {{ "%.2e"|format(risk.concentration) }} M</div>
                 <div><strong>ΔG global:</strong> {{ "%.2f"|format(risk.delta_g) }} kcal/mol</div>
+                {% if risk.boltzmann_3p_prob is not none %}
+                <div><strong>P<sub>Boltzmann</sub>(3' inter &ge; 3 pb | lié):</strong> {{ "%.1f"|format(risk.boltzmann_3p_prob * 100) }} % <small style="color: var(--color-muted);">(informatif)</small></div>
+                {% endif %}
             </div>
             {% if risk.alignment_columns %}
             <div class="diagram-container" title="{{ risk.alignment_ascii }}">
