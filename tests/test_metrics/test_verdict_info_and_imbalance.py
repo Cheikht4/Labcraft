@@ -109,20 +109,25 @@ def test_five_reference_cases_verdict_and_cli_info_exit_zero(tmp_path: Path) -> 
         ],
     )
     assert res_cli.exit_code == 0, res_cli.stdout
-    assert "Verdict Global : INFO" in out_d3.read_text(encoding="utf-8")
+    d3_html = out_d3.read_text(encoding="utf-8")
+    assert "Verdict Global : INFO" in d3_html
+    assert "0.115 nM" in d3_html
+    assert "0.230 nM" in d3_html
     d3_json = json.loads((tmp_path / "d3.json").read_text(encoding="utf-8"))
     assert d3_json["verdict"] == "INFO"
     assert all(iss["level"] == "INFO" for iss in d3_json["issues"])
 
-    # Vérifier les options CLI --role-imbalance-ratio et --dimer-warn-ratio dans --help
+    # Vérifier les options CLI --role-imbalance-ratio et --dimer-warn-ratio (et l'affichage à 3 décimales) dans --help
     res_help = runner.invoke(app, ["analyze", "--help"])
     clean_help = " ".join(res_help.stdout.replace("│", " ").split())
     assert "--role-imbalance-ratio" in clean_help
     assert "--dimer-warn-ratio" in clean_help
     assert "2,0 kcal/mol" in clean_help
+    assert "0.115 nM" in clean_help
+    assert "0.230 nM" in clean_help
 
     cases = [
-        ("singleplex_denv4", GT_DIR / "parida_DENV4.txt", GT_DIR / "Dengue_4_S1028.fasta", 0.8, 0.4, 0.2, "WARNING", "Dimères amplifiables modérés"),
+        ("singleplex_denv4", GT_DIR / "parida_DENV4.txt", GT_DIR / "Dengue_4_S1028.fasta", 0.8, 0.4, 0.2, "WARNING", "0.154 nM >= plancher WARNING 0.115 nM, < seuil FAILURE 0.230 nM"),
         ("singleplex_yfv", GT_DIR / "nunes_YFV.txt", GT_DIR / "YFV_17D_17DD.fasta", 0.8, 0.4, 0.2, "WARNING", "B3_Nunes_YFV : 16 variants, ~12,5 nM par variant"),
         ("duplex_half", GT_DIR / "duplex_YFV_DENV4_primers.txt", GT_DIR / "duplex_YFV_DENV4_targets.fasta", 0.4, 0.2, 0.1, "FAILURE", "dimères d'amorces amplifiables majeurs"),
         ("duplex_full", GT_DIR / "duplex_YFV_DENV4_primers.txt", GT_DIR / "duplex_YFV_DENV4_targets.fasta", 0.8, 0.4, 0.2, "FAILURE", "dimères d'amorces amplifiables majeurs"),

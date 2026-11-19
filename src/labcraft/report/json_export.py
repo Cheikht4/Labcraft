@@ -85,7 +85,7 @@ def build_analyze_json_payload(
     for r in risks:
         conc_nm = float(r.concentration) * 1e9
         is_amp = bool(r.is_amplifiable)
-        if not is_amp:
+        if not is_amp and float(r.concentration) > 1e-9:
             blocking_total_nm += conc_nm
         is_inter = bool(r.panel_a and r.panel_b and r.panel_a != r.panel_b)
         dimers_list.append({

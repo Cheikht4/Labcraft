@@ -408,3 +408,112 @@ def test_point2_santalucia_hicks_2004_matches_primer3_reference() -> None:
         pi = primer3.calc_heterodimer(top_i, bot_i, mv_conc=1000.0, dv_conc=0.0, dntp_conc=0.0, temp_c=37.0)
         assert (dhi - dh0) == pytest.approx((pi.dh - p0.dh) / 1000.0, abs=0.02)
         assert (dsi - ds0) == pytest.approx(pi.ds - p0.ds, abs=0.05)
+
+
+def test_relative_boltzmann_3p_enrichment_floor_from_dimer_conc_max() -> None:
+    """Vérifie que l'enrichissement Boltzmann 3' des dimères non amplifiables suit le seuil relatif
+    `conc >= 0.1 * dimer_conc_max` (en mol/L : `0.1 * dimer_conc_max_nm * 1e-9`) dérivé de `--dimer-conc-max`,
+    et qu'un dimère sub-nanomolaire (`0.050 nM < 1 nM`) avec `suboptimal_3p_masked = True` est conservé
+    dans `evaluate_risks` et le JSON sans gonfler `blocking_dimers_total_nm` (`> 1 nM`).
+
+    Verifies that Boltzmann 3' enrichment of non-amplifiable dimers uses the relative floor
+    `conc >= 0.1 * dimer_conc_max` (`0.1 * dimer_conc_max_nm * 1e-9` M) derived from `--dimer-conc-max`,
+    and that a sub-nanomolar dimer (`0.050 nM < 1 nM`) with `suboptimal_3p_masked = True` is retained in
+    `evaluate_risks` and JSON output without inflating `blocking_dimers_total_nm` (`> 1 nM`).
+    """
+    import numpy as np
+    import pytest
+
+    from labcraft.diagnostics.enzyme import BST_2_0
+    from labcraft.lamp.domains import PhysicalPrimer, PrimerRole
+    from labcraft.metrics.fractions import PrimerFractions
+    from labcraft.metrics.risk import evaluate_risks
+    from labcraft.metrics.verdict import PanelVerdict
+    from labcraft.pipeline.analysis import evaluate_dimer_complexes
+    from labcraft.report.json_export import build_analyze_json_payload
+    from labcraft.solver.types import EquilibriumProblem, EquilibriumResult, SolverMethod
+    from labcraft.thermo.backends.vienna import ViennaRNABackend
+
+    p_a = PhysicalPrimer.from_simple("SubPanel_F3", "CGCGCGCAAAAAATGCATGC", PrimerRole.F3, nominal_concentration=2e-7)
+    p_b = PhysicalPrimer.from_simple("SubPanel_B3", "CGCGCGCTTTTTGCATGCAT", PrimerRole.B3, nominal_concentration=2e-7)
+    prob = EquilibriumProblem(
+        n_strands=2,
+        n_complexes=3,
+        stoichiometry=np.array([[1, 0], [0, 1], [1, 1]], dtype=int),
+        delta_g=np.array([0.0, 0.0, -6.5], dtype=float),
+        total_concentrations=np.array([2e-7, 2e-7], dtype=float),
+        temperature_kelvin=63.0 + 273.15,
+    )
+    # 0,050 nM = 5,0e-11 M : entre 0,023 nM (0,1 * 0,230 nM) et 1,0 nM (ancien filtre codé en dur)
+    # 0.050 nM = 5.0e-11 M: between 0.023 nM (0.1 * 0.230 nM) and 1.0 nM (previous hardcoded cutoff)
+    res_eq = EquilibriumResult(
+        concentrations=np.array([1.9995e-7, 1.9995e-7, 5.0e-11], dtype=float),
+        free_concentrations=np.array([1.9995e-7, 1.9995e-7], dtype=float),
+        log_free_concentrations=np.log(np.array([1.9995e-7, 1.9995e-7], dtype=float)),
+        residuals=np.zeros(2, dtype=float),
+        max_residual=0.0,
+        n_iterations=1,
+        method=SolverMethod.DUAL_NEWTON,
+        converged=True,
+    )
+    c_names = ["SubPanel_F3_free", "SubPanel_B3_free", "SubPanel_F3_SubPanel_B3"]
+    backend = ViennaRNABackend()
+    pmap = {"SubPanel_F3": "SubPanel", "SubPanel_B3": "SubPanel"}
+
+    # 1. Avec dimer_conc_max_nm = 0.230 (plancher = 0.023 nM <= 0.050 nM) : enrichi et retenu
+    amp_flags, concs_out, details_list = evaluate_dimer_complexes(
+        prob,
+        res_eq,
+        c_names,
+        [p_a, p_b],
+        backend,
+        BST_2_0,
+        63.0,
+        {},
+        pmap,
+        dimer_conc_max_nm=0.23,
+    )
+    assert amp_flags == [False, False, False]
+    assert details_list[2].get("boltzmann_3p_prob") is not None
+    assert details_list[2]["suboptimal_3p_masked"] is True
+
+    risks = evaluate_risks(c_names, concs_out, amp_flags, dimer_details=details_list)
+    assert len(risks) == 1
+    assert risks[0].suboptimal_3p_masked is True
+
+    payload = build_analyze_json_payload(
+        version="0.0.1",
+        timestamp="2026-11-19T00:00:00Z",
+        inputs={},
+        conditions={"temperature_celsius": 63.0, "enzyme": "Bst 2.0", "dimer_dg_threshold": -2.0},
+        primer_concentrations_uM={"SubPanel_F3": 0.2, "SubPanel_B3": 0.2},
+        fractions={
+            "SubPanel_F3": PrimerFractions(0.99, 0.0, 0.0, 0.01, 0.0, 0.0),
+            "SubPanel_B3": PrimerFractions(0.99, 0.0, 0.0, 0.01, 0.0, 0.0),
+        },
+        unfolding_penalties={},
+        target_occupations={},
+        risks=risks,
+        dimer_decomposition={},
+        mispriming_risks=[],
+        verdict=PanelVerdict(status="OK", issues=[], global_cause="OK"),
+    )
+    assert len(payload["dimers"]) == 1
+    assert payload["dimers"][0]["suboptimal_3p_masked"] is True
+    assert payload["totals"]["blocking_dimers_total_nm"] == pytest.approx(0.0, abs=1e-12)
+
+    # 2. Avec dimer_conc_max_nm = 1.000 (plancher = 0.100 nM > 0.050 nM) : non enrichi
+    _, _, details_high = evaluate_dimer_complexes(
+        prob,
+        res_eq,
+        c_names,
+        [p_a, p_b],
+        backend,
+        BST_2_0,
+        63.0,
+        {},
+        pmap,
+        dimer_conc_max_nm=1.0,
+    )
+    assert "boltzmann_3p_prob" not in details_high[2]
+

@@ -75,7 +75,11 @@ def evaluate_risks(
             if "homo" in c_name:
                 desc = "Homodimère bloquant"
         
-        if is_amp or conc > 1e-9:
+        # `conc` est en mol/L (M ; 1e-9 M = 1 nM) : conserver tout dimère amplifiable, tout dimère
+        # bloquant majeur (> 1 nM), ainsi que tout dimère à conformation 3' sous-optimale masquée.
+        # `conc` is in mol/L (M; 1e-9 M = 1 nM): retain all amplifiable dimers, major blocking
+        # dimers (> 1 nM), and any dimer flagged with `suboptimal_3p_masked`.
+        if is_amp or conc > 1e-9 or bool(details.get("suboptimal_3p_masked", False)):
             risks.append(RiskItem(
                 complex_name=c_name,
                 concentration=conc,

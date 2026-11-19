@@ -53,7 +53,7 @@ def _fmt_fr_1dec(val: float) -> str:
 
 def _fmt_nm(val: float) -> str:
     """Formate une concentration en nM / Formats a concentration in nM."""
-    return f"{val:.4f}" if 0.0 < val < 0.01 else f"{val:.2f}"
+    return f"{val:.4f}" if 0.0 < val < 0.01 else f"{val:.3f}"
 
 
 @dataclass
@@ -325,8 +325,8 @@ def generate_verdict(
         ]
         if has_warn_dimers and dimer_conc_max_nm is not None:
             global_cause = (
-                f"Dimères amplifiables modérés ({_fmt_nm(total_amp_dimer_conc_nm)} nM >= plancher WARNING "
-                f"{_fmt_nm(warn_floor_nm)} nM, < seuil FAILURE {dimer_conc_max_nm:.2f} nM)."
+                f"Dimères amplifiables modérés ({total_amp_dimer_conc_nm:.3f} nM >= plancher WARNING "
+                f"{warn_floor_nm:.3f} nM, < seuil FAILURE {dimer_conc_max_nm:.3f} nM)."
             )
         elif deg_warn_causes:
             global_cause = " ".join(deg_warn_causes)
@@ -337,7 +337,7 @@ def generate_verdict(
         if has_info_dimers and dimer_conc_max_nm is not None:
             global_cause = (
                 f"Traces mineures de dimères amplifiables ({_fmt_nm(total_amp_dimer_conc_nm)} nM < plancher WARNING "
-                f"{_fmt_nm(warn_floor_nm)} nM) et occupations d'initiation équilibrées."
+                f"{warn_floor_nm:.3f} nM) et occupations d'initiation équilibrées."
             )
         else:
             global_cause = (

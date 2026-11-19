@@ -80,13 +80,13 @@ _ENZYME_HELP = (
 )
 _DIMER_CONC_MAX_HELP = (
     "Seuil maximal de concentration totale de dimères amplifiables en nM déclenchant FAILURE "
-    "(provisoire, calibré sur 5 cas de paillasse ; intervalle de séparation réel : 0.154 – 0.336 nM ; "
-    "duplex_half et duplex_full sont deux dilutions du même panel donc non indépendants, et la "
-    "séparation repose sur une seule paire inter-panels : FIP_Nunes_YFV × F3_ParidaD4)."
+    "(défaut : 0.230 nM — provisoire, calibré sur 5 cas de paillasse ; intervalle de séparation réel : "
+    "0.154 – 0.336 nM ; duplex_half et duplex_full sont deux dilutions du même panel donc non indépendants, "
+    "et la séparation repose sur une seule paire inter-panels : FIP_Nunes_YFV × F3_ParidaD4)."
 )
 _DIMER_WARN_RATIO_HELP = (
     "Fraction de --dimer-conc-max au-delà de laquelle les dimères amplifiables passent d'INFO à WARNING "
-    "(heuristique non calibrée, défaut : 0.5 soit 50 % du seuil FAILURE)."
+    "(heuristique non calibrée, défaut : 0.500 soit un plancher WARNING de 0.115 nM pour un seuil FAILURE de 0.230 nM)."
 )
 _ROLE_IMBALANCE_RATIO_HELP = (
     "Rapport maximal d'occupation brute toléré entre amorces d'initiation de même rôle (F3 vs B3, FIP vs BIP) "

@@ -121,6 +121,8 @@ def evaluate_dimer_complexes(
     temp_celsius: float,
     backend_kwargs: Dict[str, Any],
     primer_to_panel_map: Dict[str, str],
+    *,
+    dimer_conc_max_nm: float = 0.23,
 ) -> Tuple[List[bool], List[float], List[Dict[str, Any]]]:
     """Évalue chaque complexe dimérique sans cible dans une session ADN unique.
     Evaluates each target-free dimer complex within a single DNA parameter session.
@@ -136,6 +138,7 @@ def evaluate_dimer_complexes(
             temp_celsius,
             backend_kwargs,
             primer_to_panel_map,
+            dimer_conc_max_nm=dimer_conc_max_nm,
         )
 
 
@@ -149,6 +152,8 @@ def _evaluate_dimer_complexes_impl(
     temp_celsius: float,
     backend_kwargs: Dict[str, Any],
     primer_to_panel_map: Dict[str, str],
+    *,
+    dimer_conc_max_nm: float = 0.23,
 ) -> Tuple[List[bool], List[float], List[Dict[str, Any]]]:
     """Évalue chaque complexe dimérique sans cible pour l'extensibilité 3' et la décomposition.
     Evaluates each target-free dimer complex for 3' extensibility and panel decomposition.
@@ -180,7 +185,14 @@ def _evaluate_dimer_complexes_impl(
                 is_amp, _dg_3p, details = evaluate_pair_amplifiable(
                     p_a, p_b, backend, enzyme, temp_celsius, **backend_kwargs
                 )
-                if is_amp or conc > 1e-9:
+                # `conc` du solveur est en mol/L (M) ; `dimer_conc_max_nm` est en nmol/L (1 nM = 1e-9 M).
+                # Seuil relatif d'enrichissement Boltzmann 3' : conc >= 0.1 * dimer_conc_max (soit 0,023 nM
+                # = 2,3e-11 M par défaut pour dimer_conc_max = 0,230 nM), dérivé du paramètre CLI.
+                # Solver `conc` is in mol/L (M); `dimer_conc_max_nm` is in nmol/L (1 nM = 1e-9 M).
+                # Relative Boltzmann 3' enrichment floor: conc >= 0.1 * dimer_conc_max (0.023 nM = 2.3e-11 M
+                # by default for dimer_conc_max = 0.230 nM), derived from the CLI threshold.
+                boltzmann_min_conc_molar = 0.1 * dimer_conc_max_nm * 1e-9
+                if is_amp or conc >= boltzmann_min_conc_molar:
                     # Enrichir les dimères rapportés avec la probabilité de Boltzmann 3' conditionnelle
                     # (informatif uniquement pour le rapport HTML/JSON, n'entre pas dans le verdict)
                     # Enrich reported dimers with conditional Boltzmann 3' probability
@@ -420,6 +432,7 @@ def run_single_panel_analysis(
                     temp_celsius,
                     backend_kwargs,
                     primer_to_panel_map,
+                    dimer_conc_max_nm=dimer_conc_max,
                 )
 
                 risks = evaluate_risks(
@@ -506,6 +519,7 @@ def run_single_panel_analysis(
                         temp_celsius,
                         backend_kwargs,
                         primer_to_panel_map,
+                        dimer_conc_max_nm=dimer_conc_max,
                     )
 
                     risks = evaluate_risks(
@@ -702,6 +716,8 @@ def run_single_panel_analysis(
         ),
         "enzyme": enzyme.name,
         "dimer_dg_threshold": enzyme.dimer_dg_threshold,
+        "dimer_conc_max_nm": dimer_conc_max,
+        "dimer_warn_floor_nm": dimer_warn_ratio * dimer_conc_max,
         "concentrations_fip_bip": "Per target (check config)",
         "concentrations_target": "Per target (check config)",
         "interaction_matrix": interaction_matrix,

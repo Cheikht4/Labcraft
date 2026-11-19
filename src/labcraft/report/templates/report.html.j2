@@ -416,7 +416,10 @@
         <h2>Conditions de Réaction</h2>
         <div class="target-box">
             <p><strong>Température :</strong> {{ metadata.temperature }} °C</p>
-            <p><strong>Enzyme :</strong> {{ metadata.enzyme }} (Seuil dimère : {{ "%.2f"|format(metadata.dimer_dg_threshold) }} kcal/mol)</p>
+            <p><strong>Enzyme :</strong> {{ metadata.enzyme }} (Seuil dimère : {{ "%.3f"|format(metadata.dimer_dg_threshold) }} kcal/mol)</p>
+            {% if metadata.get('dimer_conc_max_nm') is not none %}
+            <p><strong>Seuils de concentration des dimères amplifiables :</strong> WARNING &ge; {{ "%.3f"|format(metadata.get('dimer_warn_floor_nm', 0.5 * metadata.dimer_conc_max_nm)) }} nM ; FAILURE &ge; {{ "%.3f"|format(metadata.dimer_conc_max_nm) }} nM</p>
+            {% endif %}
             <p><strong>Tampon :</strong> 
             {% if metadata.buffer is string %}
                 {{ metadata.buffer }}
@@ -1029,7 +1032,7 @@
         {% endif %}
 
         {% if blocking_dimers %}
-        <h3>Dimères Bloquants Majeurs (> 1 nM)</h3>
+        <h3>Dimères Non Amplifiables / Bloquants (&gt; 1 nM ou 3' sous-optimal masqué)</h3>
         {% set top_blockers = blocking_dimers[:10] %}
         {% for risk in top_blockers %}
         <div class="artefact-card artefact-block">
