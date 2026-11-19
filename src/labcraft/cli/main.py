@@ -93,6 +93,11 @@ _ROLE_IMBALANCE_RATIO_HELP = (
     "avant passage d'INFO à WARNING (heuristique non calibrée, défaut : 20.0 ≈ ΔΔG de 2,0 kcal/mol à 63 °C, "
     "sans normalisation par le nombre de variants dégénérés)."
 )
+_BOLTZMANN_MAX_DIMERS_HELP = (
+    "Plafond du nombre de dimères non amplifiables (parmi ceux >= 0.1 × --dimer-conc-max, triés par "
+    "concentration décroissante) évalués par calc_boltzmann_3p_pairing, en plus de 100 % des dimères "
+    "amplifiables (défaut : 25)."
+)
 
 
 @app.command()
@@ -120,6 +125,7 @@ def analyze(
     dimer_conc_max: float = typer.Option(0.23, "--dimer-conc-max", help=_DIMER_CONC_MAX_HELP),
     dimer_warn_ratio: float = typer.Option(0.5, "--dimer-warn-ratio", help=_DIMER_WARN_RATIO_HELP),
     role_imbalance_ratio: float = typer.Option(20.0, "--role-imbalance-ratio", help=_ROLE_IMBALANCE_RATIO_HELP),
+    boltzmann_max_dimers: int = typer.Option(25, "--boltzmann-max-dimers", min=0, help=_BOLTZMANN_MAX_DIMERS_HELP),
     separate_targets: bool = typer.Option(False, "--separate-targets", "--per-target", help="Solve targets independently instead of joint multi-target equilibrium."),
     force_joint: bool = typer.Option(False, "--force-joint", help="Force joint analysis of multiple panels for the same target.")
 ) -> None:
@@ -192,6 +198,7 @@ def analyze(
             dimer_conc_max=dimer_conc_max,
             dimer_warn_ratio=dimer_warn_ratio,
             role_imbalance_ratio=role_imbalance_ratio,
+            boltzmann_max_dimers=boltzmann_max_dimers,
             separate_targets=separate_targets,
             force_joint=force_joint,
         )
@@ -212,6 +219,7 @@ def _run_analyze_with_config(
     dimer_conc_max: float,
     dimer_warn_ratio: float = 0.5,
     role_imbalance_ratio: float = 20.0,
+    boltzmann_max_dimers: int = 25,
     separate_targets: bool,
     force_joint: bool,
 ) -> None:
@@ -261,6 +269,7 @@ def _run_analyze_with_config(
                 dimer_conc_max=dimer_conc_max,
                 dimer_warn_ratio=dimer_warn_ratio,
                 role_imbalance_ratio=role_imbalance_ratio,
+                boltzmann_max_dimers=boltzmann_max_dimers,
                 separate_targets=separate_targets,
                 progress_callback=typer.echo,
             )

@@ -517,3 +517,122 @@ def test_relative_boltzmann_3p_enrichment_floor_from_dimer_conc_max() -> None:
     )
     assert "boltzmann_3p_prob" not in details_high[2]
 
+
+def test_boltzmann_max_dimers_cap_and_json_skipped_export(tmp_path: Path) -> None:
+    """Vérifie le plafond `--boltzmann-max-dimers` (défaut 25) :
+    1. 100 % des dimères amplifiables sont évalués même si `boltzmann_max_dimers == 1` ;
+    2. Seuls les `K` dimères non amplifiables les plus concentrés parmi ceux `>= 0.1 * dimer_conc_max`
+       sont évalués, et le nombre d'éligibles non évalués est exporté dans `totals["boltzmann_skipped_eligible_dimers"]`.
+
+    Verifies `--boltzmann-max-dimers` (default 25):
+    1. 100% of amplifiable dimers are evaluated even when `boltzmann_max_dimers == 1`;
+    2. Only the top `K` non-amplifiable dimers by concentration among those `>= 0.1 * dimer_conc_max`
+       are evaluated, and the skipped eligible count is exported in `totals["boltzmann_skipped_eligible_dimers"]`.
+    """
+    import numpy as np
+
+    from labcraft.diagnostics.enzyme import BST_2_0
+    from labcraft.lamp.domains import PhysicalPrimer, PrimerRole
+    from labcraft.pipeline.analysis import evaluate_dimer_complexes
+    from labcraft.solver.types import EquilibriumProblem, EquilibriumResult, SolverMethod
+    from labcraft.thermo.backends.vienna import ViennaRNABackend
+
+    # p_amp1 × p_amp2 : dimère amplifiable franc (3' GCGCGC sur matrice 5')
+    # p_blk1..p_blk3 : 3 paires non amplifiables éligibles (0.090, 0.070, 0.050 nM >= 0.023 nM)
+    p_amp1 = PhysicalPrimer.from_simple("P_F3", "AAAAAAATGCATGC", PrimerRole.F3, nominal_concentration=2e-7)
+    p_amp2 = PhysicalPrimer.from_simple("P_B3", "TTTTTTTGCATGCA", PrimerRole.B3, nominal_concentration=2e-7)
+    p_blk1 = PhysicalPrimer.from_simple("P_LF", "CGCGCGCAAAAAATGCATGC", PrimerRole.LF, nominal_concentration=2e-7)
+    p_blk2 = PhysicalPrimer.from_simple("P_LB", "CGCGCGCTTTTTGCATGCAT", PrimerRole.LB, nominal_concentration=2e-7)
+
+    primers = [p_amp1, p_amp2, p_blk1, p_blk2]
+    # 4 monomères libres + 1 dimère amplifiable (P_F3_P_B3) + 3 dimères non amplifiables éligibles :
+    # P_LF_P_LB (0.090 nM), P_LF_homo (0.070 nM), P_LB_homo (0.050 nM)
+    stoich = np.array(
+        [
+            [1, 0, 0, 0],
+            [0, 1, 0, 0],
+            [0, 0, 1, 0],
+            [0, 0, 0, 1],
+            [1, 1, 0, 0],  # idx 4 : amplifiable (0.010 nM < 0.023 nM, mais is_amp => évalué !)
+            [0, 0, 1, 1],  # idx 5 : non-amp éligible #1 (0.090 nM)
+            [0, 0, 2, 0],  # idx 6 : non-amp éligible #2 (0.070 nM)
+            [0, 0, 0, 2],  # idx 7 : non-amp éligible #3 (0.050 nM)
+        ],
+        dtype=int,
+    )
+    prob = EquilibriumProblem(
+        n_strands=4,
+        n_complexes=8,
+        stoichiometry=stoich,
+        delta_g=np.array([0.0, 0.0, 0.0, 0.0, -7.0, -6.5, -6.2, -6.0], dtype=float),
+        total_concentrations=np.full(4, 2e-7, dtype=float),
+        temperature_kelvin=63.0 + 273.15,
+    )
+    res_eq = EquilibriumResult(
+        concentrations=np.array([1.9e-7, 1.9e-7, 1.9e-7, 1.9e-7, 1.0e-11, 9.0e-11, 7.0e-11, 5.0e-11]),
+        free_concentrations=np.full(4, 1.9e-7, dtype=float),
+        log_free_concentrations=np.log(np.full(4, 1.9e-7, dtype=float)),
+        residuals=np.zeros(4, dtype=float),
+        max_residual=0.0,
+        n_iterations=1,
+        method=SolverMethod.DUAL_NEWTON,
+        converged=True,
+    )
+    c_names = [
+        "P_F3_free",
+        "P_B3_free",
+        "P_LF_free",
+        "P_LB_free",
+        "P_F3_P_B3",
+        "P_LF_P_LB",
+        "P_LF_homo",
+        "P_LB_homo",
+    ]
+    stats: dict[str, object] = {}
+    amp_flags, _, details_list = evaluate_dimer_complexes(
+        prob,
+        res_eq,
+        c_names,
+        primers,
+        ViennaRNABackend(),
+        BST_2_0,
+        63.0,
+        {},
+        {p.name: "P" for p in primers},
+        dimer_conc_max_nm=0.23,
+        boltzmann_max_dimers=2,
+        boltzmann_stats_out=stats,
+    )
+    assert amp_flags[4] is True
+    assert "boltzmann_3p_prob" in details_list[4]  # 100 % des amplifiables évalués
+    assert "boltzmann_3p_prob" in details_list[5]  # #1 non-amp (0.090 nM) évalué
+    assert "boltzmann_3p_prob" in details_list[6]  # #2 non-amp (0.070 nM) évalué
+    assert "boltzmann_3p_prob" not in details_list[7]  # #3 non-amp (0.050 nM) plafonné
+    assert stats["eligible_non_amp_dimers"] == 3
+    assert stats["evaluated_non_amp_dimers"] == 2
+    assert stats["skipped_eligible_dimers"] == 1
+
+    # Vérification CLI de bout en bout sur DENV3 avec --boltzmann-max-dimers 2
+    gt_dir = Path(__file__).resolve().parent.parent / "fixtures" / "ground_truth"
+    out_html = tmp_path / "d3_cap.html"
+    runner = CliRunner()
+    res_cli = runner.invoke(
+        app,
+        [
+            "analyze",
+            "-p", str(gt_dir / "primer_dengue_3_panel3.txt"),
+            "-t", str(gt_dir / "DEN3_M93130.fasta"),
+            "--temperature", "63.0",
+            "--conc-fip-bip", "0.8",
+            "--conc-loop", "0.4",
+            "--conc-f3-b3", "0.2",
+            "--boltzmann-max-dimers", "2",
+            "-o", str(out_html),
+        ],
+    )
+    assert res_cli.exit_code == 0, res_cli.stdout
+    data = json.loads((tmp_path / "d3_cap.json").read_text(encoding="utf-8"))
+    assert data["conditions"]["boltzmann_max_dimers"] == 2
+    assert data["totals"]["boltzmann_skipped_eligible_dimers"] > 0
+
+

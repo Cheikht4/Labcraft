@@ -37,6 +37,7 @@ def build_analyze_json_payload(
     mispriming_risks: List[Any],
     verdict: PanelVerdict,
     panel_summaries: Optional[Dict[str, Any]] = None,
+    boltzmann_skipped_eligible_dimers: int = 0,
 ) -> Dict[str, Any]:
     """Construit le dictionnaire JSON structuré de `labcraft analyze`.
     Builds the structured JSON payload for `labcraft analyze`.
@@ -127,6 +128,7 @@ def build_analyze_json_payload(
         "amplifiable_dimers_intra_by_panel_nm": dict(dimer_decomposition.get("intra_by_panel_nm", {})),
         "amplifiable_dimers_inter_nm": float(dimer_decomposition.get("inter_nm", 0.0)),
         "blocking_dimers_total_nm": blocking_total_nm,
+        "boltzmann_skipped_eligible_dimers": int(boltzmann_skipped_eligible_dimers),
         "is_multiplex": bool(dimer_decomposition.get("is_multiplex", False)),
         "dominant_family": dimer_decomposition.get("dominant_family"),
         "families": dimer_decomposition.get("families", []),
