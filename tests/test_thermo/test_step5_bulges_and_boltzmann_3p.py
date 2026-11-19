@@ -173,3 +173,132 @@ def test_analyze_json_exports_boltzmann_3p_fields(tmp_path: Path) -> None:
     assert hetero["boltzmann_3p_prob"] is not None
     assert hetero["boltzmann_3p_prob"] > 0.10
     assert hetero["suboptimal_3p_masked"] is True
+
+
+def test_point2_santalucia_hicks_2004_table4_exact_values_and_default_equilibrium_dg() -> None:
+    """Vérifie ligne par ligne les tables de boucles internes et de bulges contre SantaLucia & Hicks (2004)
+    Table 4 & Eq. 7/13 (et Primer3 `thal`), ainsi que la non-modification du ΔG d'équilibre par défaut
+    (`couple_loops_in_salt_dg=False` dans `ViennaSaltShiftBackend` et `build_engine_from_config`).
+
+    Verifies internal-loop and bulge tables line by line against SantaLucia & Hicks (2004) Table 4 &
+    Eq. 7/13 (and Primer3 `thal`), and checks that default `couple_loops_in_salt_dg=False` leaves
+    equilibrium ΔG untouched while updating reported Tm, ΔH, and ΔS.
+    """
+    import os
+    import primer3
+    import pytest
+
+    from labcraft.cli.config import build_engine_from_config
+    from labcraft.cli.parsers import build_config_from_cli
+    from labcraft.thermo.backends.vienna_salt import (
+        _BULGE_LOOP_TABLE4_DG37_KCAL,
+        _TERMINAL_AT_PENALTY,
+        _bulge_loop_entropy_cal,
+    )
+    from labcraft.thermo.mismatch import (
+        _INTERNAL_LOOP_DG37_KCAL,
+        _INTERNAL_LOOP_TABLE4_DG37_KCAL,
+        _JACOBSON_STOCKMAYER_EXP,
+        _internal_loop_entropy_cal,
+    )
+
+    # 1. Lignes exactes imprimées dans SantaLucia & Hicks (2004), Table 4 (p. 429) & Table 1 (p. 419)
+    # 1. Exact printed rows in SantaLucia & Hicks (2004), Table 4 (p. 429) & Table 1 (p. 419)
+    expected_internal_table4 = {
+        3: 3.2, 4: 3.6, 5: 4.0, 6: 4.4, 7: 4.6, 8: 4.8, 9: 4.9, 10: 4.9,
+        12: 5.2, 14: 5.4, 15: 5.5, 16: 5.6, 18: 5.8, 20: 5.9, 25: 6.3, 30: 6.6,
+    }
+    expected_bulge_table4 = {
+        1: 4.0, 2: 2.9, 3: 3.1, 4: 3.2, 5: 3.3, 6: 3.5, 7: 3.7, 8: 3.9,
+        9: 4.1, 10: 4.3, 12: 4.5, 14: 4.8, 15: 4.9, 16: 5.0, 18: 5.2,
+        20: 5.3, 25: 5.6, 30: 5.9,
+    }
+    assert _INTERNAL_LOOP_TABLE4_DG37_KCAL == expected_internal_table4
+    assert _BULGE_LOOP_TABLE4_DG37_KCAL == expected_bulge_table4
+    assert _JACOBSON_STOCKMAYER_EXP == pytest.approx(2.44)
+    assert _TERMINAL_AT_PENALTY == (2.2, 6.9)
+    for sz, val in expected_internal_table4.items():
+        assert _INTERNAL_LOOP_DG37_KCAL[sz] == pytest.approx(val, abs=1e-9)
+
+    # 2. Comparaison ligne par ligne (tailles 1..30) avec `loops.ds` officiel de Primer3 (UNAFold / SantaLucia 2004)
+    # 2. Line-by-line check (sizes 1..30) against Primer3's official `loops.ds` (UNAFold / SantaLucia 2004)
+    loops_ds_path = os.path.join(
+        os.path.dirname(primer3.__file__), "src", "libprimer3", "primer3_config", "loops.ds"
+    )
+    with open(loops_ds_path, encoding="utf-8") as fh:
+        for line in fh:
+            n_s, ds_int_s, ds_bul_s, _ = line.split()
+            n_sz = int(n_s)
+            ds_int_ref = float(ds_int_s)
+            ds_bul_ref = float(ds_bul_s)
+            assert _bulge_loop_entropy_cal(n_sz) == pytest.approx(ds_bul_ref, abs=0.02)
+            if n_sz >= 3:
+                assert _internal_loop_entropy_cal(n_sz) == pytest.approx(ds_int_ref, abs=0.02)
+
+    # 3. Validation de `estimate_structure_thermo` contre `primer3.calc_heterodimer` (1 M Na+, 37 °C)
+    #    sur bulges k=1,2,4,6 (flancs GC et AT) et boucles internes 2x1 (n=3), 2x2 (n=4), 3x3 (n=6)
+    # 3. Validate `estimate_structure_thermo` against `primer3.calc_heterodimer` (1 M Na+, 37 °C)
+    #    on bulges k=1,2,4,6 (GC and AT flanks) and internal loops 2x1 (n=3), 2x2 (n=4), 3x3 (n=6)
+    comp = {"A": "T", "T": "A", "C": "G", "G": "C"}
+
+    def rc(s: str) -> str:
+        return "".join(comp[b] for b in reversed(s))
+
+    for k_b in (1, 2, 4, 6):
+        for left, bul_ch, right in (("CGCGCG", "T" * k_b, "GCGCGC"), ("CGCGCA", "C" * k_b, "ACGCGC")):
+            top_p = left + right
+            top_b = left + bul_ch + right
+            bot = rc(top_p)
+            struct_p = "(" * len(top_p) + "&" + ")" * len(bot)
+            struct_b = "(" * len(left) + "." * k_b + "(" * len(right) + "&" + ")" * len(bot)
+            dh0, ds0, *_ = estimate_structure_thermo(f"{top_p}&{bot}", struct_p)
+            dhb, dsb, *_ = estimate_structure_thermo(f"{top_b}&{bot}", struct_b)
+            p0 = primer3.calc_heterodimer(top_p, bot, mv_conc=1000.0, dv_conc=0.0, dntp_conc=0.0, temp_c=37.0)
+            pb = primer3.calc_heterodimer(top_b, bot, mv_conc=1000.0, dv_conc=0.0, dntp_conc=0.0, temp_c=37.0)
+            assert (dhb - dh0) == pytest.approx((pb.dh - p0.dh) / 1000.0, abs=0.02)
+            assert (dsb - ds0) == pytest.approx(pb.ds - p0.ds, abs=0.05)
+
+    for top_loop, bot_loop in (("AA", "A"), ("AA", "AA"), ("AAA", "AAA")):
+        left, right = "CGCGCG", "GCGCGC"
+        top_p = left + right
+        bot_p = rc(top_p)
+        top_i = left + top_loop + right
+        bot_i = rc(right) + bot_loop + rc(left)
+        struct_p = "(" * len(top_p) + "&" + ")" * len(bot_p)
+        struct_i = (
+            "(" * len(left) + "." * len(top_loop) + "(" * len(right)
+            + "&"
+            + ")" * len(right) + "." * len(bot_loop) + ")" * len(left)
+        )
+        dh0, ds0, *_ = estimate_structure_thermo(f"{top_p}&{bot_p}", struct_p)
+        dhi, dsi, *_ = estimate_structure_thermo(f"{top_i}&{bot_i}", struct_i)
+        p0 = primer3.calc_heterodimer(top_p, bot_p, mv_conc=1000.0, dv_conc=0.0, dntp_conc=0.0, temp_c=37.0)
+        pi = primer3.calc_heterodimer(top_i, bot_i, mv_conc=1000.0, dv_conc=0.0, dntp_conc=0.0, temp_c=37.0)
+        assert (dhi - dh0) == pytest.approx((pi.dh - p0.dh) / 1000.0, abs=0.02)
+        assert (dsi - ds0) == pytest.approx(pi.ds - p0.ds, abs=0.05)
+
+    # 4. `couple_loops_in_salt_dg` vaut False par défaut dans `ViennaSaltShiftBackend` et `build_engine_from_config` :
+    #    sur un duplexe à bulge, `dg_kcal` est strictement identique au décalage salin sur tiges WC seules.
+    # 4. `couple_loops_in_salt_dg` defaults to False in `ViennaSaltShiftBackend` and `build_engine_from_config`:
+    #    on a bulged duplex, `dg_kcal` strictly matches pure WC-stem salt shift (equilibrium ΔG untouched).
+    cfg = build_config_from_cli(config_path="examples/denv2_lopez.yaml")
+    _, _, eng_backend, *_ = build_engine_from_config(cfg, {"DENV2": "A" * 300})
+    assert isinstance(eng_backend, ViennaSaltShiftBackend)
+    assert eng_backend.couple_loops_in_salt_dg is False
+
+    salt_model = UnifiedSaltModel()
+    backend_default = ViennaSaltShiftBackend(salt_model)
+    with dna_session(temp_celsius=65.0):
+        raw_v = backend_default.vienna.calc_heterodimer("ATGCATGCTTTATGCATGC", "GCATGCATGCATGCAT", temp_celsius=65.0)
+        shifted_def = backend_default.calc_heterodimer(
+            "ATGCATGCTTTATGCATGC", "GCATGCATGCATGCAT", temp_celsius=65.0, na_mm=50.0, mg_mm=8.0, dntp_mm=1.4
+        )
+    dh_stem, ds_stem, n_bp_stem, f_gc_stem, _, _ = estimate_helix_thermo(
+        "ATGCATGCTTTATGCATGC&GCATGCATGCATGCAT", raw_v.structure, include_loops=False
+    )
+    _, ds_stem_corr = salt_model.corrected_thermodynamics(
+        dh_stem, ds_stem, f_gc_stem, n_bp_stem, 0.050, 0.0, 0.0, 0.008, 0.0014
+    )
+    expected_dg_stem_only = raw_v.dg_kcal - (65.0 + 273.15) * (ds_stem_corr - ds_stem) / 1000.0
+    assert shifted_def.dg_kcal == pytest.approx(expected_dg_stem_only, abs=1e-12)
+    assert shifted_def.dh_kcal != round(dh_stem, 2)

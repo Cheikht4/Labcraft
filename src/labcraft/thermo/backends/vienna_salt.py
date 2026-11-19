@@ -1,15 +1,83 @@
-from labcraft.thermo.constants import R_GAS_KCAL_MOL_K
 """ViennaRNA backend with salt shift correction.
 
 Applique un décalage salin (ΔΔG) au ΔG natif de ViennaRNA en estimant
 l'enthalpie et l'entropie de la structure via le modèle du plus proche voisin.
+Par défaut (`couple_loops_in_salt_dg=False`, tel qu'instancié dans `cli/config.py`),
+`res.dg_kcal` issu de ViennaRNA inclut déjà les boucles à 1 M Na+, le décalage salin
+d'Owczarzy est évalué sur les tiges Watson-Crick empilées, et la décomposition explicite
+des renflements (bulges) et boucles internes (SantaLucia & Hicks 2004, Table 4) ne modifie
+que les valeurs rapportées de `ΔH`, `ΔS` et `Tm` (auto-cohérence de Gibbs-Helmholtz),
+sans modifier le `ΔG` utilisé dans l'équilibre thermodynamique.
+
+Applies a salt shift (ΔΔG) to ViennaRNA's native 1 M Na+ ΔG using nearest-neighbor
+structure enthalpy/entropy estimation. By default (`couple_loops_in_salt_dg=False`, as
+instantiated in `cli/config.py`), ViennaRNA's `res.dg_kcal` already accounts for loops at
+1 M Na+, the Owczarzy salt shift is evaluated on stacked Watson-Crick stems, and explicit
+bulge/internal-loop decomposition (SantaLucia & Hicks 2004, Table 4) only updates reported
+`ΔH`, `ΔS`, and `Tm` (Gibbs-Helmholtz self-consistency), leaving equilibrium `ΔG` unchanged.
 """
 from typing import Any, Dict, Tuple
 import math
+from labcraft.thermo.constants import R_GAS_KCAL_MOL_K
 from .base import DuplexEnergyBackend, DuplexResult
 from .vienna import ViennaRNABackend
 from .native import _NN_PARAMS, _SEQ_TO_NN_KEY, _INIT_GC, _INIT_AT
 from labcraft.thermo.salt import UnifiedSaltModel
+
+_T37_KELVIN = 310.15
+_JACOBSON_STOCKMAYER_BULGE_EXP = 2.44
+# SantaLucia & Hicks (2004), Annu. Rev. Biophys. Biomol. Struct. 33:415-440,
+# Table 1 (ligne « Terminal A-T penalty », p. 419) : ΔH° = +2.2 kcal/mol, ΔS° = +6.9 cal/(mol·K)
+# (ΔG°_37 = +0.05 kcal/mol), égal à `_INIT_AT - _INIT_GC`.
+# Table 1 ("Terminal A-T penalty" row, p. 419): ΔH° = +2.2 kcal/mol, ΔS° = +6.9 cal/(mol·K)
+# (ΔG°_37 = +0.05 kcal/mol), equal to `_INIT_AT - _INIT_GC`.
+_TERMINAL_AT_PENALTY: Tuple[float, float] = (
+    round(_INIT_AT[0] - _INIT_GC[0], 4),
+    round(_INIT_AT[1] - _INIT_GC[1], 4),
+)
+
+# SantaLucia & Hicks (2004), Table 4 (colonne « Bulge loops », p. 429), ΔG°_37 en kcal/mol à 1 M NaCl
+# (initiation purement entropique : ΔH° = 0 kcal/mol ; tailles intermédiaires et k > 30 via Eq. 7, p. 430).
+# SantaLucia & Hicks (2004), Table 4 ("Bulge loops" column, p. 429), ΔG°_37 in kcal/mol at 1 M NaCl
+# (purely entropic initiation: ΔH° = 0 kcal/mol; intermediate sizes and k > 30 via Eq. 7, p. 430).
+_BULGE_LOOP_TABLE4_DG37_KCAL: Dict[int, float] = {
+    1: 4.0,
+    2: 2.9,
+    3: 3.1,
+    4: 3.2,
+    5: 3.3,
+    6: 3.5,
+    7: 3.7,
+    8: 3.9,
+    9: 4.1,
+    10: 4.3,
+    12: 4.5,
+    14: 4.8,
+    15: 4.9,
+    16: 5.0,
+    18: 5.2,
+    20: 5.3,
+    25: 5.6,
+    30: 5.9,
+}
+
+
+def _bulge_loop_entropy_cal(k_bulge: int) -> float:
+    """Calcule l'entropie ΔS° (cal/mol·K, négative) d'un renflement de taille `k_bulge` >= 1
+    selon SantaLucia & Hicks (2004), Table 4 (colonne « Bulge loops », p. 429) & Eq. 7 (p. 430).
+    Computes entropy ΔS° (cal/mol·K, negative) for a bulge loop of size `k_bulge` >= 1
+    following SantaLucia & Hicks (2004), Table 4 ("Bulge loops" column, p. 429) & Eq. 7 (p. 430).
+    """
+    if k_bulge < 1:
+        return 0.0
+    if k_bulge in _BULGE_LOOP_TABLE4_DG37_KCAL:
+        dg37 = _BULGE_LOOP_TABLE4_DG37_KCAL[k_bulge]
+    else:
+        x = max(sz for sz in _BULGE_LOOP_TABLE4_DG37_KCAL if sz <= k_bulge)
+        dg37 = _BULGE_LOOP_TABLE4_DG37_KCAL[x] + (
+            _JACOBSON_STOCKMAYER_BULGE_EXP * R_GAS_KCAL_MOL_K * _T37_KELVIN * math.log(k_bulge / x)
+        )
+    return -(dg37 * 1000.0) / _T37_KELVIN
 
 def _extract_pairs(structure: str) -> dict[int, int]:
     """Extrait les paires d'indices (0-based) d'une structure dot-bracket sans '&'.
@@ -171,36 +239,37 @@ def _estimate_structure_thermo_impl(
             dh_total -= init_term[0]
             ds_total -= init_term[1]
 
-        t37_k = 310.15
         if (l1 == 1 and l2 == 0) or (l1 == 0 and l2 == 1):
-            # Renflement d'1 nt (SantaLucia & Hicks 2004, Table 4) : empilement NN conservé + pénalité +4,0 kcal/mol à 37 °C
-            # Single-nt bulge (SantaLucia & Hicks 2004, Table 4): intervening NN stack retained + +4.0 kcal/mol at 37 °C
+            # Renflement d'1 nt (SantaLucia & Hicks 2004, Table 4 ligne 1 « Bulge loops » = +4.0 kcal/mol,
+            # Eq. 13 p. 430 & Primer3/UNAFold `loops.dh`/`loops.ds`) : empilement NN continu conservé
+            # (pas d'extrémité d'hélice interne) + initiation purement entropique (ΔH° = 0, ΔS° = -12.90 cal/mol·K).
+            # Single-nt bulge (SantaLucia & Hicks 2004, Table 4 row 1 "Bulge loops" = +4.0 kcal/mol,
+            # Eq. 13 p. 430 & Primer3/UNAFold `loops.dh`/`loops.ds`): uninterrupted intervening NN stack
+            # retained (no internal helix ends) + purely entropic initiation (ΔH° = 0, ΔS° = -12.90 cal/mol·K).
             stack_key = _SEQ_TO_NN_KEY.get(seq_clean[i] + seq_clean[p])
             if stack_key:
                 dh_s, ds_s = _NN_PARAMS[stack_key]
                 dh_total += dh_s
                 ds_total += ds_s
-            dh_total += 2.6
-            ds_total += -4.5
+            ds_total += _bulge_loop_entropy_cal(1)
         elif l1 == 0 or l2 == 0:
-            # Renflement de k >= 2 nt (SantaLucia & Hicks 2004, Table 4 & extrapolation Jacobson-Stockmayer)
-            # Multi-nt bulge k >= 2 (SantaLucia & Hicks 2004, Table 4 & Jacobson-Stockmayer extrapolation)
+            # Renflement de k >= 2 nt (SantaLucia & Hicks 2004, Table 4 colonne « Bulge loops » lignes 2..30
+            # & Eq. 7 p. 430) : rupture de l'empilement NN + pénalité terminale A·T de la Table 1
+            # (+2.2 kcal/mol, +6.9 cal/mol·K, soit ΔG°_37 = +0.05 kcal/mol) sur chaque paire fermante A·T.
+            # Multi-nt bulge k >= 2 (SantaLucia & Hicks 2004, Table 4 "Bulge loops" rows 2..30 & Eq. 7 p. 430):
+            # intervening NN stack omitted + Table 1 terminal A·T penalty (+2.2 kcal/mol, +6.9 cal/mol·K,
+            # i.e. ΔG°_37 = +0.05 kcal/mol) per closing A·T base pair.
             k_bulge = l1 + l2
-            if k_bulge == 2:
-                dg37_bulge = 2.9
-            elif k_bulge == 3:
-                dg37_bulge = 3.1
-            else:
-                dg37_bulge = 3.2 + 2.44 * R_GAS_KCAL_MOL_K * t37_k * math.log(k_bulge / 3.0)
-            # Pénalité de fermeture A·T (+0,5 kcal/mol par paire A·T adjacente, SantaLucia & Hicks 2004)
-            # A·T closing penalty (+0.5 kcal/mol per closing A·T pair, SantaLucia & Hicks 2004)
+            ds_total += _bulge_loop_entropy_cal(k_bulge)
             for b1, b2 in ((seq_clean[i], seq_clean[j]), (seq_clean[p], seq_clean[q])):
                 if (b1, b2) not in (('G', 'C'), ('C', 'G')):
-                    dg37_bulge += 0.5
-            ds_total += -(dg37_bulge / t37_k) * 1000.0
+                    dh_total += _TERMINAL_AT_PENALTY[0]
+                    ds_total += _TERMINAL_AT_PENALTY[1]
         else:
-            # Boucle interne l1 x l2 (Allawi & SantaLucia 1997 + SantaLucia & Hicks 2004 Table 5)
-            # Internal loop l1 x l2 (Allawi & SantaLucia 1997 + SantaLucia & Hicks 2004 Table 5)
+            # Boucle interne l1 x l2 : Table 2 pour 1×1, Table 3 + Table 4 (colonne « Internal loops »)
+            # + pénalité d'asymétrie 0.3 * |l1 - l2| kcal/mol (Eq. 11-12, p. 430) pour l1 + l2 >= 3.
+            # Internal loop l1 x l2: Table 2 for 1×1, Table 3 + Table 4 ("Internal loops" column)
+            # + asymmetry penalty 0.3 * |l1 - l2| kcal/mol (Eq. 11-12, p. 430) for l1 + l2 >= 3.
             from labcraft.thermo.mismatch import (
                 _MISMATCH_INTERNAL,
                 _MISMATCH_TERMINAL,
@@ -235,7 +304,7 @@ def _estimate_structure_thermo_impl(
                     ds_total += ds_r
                 ds_total += _internal_loop_entropy_cal(l1 + l2)
                 if l1 != l2:
-                    ds_total += -(0.3 * abs(l1 - l2) / t37_k) * 1000.0
+                    ds_total += -(0.3 * abs(l1 - l2) / _T37_KELVIN) * 1000.0
 
     # Compter aussi les épingles intramoléculaires comme structures à boucles pour l'auto-cohérence Gibbs-Helmholtz
     # Also flag intramolecular hairpins as loop-bearing structures for Gibbs-Helmholtz self-consistency
@@ -282,6 +351,22 @@ _SHARED_SALT_CACHE: Dict[Tuple[Any, ...], DuplexResult] = {}
 
 
 class ViennaSaltShiftBackend(DuplexEnergyBackend):
+    """Backend ViennaRNA avec correction saline d'Owczarzy.
+
+    Note importante (`couple_loops_in_salt_dg=False` par défaut, non activé dans `cli/config.py`) :
+    - ViennaRNA inclut déjà les renflements et boucles internes dans `res.dg_kcal` à 1 M Na+.
+    - Tant que `couple_loops_in_salt_dg` vaut `False`, `ddg_salt` est calculé sur les seules tiges
+      Watson-Crick empilées : les pénalités de bulges et boucles internes de `estimate_structure_thermo`
+      ne modifient donc QUE les grandeurs rapportées `dh_kcal`, `ds_cal_per_k` et `tm_celsius`, et
+      NE modifient PAS `dg_kcal` utilisé dans la résolution de l'équilibre.
+
+    Important note (`couple_loops_in_salt_dg=False` by default, not enabled in `cli/config.py`):
+    - ViennaRNA already includes bulges and internal loops in `res.dg_kcal` at 1 M Na+.
+    - While `couple_loops_in_salt_dg` is `False`, `ddg_salt` is evaluated on stacked Watson-Crick stems
+      only: bulge and internal-loop penalties from `estimate_structure_thermo` therefore ONLY affect
+      reported `dh_kcal`, `ds_cal_per_k`, and `tm_celsius`, NOT the `dg_kcal` entering equilibrium.
+    """
+
     def __init__(
         self,
         salt_model: UnifiedSaltModel,

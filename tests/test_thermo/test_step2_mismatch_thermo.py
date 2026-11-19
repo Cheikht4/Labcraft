@@ -101,20 +101,31 @@ def test_consecutive_tandem_mismatches_monotonic_and_coherent_with_vienna():
     assert dg_0 < dg_1 < dg_2 < dg_3 < dg_4
     assert (dg_2 - dg_0) > (dg_1 - dg_0) + 2.0
 
-    # Cohérence avec l'évaluation contrainte Mathews 2004 dans ViennaRNA
-    # Consistency with Mathews 2004 constrained structure evaluation in ViennaRNA
+    # Accord exact (< 0,02 kcal/mol) avec l'implémentation de référence SantaLucia & Hicks 2004 (Primer3 thal)
+    # et écart borné vis-à-vis de Mathews 2004 dans ViennaRNA (qui utilise 3.1/3.9/4.2 au lieu de 3.6/4.4/4.8)
+    # Exact agreement (< 0.02 kcal/mol) with the SantaLucia & Hicks 2004 reference C implementation (Primer3 thal)
+    # and bounded offset vs Mathews 2004 in ViennaRNA (which uses 3.1/3.9/4.2 instead of Table 4's 3.6/4.4/4.8)
+    import primer3
+
+    p3_0 = primer3.calc_heterodimer(seq, bot_perf[::-1], mv_conc=1000.0, dv_conc=0.0, dntp_conc=0.0, temp_c=63.0)
     with dna_session(63.0):
         fc_p = RNA.fold_compound(seq + "&" + bot_perf[::-1])
         dg_v0 = fc_p.eval_structure("(" * len(seq) + ")" * len(seq))
         for k_label, bot_k, dg_k in [("2x2", bot_2mm, dg_2), ("3x3", bot_3mm, dg_3), ("4x4", bot_4mm, dg_4)]:
+            p3_k = primer3.calc_heterodimer(seq, bot_k[::-1], mv_conc=1000.0, dv_conc=0.0, dntp_conc=0.0, temp_c=63.0)
+            ddg_nn = dg_k - dg_0
+            ddg_p3 = (p3_k.dg - p3_0.dg) / 1000.0
+            assert abs(ddg_nn - ddg_p3) < 0.02, (
+                f"Écart ΔΔG SantaLucia & Hicks 2004 sur boucle {k_label} : NN={ddg_nn:.3f} vs Primer3={ddg_p3:.3f}"
+            )
+
             s_top = "".join("(" if comp[a] == c else "." for a, c in zip(seq, bot_k))
             s_bot = "".join(")" if comp[a] == c else "." for a, c in reversed(list(zip(seq, bot_k))))
             fc_k = RNA.fold_compound(seq + "&" + bot_k[::-1])
             dg_vk = fc_k.eval_structure(s_top + s_bot)
-            ddg_nn = dg_k - dg_0
             ddg_vrna = dg_vk - dg_v0
-            assert abs(ddg_nn - ddg_vrna) < 0.85, (
-                f"Écart ΔΔG sur boucle {k_label} : NN={ddg_nn:.2f} vs ViennaRNA={ddg_vrna:.2f}"
+            assert abs(ddg_nn - ddg_vrna) < 1.35, (
+                f"Écart ΔΔG sur boucle {k_label} : NN={ddg_nn:.2f} vs ViennaRNA(Mathews2004)={ddg_vrna:.2f}"
             )
 
 

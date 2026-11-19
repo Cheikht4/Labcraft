@@ -20,18 +20,50 @@ from labcraft.thermo.constants import R_GAS_KCAL_MOL_K
 _MISMATCH_INTERNAL: Dict[str, Tuple[float, float]] = {}
 _MISMATCH_TERMINAL: Dict[str, Tuple[float, float]] = {}
 
-# Initiation entropique des boucles internes ADN à 37 °C en kcal/mol (SantaLucia & Hicks 2004, Table 5 ;
-# identique à la table `internal_loop` de Mathews 2004 dans ViennaRNA).
-# Entropic DNA internal loop initiation at 37 °C in kcal/mol (SantaLucia & Hicks 2004, Table 5;
-# identical to the Mathews 2004 `internal_loop` table in ViennaRNA).
-_INTERNAL_LOOP_DG37_KCAL: Dict[int, float] = {
-    4: 3.1, 5: 3.5, 6: 3.9, 7: 4.1, 8: 4.2, 9: 4.3, 10: 4.5,
-    11: 4.6, 12: 4.6, 13: 4.7, 14: 4.8, 15: 4.9, 16: 5.0, 17: 5.0,
-    18: 5.1, 19: 5.1, 20: 5.2, 21: 5.3, 22: 5.3, 23: 5.3, 24: 5.4,
-    25: 5.4, 26: 5.5, 27: 5.5, 28: 5.6, 29: 5.6, 30: 5.6,
-}
+# Initiation entropique des boucles internes ADN à 37 °C (1 M NaCl) en kcal/mol selon
+# SantaLucia & Hicks (2004), Annu. Rev. Biophys. Biomol. Struct. 33:415-440, Table 4
+# (colonne « Internal loops », p. 429) et Eq. 7 (p. 430, préfacteur Jacobson-Stockmayer ADN = 2.44
+# pour les tailles intermédiaires non tabulées et n > 30 ; ΔH° = 0 kcal/mol).
+# Entropic DNA internal loop initiation at 37 °C (1 M NaCl) in kcal/mol from
+# SantaLucia & Hicks (2004), Annu. Rev. Biophys. Biomol. Struct. 33:415-440, Table 4
+# ("Internal loops" column, p. 429) and Eq. 7 (p. 430, DNA Jacobson-Stockmayer prefactor = 2.44
+# for unprinted intermediate sizes and n > 30; ΔH° = 0 kcal/mol).
 _T37_KELVIN = 310.15
-_JACOBSON_STOCKMAYER_EXP = 1.75
+_JACOBSON_STOCKMAYER_EXP = 2.44
+_INTERNAL_LOOP_TABLE4_DG37_KCAL: Dict[int, float] = {
+    3: 3.2,
+    4: 3.6,
+    5: 4.0,
+    6: 4.4,
+    7: 4.6,
+    8: 4.8,
+    9: 4.9,
+    10: 4.9,
+    12: 5.2,
+    14: 5.4,
+    15: 5.5,
+    16: 5.6,
+    18: 5.8,
+    20: 5.9,
+    25: 6.3,
+    30: 6.6,
+}
+
+
+def _interp_loop_dg37(table4: Dict[int, float], n: int) -> float:
+    """Évalue ΔG°_37(n) depuis les lignes imprimées de la Table 4 + Eq. 7 de SantaLucia & Hicks (2004).
+    Evaluates ΔG°_37(n) from printed rows of Table 4 + Eq. 7 of SantaLucia & Hicks (2004).
+    """
+    if n in table4:
+        return table4[n]
+    x = max(sz for sz in table4 if sz <= n)
+    return table4[x] + _JACOBSON_STOCKMAYER_EXP * R_GAS_KCAL_MOL_K * _T37_KELVIN * math.log(n / x)
+
+
+_INTERNAL_LOOP_DG37_KCAL: Dict[int, float] = {
+    n: round(_interp_loop_dg37(_INTERNAL_LOOP_TABLE4_DG37_KCAL, n), 2)
+    for n in range(3, 31)
+}
 
 def _load_tables() -> None:
     data_dir = os.path.join(os.path.dirname(__file__), "..", "data", "thermo")
@@ -59,23 +91,18 @@ def _load_tables() -> None:
 _load_tables()
 
 def _internal_loop_entropy_cal(loop_nt_count: int) -> float:
-    """Calcule l'entropie ΔS (cal/mol·K, négative) d'une boucle interne symétrique de taille `loop_nt_count` >= 4.
-    Computes entropy ΔS (cal/mol·K, negative) for a symmetric internal loop of size `loop_nt_count` >= 4.
+    """Calcule l'entropie ΔS (cal/mol·K, négative) d'une boucle interne de taille `loop_nt_count` >= 3.
+    Computes entropy ΔS (cal/mol·K, negative) for an internal loop of total size `loop_nt_count` >= 3.
 
     Référence / Reference:
-    SantaLucia & Hicks (2004), Annu. Rev. Biophys. Biomol. Struct. 33:415-440, Eq. 5 & Table 5
-    (extrapolation de Jacobson-Stockmayer au-delà de 30 nt).
+    SantaLucia & Hicks (2004), Annu. Rev. Biophys. Biomol. Struct. 33:415-440, Table 4 (p. 429,
+    colonne « Internal loops ») & Eq. 7 (p. 430, extrapolation de Jacobson-Stockmayer avec préfacteur 2.44).
     """
-    if loop_nt_count < 4:
+    if loop_nt_count < 3:
         return 0.0
-    if loop_nt_count <= 30:
-        dg37 = _INTERNAL_LOOP_DG37_KCAL[loop_nt_count]
-    else:
-        dg37 = _INTERNAL_LOOP_DG37_KCAL[30] + (
-            _JACOBSON_STOCKMAYER_EXP * R_GAS_KCAL_MOL_K * _T37_KELVIN * math.log(loop_nt_count / 30.0)
-        )
-    # Boucle interne modélisée comme purement entropique (ΔH = 0, ΔG°_37 = -T_37 * ΔS)
-    # Internal loop initiation modeled as purely entropic (ΔH = 0, ΔG°_37 = -T_37 * ΔS)
+    dg37 = _interp_loop_dg37(_INTERNAL_LOOP_TABLE4_DG37_KCAL, loop_nt_count)
+    # Boucle interne modélisée comme purement entropique (ΔH° = 0, ΔG°_37 = -T_37 * ΔS°)
+    # Internal loop initiation modeled as purely entropic (ΔH° = 0, ΔG°_37 = -T_37 * ΔS°)
     return -(dg37 * 1000.0) / _T37_KELVIN
 
 
@@ -112,10 +139,10 @@ def nn_duplex_energy(
     Computes NN duplex energy handling single internal, terminal, and consecutive mismatches.
 
     Modèle / Model:
-    - Pas Watson-Crick : SantaLucia (1998)
-    - Mésappariement interne isolé (1×1) : Allawi & SantaLucia (1997-1998), Peyret (1999)
-    - Mésappariements terminaux (5' ou 3') : SantaLucia & Hicks (2004), Table 4 (`_MISMATCH_TERMINAL`)
-    - Mésappariements internes consécutifs (k×k, k >= 2) : SantaLucia & Hicks (2004), Eq. 5 & Table 5
+    - Pas Watson-Crick : SantaLucia (1998) / SantaLucia & Hicks (2004), Table 1
+    - Mésappariement interne isolé (1×1) : Allawi & SantaLucia (1997-1998), Peyret (1999), Table 2
+    - Mésappariements terminaux (5' ou 3') : SantaLucia & Hicks (2004), Table 3 (`_MISMATCH_TERMINAL`)
+    - Mésappariements internes consécutifs (k×k, k >= 2) : SantaLucia & Hicks (2004), Table 4 & Eq. 7, 11
       (empilements terminaux fermants + entropie de boucle interne symétrique).
     
     Args:
@@ -230,9 +257,9 @@ def nn_duplex_energy(
                         ds_total += 0.5 * _internal_loop_entropy_cal(4)
             else:
                 # Boucle interne symétrique k_mm × k_mm (k_mm >= 2) :
-                # Empilement fermant gauche + empilement fermant droit + initiation entropique Table 5
+                # Empilement fermant gauche + empilement fermant droit + initiation entropique Table 4
                 # Symmetric k_mm × k_mm internal loop (k_mm >= 2):
-                # Left closing stack + right closing stack + Table 5 entropic loop initiation
+                # Left closing stack + right closing stack + Table 4 entropic loop initiation
                 left_stack = f"{top[i:i + 2]}/{bottom[i:i + 2]}"
                 right_stack = f"{bottom[j - 1:j + 1][::-1]}/{top[j - 1:j + 1][::-1]}"
                 if left_stack in _MISMATCH_TERMINAL:

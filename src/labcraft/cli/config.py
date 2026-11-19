@@ -134,6 +134,10 @@ def build_engine_from_config(
     backend_kwargs: Dict[str, Any] = {}
     mon_molar: Optional[float]
     if buffer_conf:
+        # `couple_loops_in_salt_dg=False` par défaut : ViennaRNA inclut déjà les boucles dans son ΔG à 1 M Na+,
+        # de sorte que les bulges/boucles internes de `estimate_structure_thermo` ne mettent à jour que Tm, ΔH et ΔS.
+        # `couple_loops_in_salt_dg=False` by default: ViennaRNA already includes loops in its 1 M Na+ ΔG,
+        # so bulge/internal-loop terms in `estimate_structure_thermo` only update reported Tm, ΔH, and ΔS.
         backend = ViennaSaltShiftBackend(UnifiedSaltModel())
         backend_kwargs = {
             'na_mm': buffer_conf.na_mM,
@@ -316,6 +320,8 @@ def build_engine_from_config(
     # Vérification présence LNA pour forcer le backend SaltShift (même sans tampon)
     has_lna = any(len(p.lna_positions) > 0 for p in primers)
     if has_lna and not buffer_conf:
+        # `couple_loops_in_salt_dg=False` conservé ici également (seuls Tm, ΔH et ΔS intègrent `estimate_structure_thermo`)
+        # `couple_loops_in_salt_dg=False` preserved here as well (only reported Tm, ΔH, and ΔS use `estimate_structure_thermo`)
         backend = ViennaSaltShiftBackend(UnifiedSaltModel())
         backend_kwargs = {
             'na_mm': 1000.0, # Neutral salt pour annuler ddG_sel
