@@ -100,6 +100,10 @@ def build_analyze_json_payload(
             "parent_b": r.parent_b,
             "extensible_primer": r.extensible_primer,
             "template_primer": r.template_primer,
+            "boltzmann_3p_prob": (
+                float(r.boltzmann_3p_prob) if r.boltzmann_3p_prob is not None else None
+            ),
+            "suboptimal_3p_masked": bool(r.suboptimal_3p_masked),
         })
 
     # Alertes de mésamorçage / Mispriming alerts

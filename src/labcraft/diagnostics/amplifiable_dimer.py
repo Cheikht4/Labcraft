@@ -1,9 +1,108 @@
 import math
 from typing import Any, Tuple, Dict, Optional
+import RNA
 from labcraft.diagnostics.enzyme import PolymeraseProfile
 from labcraft.thermo.backends.base import DuplexEnergyBackend
 from labcraft.thermo.salt import sodium_equivalent_for_folding
+from labcraft.thermo.vienna import dna_params
 from labcraft.buffer.monovalent import get_total_monovalent
+
+_MAX_PF_3P_CACHE_SIZE = 16384
+_SHARED_PF_3P_CACHE: Dict[Tuple[Any, ...], Dict[str, Any]] = {}
+
+
+def calc_boltzmann_3p_pairing(
+    primer_a: str,
+    primer_b: str,
+    temp_celsius: float = 65.0,
+    blocked_a: bool = False,
+    blocked_b: bool = False,
+    mon_molar: Optional[float] = None,
+) -> Dict[str, Any]:
+    """Calcule la probabilité de Boltzmann d'appariement 3' extensible via la fonction de partition bimoléculaire.
+    Computes Boltzmann 3' extensible base-pairing probability via ViennaRNA's bimolecular partition function.
+    """
+    l_a = len(primer_a)
+    l_b = len(primer_b)
+    if l_a == 0 or l_b == 0:
+        return {
+            "prob_3p_paired_a": 0.0,
+            "prob_3p_paired_b": 0.0,
+            "prob_3p_extensible_a": 0.0,
+            "prob_3p_extensible_b": 0.0,
+            "boltzmann_3p_prob": 0.0,
+            "ensemble_dg_kcal": 0.0,
+        }
+
+    salt_key = round(mon_molar, 6) if mon_molar is not None else None
+    cache_key: Tuple[Any, ...] = (
+        primer_a,
+        primer_b,
+        round(temp_celsius, 3),
+        blocked_a,
+        blocked_b,
+        salt_key,
+    )
+    if cache_key in _SHARED_PF_3P_CACHE:
+        return dict(_SHARED_PF_3P_CACHE[cache_key])
+
+    with dna_params(temp_celsius=temp_celsius, mon_molar=mon_molar):
+        fc = RNA.fold_compound(f"{primer_a}&{primer_b}")
+        _, dg_ensemble = fc.pf()
+        bpp = fc.bpp()
+
+    n_tot = l_a + l_b
+    idx_3p_a = l_a          # Indice 1-based du 3' de A / 1-based index of A's 3' end
+    idx_3p_b = l_a + l_b    # Indice 1-based du 3' de B / 1-based index of B's 3' end
+
+    def _pair_prob(i1: int, j1: int) -> float:
+        if i1 == j1:
+            return 0.0
+        lo, hi = (i1, j1) if i1 < j1 else (j1, i1)
+        return float(bpp[lo][hi])
+
+    prob_paired_a = sum(_pair_prob(idx_3p_a, k) for k in range(1, n_tot + 1) if k != idx_3p_a)
+    prob_paired_b = sum(_pair_prob(idx_3p_b, k) for k in range(1, n_tot + 1) if k != idx_3p_b)
+
+    # Un appariement 3' offre une matrice 5' à copier si le partenaire n'est pas l'extrémité 5' stricte du brin cible :
+    # - pour A (idx_3p_a = l_a) : k > l_a + 1 sur B (5' de B à l_a + 1), ou 1 < k < l_a sur A (5' de A à 1).
+    # - pour B (idx_3p_b = l_a + l_b) : 1 < k <= l_a sur A (5' de A à 1), ou l_a + 1 < k < idx_3p_b sur B.
+    # A 3' base pair provides a 5' template overhang when the partner is not the strict 5' nucleotide of its strand:
+    # - for A (idx_3p_a = l_a): k > l_a + 1 on B (B's 5' is l_a + 1), or 1 < k < l_a on A (A's 5' is 1).
+    # - for B (idx_3p_b = l_a + l_b): 1 < k <= l_a on A (A's 5' is 1), or l_a + 1 < k < idx_3p_b on B.
+    if blocked_a:
+        prob_ext_a = 0.0
+    else:
+        prob_ext_a = (
+            sum(_pair_prob(idx_3p_a, k) for k in range(l_a + 2, n_tot + 1))
+            + sum(_pair_prob(k, idx_3p_a) for k in range(2, idx_3p_a))
+        )
+
+    if blocked_b:
+        prob_ext_b = 0.0
+    else:
+        prob_ext_b = (
+            sum(_pair_prob(k, idx_3p_b) for k in range(2, l_a + 1))
+            + sum(_pair_prob(k, idx_3p_b) for k in range(l_a + 2, idx_3p_b))
+        )
+
+    prob_paired_a = min(1.0, max(0.0, prob_paired_a))
+    prob_paired_b = min(1.0, max(0.0, prob_paired_b))
+    prob_ext_a = min(1.0, max(0.0, prob_ext_a))
+    prob_ext_b = min(1.0, max(0.0, prob_ext_b))
+
+    result = {
+        "prob_3p_paired_a": prob_paired_a,
+        "prob_3p_paired_b": prob_paired_b,
+        "prob_3p_extensible_a": prob_ext_a,
+        "prob_3p_extensible_b": prob_ext_b,
+        "boltzmann_3p_prob": max(prob_ext_a, prob_ext_b),
+        "ensemble_dg_kcal": float(dg_ensemble),
+    }
+    if len(_SHARED_PF_3P_CACHE) >= _MAX_PF_3P_CACHE_SIZE:
+        _SHARED_PF_3P_CACHE.clear()
+    _SHARED_PF_3P_CACHE[cache_key] = result
+    return dict(result)
 
 def get_pairs(structure: str) -> Dict[int, int]:
     """Parse la structure dot-bracket et retourne un dictionnaire de paires."""
@@ -246,12 +345,68 @@ def is_amplifiable_dimer(
 
 from labcraft.lamp.domains import PhysicalPrimer
 
+def enrich_dimer_boltzmann_3p(
+    details: Dict[str, Any],
+    p_a: PhysicalPrimer,
+    p_b: PhysicalPrimer,
+    is_amplifiable: bool,
+    temp_celsius: float,
+    *,
+    suboptimal_3p_prob_threshold: float = 0.10,
+    **backend_kwargs: Any,
+) -> Dict[str, Any]:
+    """Enrichit le dictionnaire de métadonnées d'un dimère avec les probabilités de Boltzmann 3'.
+    Enriches a dimer metadata dictionary with Boltzmann 3' base-pairing probabilities.
+    """
+    na_mm = backend_kwargs.get("na_mm")
+    k_mm = float(backend_kwargs.get("k_mm", 0.0) or 0.0)
+    tris_mm = float(backend_kwargs.get("tris_mm", 0.0) or 0.0)
+    mg_mm = float(backend_kwargs.get("mg_mm", 0.0) or 0.0)
+    dntp_mm = float(backend_kwargs.get("dntp_mm", 0.0) or 0.0)
+
+    mon_molar: Optional[float] = None
+    if na_mm is not None or k_mm > 0.0 or tris_mm > 0.0 or mg_mm > 0.0:
+        mon_true = get_total_monovalent(float(na_mm or 0.0), k_mm, tris_mm) / 1000.0
+        mon_molar = sodium_equivalent_for_folding(mon_true, mg_mm / 1000.0, dntp_mm / 1000.0)
+
+    order = details.get("order", "a&b")
+    if order == "b&a":
+        s1, s2 = p_b.sequence, p_a.sequence
+        blk1, blk2 = p_b.blocked_3prime, p_a.blocked_3prime
+    else:
+        s1, s2 = p_a.sequence, p_b.sequence
+        blk1, blk2 = p_a.blocked_3prime, p_b.blocked_3prime
+
+    pf_info = calc_boltzmann_3p_pairing(
+        s1, s2, temp_celsius=temp_celsius, blocked_a=blk1, blocked_b=blk2, mon_molar=mon_molar
+    )
+    if order == "b&a":
+        prob_a = pf_info["prob_3p_extensible_b"]
+        prob_b = pf_info["prob_3p_extensible_a"]
+    else:
+        prob_a = pf_info["prob_3p_extensible_a"]
+        prob_b = pf_info["prob_3p_extensible_b"]
+
+    max_prob = float(pf_info["boltzmann_3p_prob"])
+    details["prob_3p_extensible_a"] = float(prob_a)
+    details["prob_3p_extensible_b"] = float(prob_b)
+    details["boltzmann_3p_prob"] = max_prob
+    details["ensemble_dg_kcal"] = float(pf_info["ensemble_dg_kcal"])
+    details["suboptimal_3p_masked"] = bool(
+        (not is_amplifiable) and (max_prob >= suboptimal_3p_prob_threshold)
+    )
+    return details
+
+
 def evaluate_pair_amplifiable(
     p_a: PhysicalPrimer, 
     p_b: PhysicalPrimer, 
     backend: DuplexEnergyBackend, 
     enzyme: PolymeraseProfile, 
     temp_celsius: float,
+    *,
+    include_boltzmann_3p: bool = False,
+    suboptimal_3p_prob_threshold: float = 0.10,
     **backend_kwargs: Any
 ) -> Tuple[bool, float, Dict[str, Any]]:
     """Évalue un couple d'amorces dans les deux ordres de concaténation et
@@ -320,6 +475,16 @@ def evaluate_pair_amplifiable(
             "template_primer_parent": tpl_par,
             "is_blocked_veto": blocked_veto
         }
+        if include_boltzmann_3p:
+            enrich_dimer_boltzmann_3p(
+                details,
+                p_a,
+                p_b,
+                is_amp,
+                temp_celsius,
+                suboptimal_3p_prob_threshold=suboptimal_3p_prob_threshold,
+                **salt_kwargs,
+            )
         return is_amp, dg_3p, details
         
     # Hétérodimère: on évalue a&b ET b&a
@@ -436,4 +601,14 @@ def evaluate_pair_amplifiable(
         "template_primer_parent": tpl_par,
         "is_blocked_veto": worst_blocked
     }
+    if include_boltzmann_3p:
+        enrich_dimer_boltzmann_3p(
+            details,
+            p_a,
+            p_b,
+            is_amplifiable,
+            temp_celsius,
+            suboptimal_3p_prob_threshold=suboptimal_3p_prob_threshold,
+            **salt_kwargs,
+        )
     return is_amplifiable, worst_dg, details

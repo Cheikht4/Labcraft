@@ -25,6 +25,10 @@ class RiskItem:
     panel_b: str = ""
     extensible_primer: str = ""
     template_primer: str = ""
+    boltzmann_3p_prob: Optional[float] = None
+    prob_3p_extensible_a: Optional[float] = None
+    prob_3p_extensible_b: Optional[float] = None
+    suboptimal_3p_masked: bool = False
 
     @property
     def is_amplifiable(self) -> bool:
@@ -88,6 +92,10 @@ def evaluate_risks(
                 panel_b=details.get("panel_b", ""),
                 extensible_primer=details.get("extensible_primer_parent", ""),
                 template_primer=details.get("template_primer_parent", ""),
+                boltzmann_3p_prob=details.get("boltzmann_3p_prob"),
+                prob_3p_extensible_a=details.get("prob_3p_extensible_a"),
+                prob_3p_extensible_b=details.get("prob_3p_extensible_b"),
+                suboptimal_3p_masked=bool(details.get("suboptimal_3p_masked", False)),
             ))
             
     # Trier par risque global (sévérité * concentration)
