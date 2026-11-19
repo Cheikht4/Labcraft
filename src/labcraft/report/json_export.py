@@ -45,6 +45,7 @@ def build_analyze_json_payload(
     fractions_detail = {
         p: {
             "free": float(f.free),
+            "hairpin": float(f.hairpin),
             "homodimer": float(f.homodimer),
             "heterodimer_intra": float(f.heterodimer_intra),
             "heterodimer_inter": float(f.heterodimer_inter),

@@ -47,8 +47,10 @@ def evaluate_risks(
     risks = []
     
     for i, (c_name, conc, is_amp) in enumerate(zip(complex_names, concentrations, amplifiable_flags, strict=True)):
-        if "_free" in c_name or "_on_" in c_name:
-            continue # Pas de risque pour les espèces libres ou liées à la cible
+        if "_free" in c_name or "_on_" in c_name or c_name.endswith("_hairpin"):
+            # Pas de risque bimoléculaire pour les espèces libres, épingles monomoléculaires ou liées à la cible
+            # No bimolecular dimer risk for free strands, monomolecular hairpins, or target-bound species
+            continue
             
         severity = 0.0
         desc = ""

@@ -85,20 +85,26 @@ def test_complex_enumeration_counts():
     # 12 amorces + 1 site cible = 13 brins
     assert prob.n_strands == 13
     
-    # Nombre de complexes:
+    # Nombre de complexes / Complex counts:
     # 13 formes libres (12 monomères amorces + 1 monomère site cible)
+    # 12 épingles intramoléculaires (`{p.name}_hairpin`)
     # 66 hétérodimères
     # 12 homodimères
     # 1 complexe amorce-cible
-    # Total = 13 + 66 + 12 + 1 = 92 complexes
+    # Total = 13 + 12 + 66 + 12 + 1 = 104 complexes
     
-    # Compte manuel des types dans complex_names
+    # Compte manuel des types dans complex_names / Manual count by species category
     frees = [n for n in complex_names if n.endswith("_free")]
+    hairpins = [n for n in complex_names if n.endswith("_hairpin")]
     homos = [n for n in complex_names if n.endswith("_homo")]
     ons = [n for n in complex_names if "_on_" in n]
-    heteros = [n for n in complex_names if n not in frees and n not in homos and n not in ons]
+    heteros = [
+        n for n in complex_names
+        if n not in frees and n not in hairpins and n not in homos and n not in ons
+    ]
     
     assert len(frees) == 13, f"Attendu 13, eu {len(frees)}"
+    assert len(hairpins) == 12, f"Attendu 12, eu {len(hairpins)}"
     assert len(homos) == 12, f"Attendu 12, eu {len(homos)}"
     assert len(heteros) == 66, f"Attendu 66, eu {len(heteros)}"
     assert len(ons) == 1, f"Attendu 1, eu {len(ons)}"

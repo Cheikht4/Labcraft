@@ -542,7 +542,7 @@ def run_single_panel_analysis(
 
             if complexes and prob is not None:
                 for i_c, c_name in enumerate(complexes):
-                    if "_on_" in c_name or "_free" in c_name:
+                    if "_on_" in c_name or "_free" in c_name or c_name.endswith("_hairpin"):
                         continue
                     dg = float(prob.delta_g[i_c])
                     stoich = prob.stoichiometry[i_c]

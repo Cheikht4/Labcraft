@@ -418,14 +418,53 @@ class ViennaSaltShiftBackend(DuplexEnergyBackend):
         return shifted
         
     def calc_hairpin(self, seq: str, *, temp_celsius: float = 65.0, **kwargs: Any) -> DuplexResult:
+        """Évalue une épingle intramoléculaire à la force ionique équivalente sodium de ViennaRNA + LNA.
+        Evaluates a monomolecular hairpin at ViennaRNA's sodium-equivalent ionic strength + LNA shift.
+        """
         cache_key = ("hairpin", seq, temp_celsius, tuple(sorted((k, tuple(v) if isinstance(v, (list, tuple)) else v) for k, v in kwargs.items())))
         if cache_key in self._cache:
             return self._cache[cache_key]
-        res = self.vienna.calc_hairpin(seq, temp_celsius=temp_celsius, **kwargs)
-        ct = kwargs.get('ct_molar', self.default_ct_molar)
-        if ct is None: ct = self.default_ct_molar
-        lna_pos = kwargs.get('lna_positions', ())
-        shifted = self._apply_shift(res, seq, ct, kwargs, tuple(lna_pos))
+
+        from labcraft.buffer.monovalent import get_total_monovalent
+        from labcraft.thermo.salt import sodium_equivalent_for_folding
+
+        eff_mon: Any = kwargs.get("mon_molar")
+        if eff_mon is None:
+            na_mm = float(kwargs.get("na_mm", 50.0))
+            k_mm = float(kwargs.get("k_mm", 0.0))
+            tris_mm = float(kwargs.get("tris_mm", 0.0))
+            mg_mm = float(kwargs.get("mg_mm", 0.0))
+            dntp_mm = float(kwargs.get("dntp_mm", 0.0) or 0.0)
+            if abs(na_mm - 1000.0) < 1e-6 and k_mm == 0.0 and tris_mm == 0.0 and mg_mm == 0.0:
+                eff_mon = None
+            else:
+                mon_true = get_total_monovalent(na_mm, k_mm, tris_mm) / 1000.0
+                eff_mon = sodium_equivalent_for_folding(mon_true, mg_mm / 1000.0, dntp_mm / 1000.0)
+
+        res = self.vienna.calc_hairpin(seq, temp_celsius=temp_celsius, mon_molar=eff_mon)
+        if not res.structure or "(" not in res.structure:
+            if len(self._cache) >= _MAX_SALT_CACHE_SIZE:
+                self._cache.clear()
+            self._cache[cache_key] = res
+            return res
+
+        lna_pos = tuple(kwargs.get("lna_positions", ()))
+        dh_st, _, _, _, ddH_lna, ddS_lna, _ = _estimate_structure_thermo_impl(
+            seq, res.structure, lna_pos, include_loops=True
+        )
+        temp_k = temp_celsius + 273.15
+        ddg_lna = ddH_lna - temp_k * (ddS_lna / 1000.0)
+        dg_final = res.dg_kcal + ddg_lna
+        ds_st = ((dh_st - dg_final) / temp_k) * 1000.0 if temp_k > 0 else 0.0
+        tm_hp = (dh_st * 1000.0) / ds_st - 273.15 if ds_st != 0.0 else float("nan")
+        shifted = DuplexResult(
+            dh_kcal=round(dh_st, 2),
+            ds_cal_per_k=round(ds_st, 2),
+            dg_kcal=dg_final,
+            tm_celsius=tm_hp,
+            structure=res.structure,
+            temperature_celsius=temp_celsius,
+        )
         if len(self._cache) >= _MAX_SALT_CACHE_SIZE:
             self._cache.clear()
         self._cache[cache_key] = shifted

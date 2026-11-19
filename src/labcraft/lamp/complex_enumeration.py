@@ -382,6 +382,28 @@ def _enumerate_complexes_impl(
         stoich[n_primers + i] = 1
         complexes.append(ComplexInfo(f"{s['name']}_free", stoich, 0.0))
 
+    # --- 2.5 Épingles intramoléculaires (`{p.name}_hairpin`) ---
+    # --- 2.5 Monomolecular hairpins (`{p.name}_hairpin`) ---
+    for i, p in enumerate(primers):
+        try:
+            res_hp = backend.calc_hairpin(
+                p.sequence,
+                temp_celsius=temp_celsius,
+                lna_positions=p.lna_positions,
+                mon_molar=mon_molar,
+                **backend_kwargs,
+            )
+            dg_hp = float(res_hp.dg_kcal)
+        except NotImplementedError:
+            dg_hp = 1.0
+        except Exception:
+            dg_hp = 1.0
+
+        if dg_hp < 0.0:
+            stoich = [0] * n_strands
+            stoich[i] = 1
+            complexes.append(ComplexInfo(f"{p.name}_hairpin", stoich, dg_hp))
+
     # --- 3. Dimères d'amorces (Oligo entier vs Oligo entier) ---
     for i, p1 in enumerate(primers):
         for j, p2 in enumerate(primers):

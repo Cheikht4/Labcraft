@@ -861,8 +861,26 @@ class IncrementalRedesignEvaluator:
                     self.cand_site_insert_idx = idx_s
                     break
 
-        # 2. Pré-calculer une seule fois les énergies et l'amplifiabilité des dimères partenaire×partenaire
-        # 2. Precompute partner×partner dimer energies and amplifiability once
+        # 2. Pré-calculer une seule fois les énergies d'épingles et des dimères partenaire×partenaire
+        # 2. Precompute partner hairpin energies and partner×partner dimer energies once
+        self.partner_hairpin_dg: Dict[str, float] = {}
+        for p1 in self.partners:
+            try:
+                res_hp = backend.calc_hairpin(
+                    p1.sequence,
+                    temp_celsius=temp_celsius,
+                    lna_positions=p1.lna_positions,
+                    mon_molar=mon_molar,
+                    **backend_kwargs,
+                )
+                dg_hp = float(res_hp.dg_kcal)
+            except NotImplementedError:
+                dg_hp = 1.0
+            except Exception:
+                dg_hp = 1.0
+            if dg_hp < 0.0:
+                self.partner_hairpin_dg[p1.name] = dg_hp
+
         self.partner_dimer_dg: Dict[Tuple[str, str], float] = {}
         for i, p1 in enumerate(self.partners):
             for j in range(i, len(self.partners)):
@@ -1015,6 +1033,29 @@ class IncrementalRedesignEvaluator:
             stoich[n_primers + i] = 1
             complexes.append(ComplexInfo(f"{s_name}_free", stoich, 0.0))
             dimer_pairs_meta.append(None)
+
+        for i, p1 in enumerate(all_primers):
+            if p1.name not in cand_name_set:
+                dg_hp = self.partner_hairpin_dg.get(p1.name, 1.0)
+            else:
+                try:
+                    res_hp = self.backend.calc_hairpin(
+                        p1.sequence,
+                        temp_celsius=self.temp_celsius,
+                        lna_positions=p1.lna_positions,
+                        mon_molar=self.mon_molar,
+                        **self.backend_kwargs,
+                    )
+                    dg_hp = float(res_hp.dg_kcal)
+                except NotImplementedError:
+                    dg_hp = 1.0
+                except Exception:
+                    dg_hp = 1.0
+            if dg_hp < 0.0:
+                stoich = [0] * n_strands
+                stoich[i] = 1
+                complexes.append(ComplexInfo(f"{p1.name}_hairpin", stoich, dg_hp))
+                dimer_pairs_meta.append(None)
 
         for i, p1 in enumerate(all_primers):
             p1_is_cand = p1.name in cand_name_set
