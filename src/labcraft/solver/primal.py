@@ -162,7 +162,7 @@ def solve_primal(
     # Extract free strand concentrations / Extrait les concentrations des brins libres
     # Free strands are monomeric complexes with ΔG° = 0
     # Les brins libres sont les complexes monomériques avec ΔG° = 0
-    free_conc = np.zeros(n_s)
+    free_conc: npt.NDArray[np.float64] = np.zeros(n_s, dtype=np.float64)
     for i in range(n_s):
         for c_idx in range(n_c):
             if (dg[c_idx] == 0.0
@@ -171,7 +171,7 @@ def solve_primal(
                 free_conc[i] = c_conc[c_idx]
                 break
 
-    free_conc = np.maximum(free_conc, x_min)
+    free_conc = np.asarray(np.maximum(free_conc, x_min), dtype=np.float64)
     u = np.log(free_conc)
 
     return EquilibriumResult(
