@@ -178,6 +178,9 @@ def test_analyze_json_exports_boltzmann_3p_fields(tmp_path: Path) -> None:
     html_text = out_html.read_text(encoding="utf-8")
     assert "heuristique non calibré" in html_text
     assert "sans effet sur le verdict" in html_text
+    assert "validé expérimentalement" in html_text
+    readme_text = (Path(__file__).resolve().parent.parent.parent / "README.md").read_text(encoding="utf-8")
+    assert "ne doit pas entrer dans le verdict tant qu'il n'est pas validé expérimentalement" in readme_text
 
 
 def test_point3_boltzmann_3p_inter_vs_intra_contiguous_and_connected() -> None:

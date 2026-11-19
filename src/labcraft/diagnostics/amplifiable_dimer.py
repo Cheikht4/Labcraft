@@ -14,10 +14,12 @@ _SHARED_PF_3P_CACHE: Dict[Tuple[Any, ...], Dict[str, Any]] = {}
 
 # Seuil heuristique non calibré (10 %) signalant dans le rapport HTML/JSON qu'un dimère classé
 # non amplifiable au MFE possède néanmoins une sous-population Boltzmann 3' intermoléculaire notable.
-# N'intervient JAMAIS dans `is_amplifiable`, `total_amp_dimer_conc_nm`, ni dans le verdict du panel.
+# Six dimères sub-nanomolaires (0,040–0,101 nM) étant signalés sur `singleplex_denv3` (panel fonctionnel
+# en paillasse), cet indicateur NE DOIT PAS entrer dans le verdict tant qu'il n'est pas validé expérimentalement.
 # Uncalibrated heuristic threshold (10%) flagging in HTML/JSON reports that a dimer classified as
 # non-amplifiable at MFE still carries a notable intermolecular 3' Boltzmann sub-population.
-# NEVER enters `is_amplifiable`, `total_amp_dimer_conc_nm`, or the panel verdict.
+# Because 6 sub-nanomolar dimers (0.040–0.101 nM) are flagged on `singleplex_denv3` (a functional bench
+# panel), this indicator MUST NOT enter the panel verdict until experimentally validated.
 SUBOPTIMAL_3P_PROB_THRESHOLD_HEURISTIC = 0.10
 
 _WC_STRICT_PAIRS = frozenset({("A", "T"), ("T", "A"), ("C", "G"), ("G", "C")})

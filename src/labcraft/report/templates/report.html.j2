@@ -1045,7 +1045,7 @@
                 <br><strong style="color: var(--color-warning-text); font-size: 12px;">⚠️ Ce dimère aurait été amplifiable, mais n'est pas amplifiable : 3' bloqué.</strong>
                 {% endif %}
                 {% if risk.suboptimal_3p_masked and risk.boltzmann_3p_prob is not none %}
-                <br><strong style="color: var(--color-warning-text); font-size: 12px;">ℹ️ Conformation 3' intermoléculaire sous-optimale masquée au MFE : P<sub>Boltzmann</sub>(3' &ge; 3 pb | dimère lié) = {{ "%.1f"|format(risk.boltzmann_3p_prob * 100) }} % &ge; 10 % (seuil heuristique non calibré ; indicateur informatif sans effet sur le verdict).</strong>
+                <br><strong style="color: var(--color-warning-text); font-size: 12px;">ℹ️ Conformation 3' intermoléculaire sous-optimale masquée au MFE : P<sub>Boltzmann</sub>(3' &ge; 3 pb | dimère lié) = {{ "%.1f"|format(risk.boltzmann_3p_prob * 100) }} % &ge; 10 % (seuil heuristique non calibré ; indicateur informatif sans effet sur le verdict, ne devant pas entrer dans le verdict tant qu'il n'est pas validé expérimentalement).</strong>
                 {% endif %}
             </p>
             <div class="artefact-stats">
