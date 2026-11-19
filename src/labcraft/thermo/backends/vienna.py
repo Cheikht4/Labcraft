@@ -1,5 +1,6 @@
 """ViennaRNA backend (duplexfold/cofold, no GPL) / Backend ViennaRNA"""
 from typing import Any, Optional
+import warnings
 import RNA
 from labcraft.thermo.vienna import dna_params, _ensure_vienna
 from labcraft.thermo.backends.base import DuplexEnergyBackend, DuplexResult
@@ -92,6 +93,25 @@ class ViennaRNABackend(DuplexEnergyBackend):
             return res
 
     def calc_hairpin(self, seq: str, *, temp_celsius: float = 65.0, **kwargs: Any) -> DuplexResult:
+        """Calcule l'énergie libre MFE d'une épingle intramoléculaire via `RNA.fold`.
+
+        Note : `ViennaRNABackend` simple n'applique pas de paramètres LNA (`lna_positions` est ignoré
+        et déclenche un `UserWarning` s'il est non vide ; utiliser `ViennaSaltShiftBackend` pour
+        inclure la stabilisation thermodynamique des bases LNA sur les épingles).
+
+        Computes monomolecular hairpin MFE free energy via `RNA.fold`.
+        Note: bare `ViennaRNABackend` does not model LNA bases (`lna_positions` is ignored and emits a
+        `UserWarning` when non-empty; use `ViennaSaltShiftBackend` for LNA hairpin stabilization).
+        """
+        lna_positions = kwargs.get("lna_positions")
+        if lna_positions:
+            warnings.warn(
+                "ViennaRNABackend.calc_hairpin ignore lna_positions ; utilisez ViennaSaltShiftBackend "
+                "pour appliquer la stabilisation LNA sur les épingles. / "
+                "ViennaRNABackend.calc_hairpin ignores lna_positions; use ViennaSaltShiftBackend for LNA.",
+                UserWarning,
+                stacklevel=2,
+            )
         mon_molar: Optional[float] = kwargs.get("mon_molar")
         salt_key = round(float(mon_molar), 6) if mon_molar is not None else None
         key = ("hairpin", seq, temp_celsius, salt_key)

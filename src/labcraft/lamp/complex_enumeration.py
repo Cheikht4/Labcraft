@@ -396,7 +396,15 @@ def _enumerate_complexes_impl(
             dg_hp = float(res_hp.dg_kcal)
         except NotImplementedError:
             dg_hp = 1.0
-        except Exception:
+        except Exception as exc:
+            # Ne pas masquer silencieusement les erreurs inattendues hors NotImplementedError
+            # Do not silently swallow unexpected exceptions beyond NotImplementedError
+            warnings.warn(
+                f"Échec inattendu de calc_hairpin pour '{p.name}' ({type(backend).__name__}) : "
+                f"{type(exc).__name__}: {exc}. Épingle ignorée.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
             dg_hp = 1.0
 
         if dg_hp < 0.0:

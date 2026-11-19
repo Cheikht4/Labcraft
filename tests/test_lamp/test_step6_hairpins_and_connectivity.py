@@ -136,3 +136,66 @@ def test_cli_analyze_json_exports_hairpin_fraction_without_fake_dimer(tmp_path: 
     assert js["fractions"]["F3_HPTest"]["hairpin"] > 0.50
     assert not any(d["name"].endswith("_hairpin") for d in js["dimers"])
     assert not any("F3_HPTest" in d["name"] and "B3_HPTest" in d["name"] for d in js["dimers"])
+
+
+def test_point4_hairpin_unexpected_exception_warns_and_vienna_lna_warns() -> None:
+    """Vérifie le Point 4 :
+    1) `NotImplementedError` sur `calc_hairpin` reste silencieux, tandis que toute autre exception
+       émet un `RuntimeWarning` explicite au lieu d'être avalée silencieusement ;
+    2) `ViennaRNABackend.calc_hairpin` émet un `UserWarning` lorsque `lna_positions` est non vide
+       (même sur appel caché), contrairement à `ViennaSaltShiftBackend.calc_hairpin` qui applique le LNA.
+
+    Verifies Point 4:
+    1) `NotImplementedError` in `calc_hairpin` remains silent, while any other exception emits an
+       explicit `RuntimeWarning` instead of being silently swallowed;
+    2) `ViennaRNABackend.calc_hairpin` emits a `UserWarning` when `lna_positions` is non-empty
+       (including on cached calls), whereas `ViennaSaltShiftBackend.calc_hairpin` applies LNA cleanly.
+    """
+    import warnings
+    import pytest
+    from labcraft.thermo.backends.base import DuplexResult
+
+    p_hp = PhysicalPrimer(
+        name="P_err",
+        sequence="CGCGCGCAAAAGCGCGCG",
+        role=PrimerRole.F3,
+        binding_domain="CGCGCGCAAAAGCGCGCG",
+        nominal_concentration=0.2e-6,
+    )
+    profile = ConcentrationProfile(target=1e-12, fip_bip=0.8e-6, f3_b3=0.2e-6, lf_lb=0.4e-6)
+
+    # 1a) NativeBackend (NotImplementedError) -> aucun RuntimeWarning
+    with warnings.catch_warnings(record=True) as rec_nat:
+        warnings.simplefilter("always")
+        enumerate_complexes([p_hp], None, NativeBackend(), profile=profile, temp_celsius=63.0)
+    assert not any(issubclass(w.category, RuntimeWarning) for w in rec_nat)
+
+    # 1b) Backend défaillant levant RuntimeError -> RuntimeWarning émis avec nom d'amorce et cause
+    class _BrokenHairpinBackend(ViennaRNABackend):
+        def calc_hairpin(self, seq: str, *, temp_celsius: float = 65.0, **kwargs: object) -> DuplexResult:
+            raise RuntimeError("boom_hairpin_failure")
+
+    with pytest.warns(RuntimeWarning, match=r"P_err.*RuntimeError: boom_hairpin_failure"):
+        prob_b, _st_b, comp_b, _ = enumerate_complexes(
+            [p_hp], None, _BrokenHairpinBackend(), profile=profile, temp_celsius=63.0
+        )
+    assert "P_err_hairpin" not in comp_b
+    assert prob_b.n_complexes >= 1
+
+    # 2a) ViennaRNABackend simple avec LNA -> UserWarning explicite (1er appel ET appel en cache)
+    vienna_plain = ViennaRNABackend()
+    with pytest.warns(UserWarning, match="ViennaRNABackend.calc_hairpin ignore lna_positions"):
+        vienna_plain.calc_hairpin("CGCGCGCAAAAGCGCGCG", temp_celsius=63.0, lna_positions=(1, 3))
+    with pytest.warns(UserWarning, match="ViennaRNABackend.calc_hairpin ignore lna_positions"):
+        vienna_plain.calc_hairpin("CGCGCGCAAAAGCGCGCG", temp_celsius=63.0, lna_positions=(1, 3))
+
+    # 2b) ViennaSaltShiftBackend avec LNA -> aucun warning LNA ignoré et stabilisation effective du ΔG
+    salt_backend = ViennaSaltShiftBackend(UnifiedSaltModel())
+    with warnings.catch_warnings(record=True) as rec_salt:
+        warnings.simplefilter("always")
+        res_dna = salt_backend.calc_hairpin("CGCGCGCAAAAGCGCGCG", temp_celsius=63.0, na_mm=50.0, mg_mm=8.0)
+        res_lna = salt_backend.calc_hairpin(
+            "CGCGCGCAAAAGCGCGCG", temp_celsius=63.0, na_mm=50.0, mg_mm=8.0, lna_positions=(1, 3)
+        )
+    assert not any("ignore lna_positions" in str(w.message) for w in rec_salt)
+    assert res_lna.dg_kcal < res_dna.dg_kcal

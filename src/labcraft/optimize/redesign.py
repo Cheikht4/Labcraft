@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import copy
 import math
+import warnings
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -884,7 +885,13 @@ class IncrementalRedesignEvaluator:
                 dg_hp = float(res_hp.dg_kcal)
             except NotImplementedError:
                 dg_hp = 1.0
-            except Exception:
+            except Exception as exc:
+                warnings.warn(
+                    f"Échec inattendu de calc_hairpin pour '{p1.name}' ({type(backend).__name__}) : "
+                    f"{type(exc).__name__}: {exc}. Épingle ignorée.",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
                 dg_hp = 1.0
             if dg_hp < 0.0:
                 self.partner_hairpin_dg[p1.name] = dg_hp
@@ -1057,7 +1064,13 @@ class IncrementalRedesignEvaluator:
                     dg_hp = float(res_hp.dg_kcal)
                 except NotImplementedError:
                     dg_hp = 1.0
-                except Exception:
+                except Exception as exc:
+                    warnings.warn(
+                        f"Échec inattendu de calc_hairpin pour '{p1.name}' ({type(self.backend).__name__}) : "
+                        f"{type(exc).__name__}: {exc}. Épingle ignorée.",
+                        RuntimeWarning,
+                        stacklevel=2,
+                    )
                     dg_hp = 1.0
             if dg_hp < 0.0:
                 stoich = [0] * n_strands
