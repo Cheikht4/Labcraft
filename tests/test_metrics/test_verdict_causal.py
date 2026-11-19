@@ -142,11 +142,20 @@ def test_part_d_dimer_conc_max_and_recommendations_coherence_via_cli(tmp_path):
     primers_only_pd3.write_text("\n".join(pd3_records) + "\n", encoding="utf-8")
 
     runner = CliRunner()
-    # 1) Avec --dimer-conc-max 20.0 (au-dessus de 7.26 nM) -> WARNING
+    # 1a) Avec --dimer-conc-max 20.0 (7.26 nM < 0.5 * 20.0 = 10.0 nM) -> INFO
+    out_info = tmp_path / "pd3_info.html"
+    res_info = runner.invoke(app, [
+        "analyze", "-p", str(primers_only_pd3), "-t", str(d3_fasta),
+        "--temperature", "63.0", "--dimer-conc-max", "20.0", "-o", str(out_info)
+    ])
+    assert res_info.exit_code == 0, f"CLI failed: {res_info.stdout}"
+    assert "Verdict Global : INFO" in out_info.read_text(encoding="utf-8")
+
+    # 1b) Avec --dimer-conc-max 12.0 (0.5 * 12.0 = 6.0 nM <= 7.26 nM < 12.0 nM) -> WARNING
     out_warn = tmp_path / "pd3_warn.html"
     res_warn = runner.invoke(app, [
         "analyze", "-p", str(primers_only_pd3), "-t", str(d3_fasta),
-        "--temperature", "63.0", "--dimer-conc-max", "20.0", "-o", str(out_warn)
+        "--temperature", "63.0", "--dimer-conc-max", "12.0", "-o", str(out_warn)
     ])
     assert res_warn.exit_code == 0, f"CLI failed: {res_warn.stdout}"
     html_warn = out_warn.read_text(encoding="utf-8")

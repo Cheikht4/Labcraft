@@ -87,6 +87,7 @@
             font-size: 0.76rem;
         }
         .badge-ok { background: #dcfce7; color: #166534; }
+        .badge-info { background: #e0f2fe; color: #075985; }
         .badge-warning { background: #fef3c7; color: #92400e; }
         .badge-failure { background: #fee2e2; color: #991b1b; }
         .warn-flag { color: #b45309; font-weight: 600; }
@@ -183,6 +184,8 @@
                     <td>
                         {%- if row.verdict == "OK" -%}
                             <span class="badge badge-ok">OK</span>
+                        {%- elif row.verdict == "INFO" -%}
+                            <span class="badge badge-info">INFO</span>
                         {%- elif row.verdict == "WARNING" -%}
                             <span class="badge badge-warning">WARNING</span>
                         {%- elif row.verdict == "FAILURE" -%}

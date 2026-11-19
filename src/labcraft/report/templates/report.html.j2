@@ -14,6 +14,7 @@
             
             /* Palette Colorblind-friendly (Okabe-Ito inspired) */
             --color-ok: #009E73;
+            --color-info: #0072B2; /* Blue */
             --color-warning: #F0E442; /* Yellow */
             --color-warning-text: #8a7a00;
             --color-failure: #D55E00; /* Vermillion */
@@ -60,6 +61,7 @@
             color: #fff;
         }
         .verdict-banner.OK { background-color: var(--color-ok); }
+        .verdict-banner.INFO { background-color: var(--color-info); }
         .verdict-banner.WARNING { background-color: var(--color-warning); color: var(--color-warning-text); }
         .verdict-banner.FAILURE { background-color: var(--color-failure); }
         
@@ -77,6 +79,9 @@
             border-left: 4px solid var(--color-failure);
             box-shadow: 0 1px 3px rgba(0,0,0,0.1);
         }
+        .issue-item.issue-INFO { border-left-color: var(--color-info); }
+        .issue-item.issue-WARNING { border-left-color: var(--color-warning-text); }
+        .issue-item.issue-FAILURE { border-left-color: var(--color-failure); }
         
         /* Barres de fractions */
         .fraction-row {
@@ -444,8 +449,8 @@
             <div class="target-box">
                 <h3>Cible : {{ target }}</h3>
                 {% for issue in issues %}
-                <div class="issue-item">
-                    <strong>Amorce : {{ issue.primer_name }}</strong> 
+                <div class="issue-item issue-{{ issue.level }}">
+                    <strong>[{{ issue.level }}] Amorce : {{ issue.primer_name }}</strong> 
                     {% if target == "Compétition Sans Cible" %}
                         (Fraction libre : {{ issue.occupation|pct }})
                     {% else %}

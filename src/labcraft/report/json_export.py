@@ -154,6 +154,7 @@ def build_analyze_json_payload(
                 "occupation": float(iss.occupation),
                 "cause": iss.cause,
                 "is_critical": bool(iss.is_critical),
+                "level": iss.level,
             }
             for iss in verdict.issues
         ],

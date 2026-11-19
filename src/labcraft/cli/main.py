@@ -84,6 +84,15 @@ _DIMER_CONC_MAX_HELP = (
     "duplex_half et duplex_full sont deux dilutions du même panel donc non indépendants, et la "
     "séparation repose sur une seule paire inter-panels : FIP_Nunes_YFV × F3_ParidaD4)."
 )
+_DIMER_WARN_RATIO_HELP = (
+    "Fraction de --dimer-conc-max au-delà de laquelle les dimères amplifiables passent d'INFO à WARNING "
+    "(heuristique non calibrée, défaut : 0.5 soit 50 % du seuil FAILURE)."
+)
+_ROLE_IMBALANCE_RATIO_HELP = (
+    "Rapport maximal d'occupation brute toléré entre amorces d'initiation de même rôle (F3 vs B3, FIP vs BIP) "
+    "avant passage d'INFO à WARNING (heuristique non calibrée, défaut : 20.0 ≈ ΔΔG de 2,0 kcal/mol à 63 °C, "
+    "sans normalisation par le nombre de variants dégénérés)."
+)
 
 
 @app.command()
@@ -109,6 +118,8 @@ def analyze(
     strict_3prime: int = typer.Option(3, "--strict-3prime", help="Length of strict 3' zone for candidate site seeding."),
     strict_3prime_tolerate: int = typer.Option(2, "--strict-3prime-tolerate", help="Number of tolerated substitutions in strict 3' zone for seeding."),
     dimer_conc_max: float = typer.Option(0.23, "--dimer-conc-max", help=_DIMER_CONC_MAX_HELP),
+    dimer_warn_ratio: float = typer.Option(0.5, "--dimer-warn-ratio", help=_DIMER_WARN_RATIO_HELP),
+    role_imbalance_ratio: float = typer.Option(20.0, "--role-imbalance-ratio", help=_ROLE_IMBALANCE_RATIO_HELP),
     separate_targets: bool = typer.Option(False, "--separate-targets", "--per-target", help="Solve targets independently instead of joint multi-target equilibrium."),
     force_joint: bool = typer.Option(False, "--force-joint", help="Force joint analysis of multiple panels for the same target.")
 ) -> None:
@@ -179,6 +190,8 @@ def analyze(
             strict_3prime=strict_3prime,
             strict_3prime_tolerate=strict_3prime_tolerate,
             dimer_conc_max=dimer_conc_max,
+            dimer_warn_ratio=dimer_warn_ratio,
+            role_imbalance_ratio=role_imbalance_ratio,
             separate_targets=separate_targets,
             force_joint=force_joint,
         )
@@ -197,6 +210,8 @@ def _run_analyze_with_config(
     strict_3prime: int,
     strict_3prime_tolerate: int,
     dimer_conc_max: float,
+    dimer_warn_ratio: float = 0.5,
+    role_imbalance_ratio: float = 20.0,
     separate_targets: bool,
     force_joint: bool,
 ) -> None:
@@ -244,6 +259,8 @@ def _run_analyze_with_config(
                 strict_3prime=strict_3prime,
                 strict_3prime_tolerate=strict_3prime_tolerate,
                 dimer_conc_max=dimer_conc_max,
+                dimer_warn_ratio=dimer_warn_ratio,
+                role_imbalance_ratio=role_imbalance_ratio,
                 separate_targets=separate_targets,
                 progress_callback=typer.echo,
             )
@@ -457,6 +474,8 @@ def redesign(
     copies: Optional[float] = typer.Option(None, "--copies", help="Target copies per uL."),
     max_variants: int = typer.Option(64, "--max-variants", help="Maximum variants allowed per degenerate primer."),
     dimer_conc_max: float = typer.Option(0.23, "--dimer-conc-max", help=_DIMER_CONC_MAX_HELP),
+    dimer_warn_ratio: float = typer.Option(0.5, "--dimer-warn-ratio", help=_DIMER_WARN_RATIO_HELP),
+    role_imbalance_ratio: float = typer.Option(20.0, "--role-imbalance-ratio", help=_ROLE_IMBALANCE_RATIO_HELP),
 ) -> None:
     """Propose des séquences de remplacement pour une amorce externe ou de boucle.
     Proposes replacement sequences for an outer or loop primer.
@@ -654,6 +673,8 @@ def redesign(
             temp_celsius=temp_celsius,
             max_variants=max_variants,
             dimer_conc_max=dimer_conc_max,
+            dimer_warn_ratio=dimer_warn_ratio,
+            role_imbalance_ratio=role_imbalance_ratio,
             pair_cache=pair_cache,
         )
         for i_c, c in enumerate([ref] + best):

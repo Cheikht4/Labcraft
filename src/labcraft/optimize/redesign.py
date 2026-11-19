@@ -26,7 +26,11 @@ from labcraft.lamp.stoichiometry import ConcentrationProfile, LAMP_DEFAULT_PROFI
 from labcraft.metrics.balance import calculate_multiplex_balance
 from labcraft.metrics.fractions import compute_fractions
 from labcraft.metrics.risk import evaluate_risks, summarize_amplifiable_dimers
-from labcraft.metrics.verdict import generate_verdict
+from labcraft.metrics.verdict import (
+    DEFAULT_DIMER_WARN_RATIO,
+    DEFAULT_ROLE_IMBALANCE_RATIO,
+    generate_verdict,
+)
 from labcraft.solver.dual import solve_dual
 from labcraft.solver.types import EquilibriumProblem
 from labcraft.target.seeding import primer_matches_sequence
@@ -750,6 +754,8 @@ class IncrementalRedesignEvaluator:
         strict_3prime: int = 3,
         strict_3prime_tolerate: int = 2,
         dimer_conc_max: Optional[float] = None,
+        dimer_warn_ratio: float = DEFAULT_DIMER_WARN_RATIO,
+        role_imbalance_ratio: float = DEFAULT_ROLE_IMBALANCE_RATIO,
         pair_cache: Optional[Dict[Tuple[Any, ...], Tuple[bool, float, Dict[str, Any]]]] = None,
     ) -> None:
         self.internal_name = internal_name
@@ -772,6 +778,8 @@ class IncrementalRedesignEvaluator:
         self.strict_3prime = strict_3prime
         self.strict_3prime_tolerate = strict_3prime_tolerate
         self.dimer_conc_max = dimer_conc_max
+        self.dimer_warn_ratio = dimer_warn_ratio
+        self.role_imbalance_ratio = role_imbalance_ratio
         self.pair_cache = pair_cache if pair_cache is not None else {}
 
         # Conserver la position exacte de l'amorce remplacée dans la liste des brins
@@ -1172,12 +1180,24 @@ class IncrementalRedesignEvaluator:
             for p in all_primers
             if p.role in (PrimerRole.LF, PrimerRole.LB)
         }
+        parent_nominal_concs: Dict[str, float] = {}
+        parent_variant_counts: Dict[str, int] = {}
+        for p in all_primers:
+            par_k = p.parent_name or p.name.split("#")[0]
+            parent_nominal_concs[par_k] = parent_nominal_concs.get(par_k, 0.0) + float(
+                p.nominal_concentration or 0.0
+            )
+            parent_variant_counts[par_k] = parent_variant_counts.get(par_k, 0) + 1
         verdict = generate_verdict(
             fractions, target_occupations, risks,
             loop_primer_parents=loop_parents,
-            primer_to_panel=p2t, primer_to_target=p2t,
+            primer_to_panel=p2pan, primer_to_target=p2t,
             unfolding_penalties=all_unfolding,
             dimer_conc_max_nm=self.dimer_conc_max,
+            role_imbalance_ratio=self.role_imbalance_ratio,
+            dimer_warn_ratio=self.dimer_warn_ratio,
+            primer_nominal_concs=parent_nominal_concs,
+            primer_variant_counts=parent_variant_counts,
         )
         decomp = summarize_amplifiable_dimers(risks, primer_to_panel=p2pan)
         free_frac_map = {p: f.free for p, f in fractions.items()}

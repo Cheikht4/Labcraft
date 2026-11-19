@@ -30,7 +30,12 @@ from labcraft.metrics.risk import (
     evaluate_risks,
     summarize_amplifiable_dimers,
 )
-from labcraft.metrics.verdict import PanelVerdict, generate_verdict
+from labcraft.metrics.verdict import (
+    DEFAULT_DIMER_WARN_RATIO,
+    DEFAULT_ROLE_IMBALANCE_RATIO,
+    PanelVerdict,
+    generate_verdict,
+)
 from labcraft.optimize.concentrations import optimize_concentrations
 from labcraft.optimize.recommendations import generate_recommendations
 from labcraft.report.alignment import dotbracket_to_alignment, get_alignment_columns
@@ -295,6 +300,8 @@ def run_single_panel_analysis(
     strict_3prime: int = 3,
     strict_3prime_tolerate: int = 2,
     dimer_conc_max: float = 0.23,
+    dimer_warn_ratio: float = DEFAULT_DIMER_WARN_RATIO,
+    role_imbalance_ratio: float = DEFAULT_ROLE_IMBALANCE_RATIO,
     separate_targets: bool = False,
     progress_callback: Optional[Callable[[str], None]] = None,
 ) -> PanelAnalysisResult:
@@ -571,15 +578,27 @@ def run_single_panel_analysis(
         loop_primer_parents = {
             _get_parent_name(p.name) for p in primers if p.role in (PrimerRole.LF, PrimerRole.LB)
         }
+        parent_nominal_concs: Dict[str, float] = {}
+        parent_variant_counts: Dict[str, int] = {}
+        for p in primers:
+            par_key = p.parent_name or _get_parent_name(p.name)
+            parent_nominal_concs[par_key] = parent_nominal_concs.get(par_key, 0.0) + float(
+                p.nominal_concentration or 0.0
+            )
+            parent_variant_counts[par_key] = parent_variant_counts.get(par_key, 0) + 1
         verdict = generate_verdict(
             all_fractions,
             target_occupations,
             all_risks,
             loop_primer_parents=loop_primer_parents,
-            primer_to_panel=primer_to_target,
+            primer_to_panel=primer_to_panel_map,
             primer_to_target=primer_to_target,
             unfolding_penalties=all_unfolding_penalties,
             dimer_conc_max_nm=dimer_conc_max,
+            role_imbalance_ratio=role_imbalance_ratio,
+            dimer_warn_ratio=dimer_warn_ratio,
+            primer_nominal_concs=parent_nominal_concs,
+            primer_variant_counts=parent_variant_counts,
         )
 
         dimer_decomposition = summarize_amplifiable_dimers(
@@ -712,6 +731,8 @@ def run_single_panel_analysis(
         "enzyme": enzyme.name,
         "buffer": buf_dump,
         "dimer_conc_max_nm": dimer_conc_max,
+        "dimer_warn_ratio": dimer_warn_ratio,
+        "role_imbalance_ratio": role_imbalance_ratio,
         "dimer_dg_threshold": enzyme.dimer_dg_threshold,
         "max_variants": max_variants,
         "seeding": {
@@ -780,6 +801,8 @@ def run_analysis_pipeline(
     strict_3prime: int = 3,
     strict_3prime_tolerate: int = 2,
     dimer_conc_max: float = 0.23,
+    dimer_warn_ratio: float = DEFAULT_DIMER_WARN_RATIO,
+    role_imbalance_ratio: float = DEFAULT_ROLE_IMBALANCE_RATIO,
     separate_targets: bool = False,
     force_joint: bool = False,
     progress_callback: Optional[Callable[[str], None]] = None,
@@ -822,6 +845,8 @@ def run_analysis_pipeline(
                 strict_3prime=strict_3prime,
                 strict_3prime_tolerate=strict_3prime_tolerate,
                 dimer_conc_max=dimer_conc_max,
+                dimer_warn_ratio=dimer_warn_ratio,
+                role_imbalance_ratio=role_imbalance_ratio,
                 separate_targets=separate_targets,
                 progress_callback=progress_callback,
             )
