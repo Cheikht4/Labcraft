@@ -3,13 +3,13 @@ Reproducible LabCraft reference benchmark suite (`validation/reference_benchmark
 
 Produit à partir du code actuel :
 (a) le tableau des 5 cas de paillasse de référence (dimères amplifiables à -2.0 et -3.5 kcal/mol,
-    verdict, cause globale, dédoublonnage 3' `(couple parent, 5 nt 3'_A, 5 nt 3'_B)`,
-    indicateur `suboptimal_3p_masked` et `parent_pair_max_boltzmann_3p_prob`) ;
+    verdict, cause globale, évaluation Boltzmann 3' exhaustive par défaut (`boltzmann_mode = "exhaustive"`),
+    comparaison `exhaustive` vs `dedup_approx` (fenêtre 5 nt) et liste des groupes où `P_Boltzmann` varie
+    de plus de 10 points entre variants d'une même clé) ;
 (b) le comparatif exact `labcraft coverage` entre les commits `58ae5d9` et `8cf5bd8` sur les 3 génomes
     GenBank de référence et les 2 cohortes synthétiques déterministes (120 DENV3 + 120 DENV4, graine 20261119) ;
 (c) le benchmark de temps de calcul (`N = 3` répétitions : médiane et étendue) de `enrich_dimer_boltzmann_3p`
-    sur 81 espèces (3 321 paires) avec le défaut illimité (`--boltzmann-max-dimers None`, fenêtre 3' = 5 nt)
-    et avec le garde-fou `--boltzmann-max-dimers 25`.
+    sur 81 espèces (3 321 paires) en mode par défaut `exhaustive` vs accélérateurs optionnels `dedup_approx`.
 """
 from __future__ import annotations
 
@@ -248,11 +248,11 @@ def run_section_a_five_cases() -> Tuple[List[Dict[str, Any]], Dict[str, List[Dic
                     "inter_35": float(r35.dimer_decomposition["inter_nm"]),
                     "verdict_35": r35.verdict.status,
                     "dom_20": dom_str,
+                    "boltzmann_mode": str(totals20["boltzmann_mode"]),
                     "masked_count_default": len(masked_items),
-                    "eligible_dedup_groups": int(totals20["boltzmann_eligible_dedup_groups"]),
-                    "skipped_dedup_groups": int(totals20["boltzmann_skipped_dedup_groups"]),
+                    "eligible_non_amp": int(totals20["boltzmann_eligible_dedup_groups"]),
+                    "skipped_eligible": int(totals20["boltzmann_skipped_eligible_dimers"]),
                     "eligible_ppairs": int(totals20["boltzmann_eligible_parent_pairs"]),
-                    "skipped_ppairs": int(totals20["boltzmann_skipped_parent_pairs"]),
                 }
             )
     finally:
@@ -262,15 +262,14 @@ def run_section_a_five_cases() -> Tuple[List[Dict[str, Any]], Dict[str, List[Dic
     return rows, masked_by_case
 
 
-def run_section_a_masked_reconciliation() -> List[str]:
-    """Compare sur les 5 cas de référence les 12 dimères `suboptimal_3p_masked` sans dédoublonnage
-    avec la sélection dédoublonnée par clé `(couple parent, 5 nt 3'_A, 5 nt 3'_B)` sans plafond (défaut `None`),
-    en détaillant chaque fusion de variants identiques en 3' (différant uniquement en 5'/milieu) et la séparation
-    des variants différant dans la fenêtre 3'.
+def run_section_a_exhaustive_vs_dedup5() -> Tuple[List[Dict[str, Any]], List[str]]:
+    """Compare sur les 5 cas de référence le mode par défaut `exhaustive` (`--boltzmann-dedup-3p-window 0`)
+    et l'approximation `--boltzmann-dedup-3p-window 5` (`dedup_approx`), et liste tous les groupes où
+    `P_Boltzmann` varie de plus de `10.0` points de pourcentage entre variants d'une même clé 5 nt.
 
-    Compares across the 5 reference cases the 12 un-deduplicated `suboptimal_3p_masked` dimers against
-    `(parent_pair, 5-nt 3'_A, 5-nt 3'_B)` deduplicated selection under the unlimited default (`None`),
-    detailing every 5'/internal merge and every 3'-distinct split.
+    Compares default `exhaustive` mode (`--boltzmann-dedup-3p-window 0`) against `--boltzmann-dedup-3p-window 5`
+    (`dedup_approx`) across the 5 reference cases, and lists every 5-nt key whose variants span `> 10.0`
+    percentage points in `P_Boltzmann`.
     """
     from labcraft.cli.config import build_engine_from_config
     from labcraft.diagnostics.amplifiable_dimer import (
@@ -289,9 +288,10 @@ def run_section_a_masked_reconciliation() -> List[str]:
         ("duplex_half", GT_DIR / "duplex_YFV_DENV4_primers.txt", GT_DIR / "duplex_YFV_DENV4_targets.fasta", 0.4, 0.2, 0.1),
         ("duplex_full", GT_DIR / "duplex_YFV_DENV4_primers.txt", GT_DIR / "duplex_YFV_DENV4_targets.fasta", 0.8, 0.4, 0.2),
     ]
-    notes: List[str] = []
+    comp_rows: List[Dict[str, Any]] = []
+    spread_notes: List[str] = []
     floor_m = 0.1 * 0.23 * 1e-9
-    win_3p = DEFAULT_BOLTZMANN_DEDUP_3P_WINDOW
+    win_approx = 5
 
     for cid, pf, tf, c_fb, c_lp, c_f3 in cases:
         cfg = build_config_from_cli(
@@ -318,13 +318,7 @@ def run_section_a_masked_reconciliation() -> List[str]:
                 )
             res = solve_dual(prob)
 
-            # Regrouper par couple parent et par clé 3' canonique / Group by parent pair and canonical 3' key
-            by_dkey: Dict[Tuple[Tuple[str, str], Tuple[str, str]], List[Dict[str, Any]]] = {}
-            by_ppair_dkeys: Dict[
-                Tuple[str, str], List[Tuple[Tuple[str, str], Tuple[str, str]]]
-            ] = {}
-            amp_max_by_ppair: Dict[Tuple[str, str], float] = {}
-
+            by_dkey5: Dict[Tuple[Tuple[str, str], Tuple[str, str]], List[Dict[str, Any]]] = {}
             for idx_c, cname in enumerate(complexes):
                 conc = float(res.concentrations[idx_c])
                 has_t = any(k >= len(primers) and v > 0 for k, v in enumerate(prob.stoichiometry[idx_c]))
@@ -341,23 +335,15 @@ def run_section_a_masked_reconciliation() -> List[str]:
                 pa = primers[ks[0]]
                 pb = primers[ks[0]] if len(ks) == 1 else primers[ks[1]]
                 is_amp, _dg3, det = evaluate_pair_amplifiable(pa, pb, backend, enz, tc, **bkw)
-                par_a = str(det.get("parent_a") or _get_parent_name(pa.name))
-                par_b = str(det.get("parent_b") or _get_parent_name(pb.name))
-                ppair = (par_a, par_b) if par_a <= par_b else (par_b, par_a)
-                if is_amp:
-                    enrich_dimer_boltzmann_3p(det, pa, pb, True, tc, enzyme=enz, **bkw)
-                    p_amp = float(det.get("boltzmann_3p_prob") or 0.0) * 100.0
-                    if p_amp > amp_max_by_ppair.get(ppair, -1.0):
-                        amp_max_by_ppair[ppair] = p_amp
-                    continue
-                if conc < floor_m:
+                if is_amp or conc < floor_m:
                     continue
                 enrich_dimer_boltzmann_3p(det, pa, pb, False, tc, enzyme=enz, **bkw)
-                dkey = _make_boltzmann_dedup_key(par_a, pa.sequence, par_b, pb.sequence, win_3p)
-                if dkey not in by_dkey:
-                    by_dkey[dkey] = []
-                    by_ppair_dkeys.setdefault(ppair, []).append(dkey)
-                by_dkey[dkey].append(
+                par_a = str(det.get("parent_a") or _get_parent_name(pa.name))
+                par_b = str(det.get("parent_b") or _get_parent_name(pb.name))
+                dkey = _make_boltzmann_dedup_key(
+                    par_a, pa.name, pa.sequence, par_b, pb.name, pb.sequence, win_approx
+                )
+                by_dkey5.setdefault(dkey, []).append(
                     {
                         "idx": idx_c,
                         "name": cname,
@@ -368,71 +354,67 @@ def run_section_a_masked_reconciliation() -> List[str]:
                     }
                 )
 
-        for vlist in by_dkey.values():
+        for vlist in by_dkey5.values():
             vlist.sort(key=lambda item: (-item["conc_nm"], item["idx"]))
         ranked_dkeys = sorted(
-            by_dkey.items(), key=lambda kv: (-kv[1][0]["conc_nm"], kv[1][0]["idx"])
-        )
-        dkey_rank = {dk: r_i for r_i, (dk, _vl) in enumerate(ranked_dkeys, 1)}
-
-        raw_masked = [v for _dk, vlist in ranked_dkeys for v in vlist if v["masked"]]
-        dedup_default_masked = [vlist[0] for _dk, vlist in ranked_dkeys if vlist[0]["masked"]]
-        dedup_cap25_masked = [
-            vlist[0]
-            for r_i, (_dk, vlist) in enumerate(ranked_dkeys, 1)
-            if r_i <= 25 and vlist[0]["masked"]
-        ]
-        notes.append(
-            f"- `{cid}` : sans dédoublonnage = `{len(raw_masked)}` dimère(s) ; "
-            f"dédoublonnage `(couple parent, {win_3p} nt 3'_A, {win_3p} nt 3'_B)` par défaut (illimité) = "
-            f"`{len(dedup_default_masked)}` dimère(s) sur `{len(ranked_dkeys)}` groupe(s) 3' éligible(s) "
-            f"(`{len(by_ppair_dkeys)}` couple(s) parent(s) éligible(s), `0` groupe non évalué ; "
-            f"avec garde-fou `K = 25` = `{len(dedup_cap25_masked)}`)."
+            by_dkey5.items(), key=lambda kv: (-kv[1][0]["conc_nm"], kv[1][0]["idx"])
         )
 
-        # Détailler chaque couple parent contenant au moins un variant masked
-        # Detail every parent pair containing at least one masked variant
-        for ppair, dk_list in sorted(
-            by_ppair_dkeys.items(),
-            key=lambda kv: min(dkey_rank[dk] for dk in kv[1]),
-        ):
-            all_pp_variants = [v for dk in dk_list for v in by_dkey[dk]]
-            if not any(v["masked"] for v in all_pp_variants):
+        n_elig_exh = sum(len(vlist) for _dk, vlist in ranked_dkeys)
+        n_masked_exh = sum(1 for _dk, vlist in ranked_dkeys for v in vlist if v["masked"])
+        n_groups_ded5 = len(ranked_dkeys)
+        n_masked_ded5 = sum(1 for _dk, vlist in ranked_dkeys if vlist[0]["masked"])
+
+        # Identifier les clés 5 nt multi-variants dont l'étendue intra-clé dépasse 10.0 points
+        # Identify multi-variant 5-nt keys whose intra-key P_Boltzmann spread exceeds 10.0 percentage points
+        gt10_groups: List[Tuple[float, Tuple[Tuple[str, str], Tuple[str, str]], List[Dict[str, Any]]]] = []
+        for dk, vlist in ranked_dkeys:
+            if len(vlist) < 2:
                 continue
-            dk_sorted = sorted(dk_list, key=lambda dk: dkey_rank[dk])
-            rep_probs = [by_dkey[dk][0]["prob_pct"] for dk in dk_sorted]
-            if ppair in amp_max_by_ppair:
-                rep_probs.append(amp_max_by_ppair[ppair])
-            pp_max_pct = max(rep_probs)
-            notes.append(
-                f"  - Couple parent `{ppair[0]} × {ppair[1]}` "
-                f"(`{len(dk_sorted)}` groupe(s) 3' distinct(s), "
-                f"`max P_Boltzmann` couple parent = `{pp_max_pct:.2f} %`) :"
+            probs = [v["prob_pct"] for v in vlist]
+            spread_pts = max(probs) - min(probs)
+            if spread_pts > 10.0:
+                gt10_groups.append((spread_pts, dk, vlist))
+        gt10_groups.sort(key=lambda item: (-item[0], item[1]))
+
+        comp_rows.append(
+            {
+                "case_id": cid,
+                "elig_exh": n_elig_exh,
+                "masked_exh": n_masked_exh,
+                "groups_ded5": n_groups_ded5,
+                "masked_ded5": n_masked_ded5,
+                "gt10_count": len(gt10_groups),
+            }
+        )
+
+        if not gt10_groups:
+            spread_notes.append(
+                f"- `{cid}` : `0` groupe `(couple parent, 5 nt 3'_A, 5 nt 3'_B)` avec `ΔP_Boltzmann > 10.0` points."
             )
-            for dk in dk_sorted:
-                vlist = by_dkey[dk]
-                rep = vlist[0]
-                rk = dkey_rank[dk]
+        else:
+            spread_notes.append(
+                f"- `{cid}` : `{len(gt10_groups)}` groupe(s) avec `ΔP_Boltzmann > 10.0` points entre variants d'une même clé `5` nt :"
+            )
+            for spread_pts, dk, vlist in gt10_groups:
                 end1 = f"{dk[0][0]}[3':{dk[0][1]}]"
                 end2 = f"{dk[1][0]}[3':{dk[1][1]}]"
-                merged = vlist[1:]
-                merged_parts = [
-                    f"{x['name']} à {x['conc_nm']:.4f} nM (P = {x['prob_pct']:.2f} %)"
-                    for x in merged
+                rep = vlist[0]
+                v_max = max(vlist, key=lambda x: x["prob_pct"])
+                v_min = min(vlist, key=lambda x: x["prob_pct"])
+                var_parts = [
+                    f"`{x['name']}` (`{x['conc_nm']:.4f} nM`, `P = {x['prob_pct']:.2f} %`, `masked = {x['masked']}`)"
+                    for x in vlist
                 ]
-                merged_txt = (
-                    f" ; fusionne `{len(merged)}` variant(s) identique(s) sur les `{win_3p}` nt 3' "
-                    f"ne différant qu'en 5'/milieu ({', '.join(merged_parts)})"
-                    if merged
-                    else ""
+                spread_notes.append(
+                    f"  - Clé `{end1} × {end2}` (`{len(vlist)}` variants) : "
+                    f"écart `ΔP = {spread_pts:.2f}` points (`{v_min['name']}` à `{v_min['prob_pct']:.2f} %` → "
+                    f"`{v_max['name']}` à `{v_max['prob_pct']:.2f} %`) ; représentant retenu par concentration = "
+                    f"`{rep['name']}` (`{rep['conc_nm']:.4f} nM`, `P_Boltzmann = {rep['prob_pct']:.2f} %`, "
+                    f"`masked = {rep['masked']}`). Variants : {', '.join(var_parts)}."
                 )
-                notes.append(
-                    f"    - Clé `{end1} × {end2}` (rang `{rk}/{len(ranked_dkeys)}`) : "
-                    f"représentant `{rep['name']}` (`{rep['conc_nm']:.8f} nM` / `{rep['conc_nm']:.4f} nM`, "
-                    f"`ΔG = {rep['dg']:.4f} kcal/mol`, `P_Boltzmann = {rep['prob_pct']:.2f} %`, "
-                    f"`masked = {rep['masked']}`){merged_txt}."
-                )
-    return notes
+
+    return comp_rows, spread_notes
 
 
 def _run_cov_json_for_tree(
@@ -685,14 +667,21 @@ def run_section_c_boltzmann_perf(n_repeats: int = 3) -> List[Dict[str, Any]]:
                 GT_DIR / "duplex_YFV_DENV4_targets.fasta",
             ),
         ]
-        modes_spec: List[Tuple[Optional[int], str]] = [
+        modes_spec: List[Tuple[int, Optional[int], str]] = [
             (
-                DEFAULT_BOLTZMANN_MAX_DIMERS,
-                f"défaut illimité, fenêtre 3' = {DEFAULT_BOLTZMANN_DEDUP_3P_WINDOW} nt (`--boltzmann-max-dimers None`)",
+                0,
+                None,
+                "défaut `exhaustive` (`--boltzmann-dedup-3p-window 0`, `--boltzmann-max-dimers None`)",
             ),
             (
+                5,
+                None,
+                "approx. `dedup_approx` 5 nt (`--boltzmann-dedup-3p-window 5`, `--boltzmann-max-dimers None`)",
+            ),
+            (
+                5,
                 25,
-                f"garde-fou K=25, fenêtre 3' = {DEFAULT_BOLTZMANN_DEDUP_3P_WINDOW} nt (`--boltzmann-max-dimers 25`)",
+                "approx. `dedup_approx` 5 nt + K=25 (`--boltzmann-dedup-3p-window 5`, `--boltzmann-max-dimers 25`)",
             ),
         ]
 
@@ -708,20 +697,20 @@ def run_section_c_boltzmann_perf(n_repeats: int = 3) -> List[Dict[str, Any]]:
             )
 
             t_without_list: List[float] = []
-            by_cap: Dict[Optional[int], Dict[str, Any]] = {
-                cap_v: {
+            by_mode: Dict[Tuple[int, Optional[int]], Dict[str, Any]] = {
+                (win_v, cap_v): {
                     "pf": [],
                     "t_with": [],
                     "calls": 0,
                     "elig_dedup": 0,
-                    "skip_dedup": 0,
-                    "elig_pp": 0,
+                    "skip_elig": 0,
+                    "bmode": "",
                 }
-                for cap_v, _ in modes_spec
+                for win_v, cap_v, _ in modes_spec
             }
 
-            # Entrelacer les `n_repeats` répétitions (sans Boltzmann -> défaut illimité -> garde-fou K=25)
-            # Interleave `n_repeats` replicates (without Boltzmann -> unlimited default -> K=25 safeguard)
+            # Entrelacer les `n_repeats` répétitions (sans Boltzmann -> exhaustif -> dedup 5 nt -> dedup 5 nt + K=25)
+            # Interleave `n_repeats` replicates (without Boltzmann -> exhaustive -> 5-nt dedup -> 5-nt dedup + K=25)
             for _rep in range(n_repeats):
                 _clear_thermo_caches()
                 an_mod.enrich_dimer_boltzmann_3p = lambda details, *a, **kw: details  # type: ignore[assignment]
@@ -737,7 +726,7 @@ def run_section_c_boltzmann_perf(n_repeats: int = 3) -> List[Dict[str, Any]]:
                 finally:
                     an_mod.enrich_dimer_boltzmann_3p = orig_fn
 
-                for cap_val, _mode_label in modes_spec:
+                for win_val, cap_val, _mode_label in modes_spec:
                     calls = 0
                     pf_time = 0.0
 
@@ -757,33 +746,34 @@ def run_section_c_boltzmann_perf(n_repeats: int = 3) -> List[Dict[str, Any]]:
                             cfg,
                             explicit_config=False,
                             boltzmann_max_dimers=cap_val,
-                            boltzmann_dedup_3p_window=DEFAULT_BOLTZMANN_DEDUP_3P_WINDOW,
+                            boltzmann_dedup_3p_window=win_val,
                         )[0]
                         t_with = time.perf_counter() - t0
                     finally:
                         an_mod.enrich_dimer_boltzmann_3p = orig_fn
 
                     tots = res_with.json_payload["totals"]
-                    by_cap[cap_val]["pf"].append(pf_time)
-                    by_cap[cap_val]["t_with"].append(t_with)
-                    by_cap[cap_val]["calls"] = calls
-                    by_cap[cap_val]["elig_dedup"] = int(tots["boltzmann_eligible_dedup_groups"])
-                    by_cap[cap_val]["skip_dedup"] = int(tots["boltzmann_skipped_dedup_groups"])
-                    by_cap[cap_val]["elig_pp"] = int(tots["boltzmann_eligible_parent_pairs"])
+                    mkey = (win_val, cap_val)
+                    by_mode[mkey]["pf"].append(pf_time)
+                    by_mode[mkey]["t_with"].append(t_with)
+                    by_mode[mkey]["calls"] = calls
+                    by_mode[mkey]["elig_dedup"] = int(tots["boltzmann_eligible_dedup_groups"])
+                    by_mode[mkey]["skip_elig"] = int(tots["boltzmann_skipped_eligible_dimers"])
+                    by_mode[mkey]["bmode"] = str(tots["boltzmann_mode"])
 
             med_without = statistics.median(t_without_list)
-            for cap_val, mode_label in modes_spec:
-                rec = by_cap[cap_val]
+            for win_val, cap_val, mode_label in modes_spec:
+                rec = by_mode[(win_val, cap_val)]
                 med_pf = statistics.median(rec["pf"])
                 med_with = statistics.median(rec["t_with"])
                 rows.append(
                     {
                         "scenario": scen_label,
                         "mode": mode_label,
+                        "bmode": rec["bmode"],
                         "calls": rec["calls"],
                         "elig_dedup": rec["elig_dedup"],
-                        "skip_dedup": rec["skip_dedup"],
-                        "elig_pp": rec["elig_pp"],
+                        "skip_elig": rec["skip_elig"],
                         "pf_fmt": _fmt_med_range(rec["pf"], 3),
                         "without_fmt": _fmt_med_range(t_without_list, 2),
                         "with_fmt": _fmt_med_range(rec["t_with"], 2),
@@ -802,7 +792,7 @@ def render_markdown() -> str:
 
     dg3p_rows = run_section_dg3p_shifts()
     five_rows, masked_by_case = run_section_a_five_cases()
-    reconcil_notes = run_section_a_masked_reconciliation()
+    comp_rows, spread_notes = run_section_a_exhaustive_vs_dedup5()
     cohort_meta, cov_rows = run_section_b_coverage()
     perf_rows = run_section_c_boltzmann_perf(n_repeats=3)
 
@@ -840,8 +830,9 @@ def render_markdown() -> str:
             f"`--dimer-warn-ratio = {DEFAULT_DIMER_WARN_RATIO:.3f}` "
             f"(plancher `WARNING = {DEFAULT_DIMER_WARN_RATIO * 0.23:.3f} nM`), "
             f"`--role-imbalance-ratio = {DEFAULT_ROLE_IMBALANCE_RATIO:.1f}`, "
-            f"`--boltzmann-dedup-3p-window = {DEFAULT_BOLTZMANN_DEDUP_3P_WINDOW}` nt, "
-            f"`--boltzmann-max-dimers = {DEFAULT_BOLTZMANN_MAX_DIMERS}` (illimité par défaut ; "
+            f"`boltzmann_mode = exhaustive` par défaut "
+            f"(`--boltzmann-dedup-3p-window = {DEFAULT_BOLTZMANN_DEDUP_3P_WINDOW}`, "
+            f"`--boltzmann-max-dimers = {DEFAULT_BOLTZMANN_MAX_DIMERS}`, "
             f"plancher d'éligibilité `0.1 × 0.230 = 0.023 nM`)"
         ),
         "",
@@ -862,16 +853,16 @@ def render_markdown() -> str:
             "",
             "## A. Cinq cas de référence de paillasse (`-2.0` vs `-3.5 kcal/mol`, génomes complets)",
             "",
-            "| Cas | Paillasse | Dimères amp. `-2.0` (`nM`) | dont inter `-2.0` (`nM`) | Dimères amp. `-3.5` (`nM`) | dont inter `-3.5` (`nM`) | Famille dominante (`-2.0`) | Verdict (`-2.0` / `-3.5`) | `suboptimal_3p_masked` (défaut) | Groupes 3' éligibles | Groupes 3' non évalués | Couples parents éligibles |",
-            "|---|---|---:|---:|---:|---:|---|---|---:|---:|---:|---:|",
+            "| Cas | Paillasse | Dimères amp. `-2.0` (`nM`) | dont inter `-2.0` (`nM`) | Dimères amp. `-3.5` (`nM`) | dont inter `-3.5` (`nM`) | Famille dominante (`-2.0`) | Verdict (`-2.0` / `-3.5`) | `boltzmann_mode` | `suboptimal_3p_masked` (défaut) | Non-amp éligibles évalués | Non-amp éligibles non évalués | Couples parents éligibles |",
+            "|---|---|---:|---:|---:|---:|---|---|---|---:|---:|---:|---:|",
         ]
     )
     for r in five_rows:
         lines.append(
             f"| `{r['case_id']}` | {r['bench']} | `{r['tot_20']:.4f}` | `{r['inter_20']:.4f}` | "
             f"`{r['tot_35']:.4f}` | `{r['inter_35']:.4f}` | `{r['dom_20']}` | "
-            f"`{r['verdict_20']}` / `{r['verdict_35']}` | `{r['masked_count_default']}` | "
-            f"`{r['eligible_dedup_groups']}` | `{r['skipped_dedup_groups']}` | "
+            f"`{r['verdict_20']}` / `{r['verdict_35']}` | `{r['boltzmann_mode']}` | `{r['masked_count_default']}` | "
+            f"`{r['eligible_non_amp']}` | `{r['skipped_eligible']}` | "
             f"`{r['eligible_ppairs']}` |"
         )
 
@@ -888,7 +879,7 @@ def render_markdown() -> str:
     lines.extend(
         [
             "",
-            f"### Détail des dimères `suboptimal_3p_masked = True` (défaut : `--boltzmann-dedup-3p-window {DEFAULT_BOLTZMANN_DEDUP_3P_WINDOW}`, `--boltzmann-max-dimers {DEFAULT_BOLTZMANN_MAX_DIMERS}`)",
+            f"### Détail des dimères `suboptimal_3p_masked = True` (défaut `exhaustive` : `--boltzmann-dedup-3p-window {DEFAULT_BOLTZMANN_DEDUP_3P_WINDOW}`, `--boltzmann-max-dimers {DEFAULT_BOLTZMANN_MAX_DIMERS}`)",
             "",
         ]
     )
@@ -908,9 +899,24 @@ def render_markdown() -> str:
     lines.extend(
         [
             "",
-            "### Réconciliation des `7` dimères retenus (`2 + 0 + 1 + 0 + 4 = 7`) avec les `12` variants bruts sans dédoublonnage",
+            "### Comparaison `exhaustive` (défaut, fenêtre `0`) vs `dedup_approx` (fenêtre `5` nt) sur les 5 cas",
             "",
-            *reconcil_notes,
+            "| Cas | Non-amp éligibles (`exhaustive`) | `suboptimal_3p_masked` (`exhaustive`) | Groupes 3' (`dedup_approx`, `5` nt) | `suboptimal_3p_masked` (`dedup_approx`, `5` nt) | Clés `5` nt où `ΔP_Boltzmann > 10.0` points |",
+            "|---|---:|---:|---:|---:|---:|",
+        ]
+    )
+    for cr in comp_rows:
+        lines.append(
+            f"| `{cr['case_id']}` | `{cr['elig_exh']}` | `{cr['masked_exh']}` | "
+            f"`{cr['groups_ded5']}` | `{cr['masked_ded5']}` | `{cr['gt10_count']}` |"
+        )
+
+    lines.extend(
+        [
+            "",
+            "#### Groupes `(couple parent, 5 nt 3'_A, 5 nt 3'_B)` où `P_Boltzmann` varie de plus de `10.0` points entre variants d'une même clé",
+            "",
+            *spread_notes,
         ]
     )
 
@@ -967,14 +973,14 @@ def render_markdown() -> str:
             "",
             "## C. Performance `enrich_dimer_boltzmann_3p` sur 81 espèces (`3 321` paires, `N = 3` répétitions : médiane et étendue)",
             "",
-            "| Scénario | Mode | Appels Boltzmann | Groupes 3' éligibles | Groupes 3' non évalués | Couples parents éligibles | `pf_time` (`s`, médiane / étendue) | Total hors Boltzmann (`s`, médiane / étendue) | Total avec Boltzmann (`s`, médiane / étendue) | Part médiane `pf / avec` | Surcoût médian `pf / hors` |",
-            "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+            "| Scénario | Mode | `boltzmann_mode` | Appels Boltzmann | Groupes/dimères non-amp éligibles | Dimères éligibles non évalués | `pf_time` (`s`, médiane / étendue) | Total hors Boltzmann (`s`, médiane / étendue) | Total avec Boltzmann (`s`, médiane / étendue) | Part médiane `pf / avec` | Surcoût médian `pf / hors` |",
+            "|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|",
         ]
     )
     for p in perf_rows:
         lines.append(
-            f"| {p['scenario']} | {p['mode']} | `{p['calls']}` | `{p['elig_dedup']}` | `{p['skip_dedup']}` | "
-            f"`{p['elig_pp']}` | `{p['pf_fmt']}` | `{p['without_fmt']}` | `{p['with_fmt']}` | "
+            f"| {p['scenario']} | {p['mode']} | `{p['bmode']}` | `{p['calls']}` | `{p['elig_dedup']}` | `{p['skip_elig']}` | "
+            f"`{p['pf_fmt']}` | `{p['without_fmt']}` | `{p['with_fmt']}` | "
             f"`{p['share_pct']:.2f} %` | `{p['overhead_pct']:+.2f} %` |"
         )
     lines.append("")
