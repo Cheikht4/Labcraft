@@ -26,6 +26,7 @@ class RiskItem:
     extensible_primer: str = ""
     template_primer: str = ""
     boltzmann_3p_prob: Optional[float] = None
+    parent_pair_max_boltzmann_3p_prob: Optional[float] = None
     prob_3p_extensible_a: Optional[float] = None
     prob_3p_extensible_b: Optional[float] = None
     prob_3p_intra_a: Optional[float] = None
@@ -101,6 +102,7 @@ def evaluate_risks(
                 extensible_primer=details.get("extensible_primer_parent", ""),
                 template_primer=details.get("template_primer_parent", ""),
                 boltzmann_3p_prob=details.get("boltzmann_3p_prob"),
+                parent_pair_max_boltzmann_3p_prob=details.get("parent_pair_max_boltzmann_3p_prob"),
                 prob_3p_extensible_a=details.get("prob_3p_extensible_a"),
                 prob_3p_extensible_b=details.get("prob_3p_extensible_b"),
                 prob_3p_intra_a=details.get("prob_3p_intra_a"),

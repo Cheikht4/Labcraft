@@ -956,7 +956,7 @@
                 <div><strong>ΔG global:</strong> {{ "%.2f"|format(risk.delta_g) }} kcal/mol</div>
                 <div><strong>ΔG (3'-end):</strong> {{ "%.2f"|format(risk.delta_g_3p) }} kcal/mol</div>
                 {% if risk.boltzmann_3p_prob is not none %}
-                <div><strong>P<sub>Boltzmann</sub>(3' inter &ge; 3 pb | lié):</strong> {{ "%.1f"|format(risk.boltzmann_3p_prob * 100) }} % <small style="color: var(--color-muted);">(informatif)</small></div>
+                <div><strong>P<sub>Boltzmann</sub>(3' inter &ge; 3 pb | lié):</strong> {{ "%.1f"|format(risk.boltzmann_3p_prob * 100) }} %{% if risk.parent_pair_max_boltzmann_3p_prob is not none %} <small style="color: var(--color-muted);">(max couple parent : {{ "%.1f"|format(risk.parent_pair_max_boltzmann_3p_prob * 100) }} % ; informatif)</small>{% else %} <small style="color: var(--color-muted);">(informatif)</small>{% endif %}</div>
                 {% endif %}
             </div>
             
@@ -1052,7 +1052,7 @@
                 <div><strong>Concentration:</strong> {{ "%.2e"|format(risk.concentration) }} M</div>
                 <div><strong>ΔG global:</strong> {{ "%.2f"|format(risk.delta_g) }} kcal/mol</div>
                 {% if risk.boltzmann_3p_prob is not none %}
-                <div><strong>P<sub>Boltzmann</sub>(3' inter &ge; 3 pb | lié):</strong> {{ "%.1f"|format(risk.boltzmann_3p_prob * 100) }} % <small style="color: var(--color-muted);">(informatif)</small></div>
+                <div><strong>P<sub>Boltzmann</sub>(3' inter &ge; 3 pb | lié):</strong> {{ "%.1f"|format(risk.boltzmann_3p_prob * 100) }} %{% if risk.parent_pair_max_boltzmann_3p_prob is not none %} <small style="color: var(--color-muted);">(max couple parent : {{ "%.1f"|format(risk.parent_pair_max_boltzmann_3p_prob * 100) }} % ; informatif)</small>{% else %} <small style="color: var(--color-muted);">(informatif)</small>{% endif %}</div>
                 {% endif %}
             </div>
             {% if risk.alignment_columns %}

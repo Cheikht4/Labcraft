@@ -37,9 +37,12 @@ def build_analyze_json_payload(
     mispriming_risks: List[Any],
     verdict: PanelVerdict,
     panel_summaries: Optional[Dict[str, Any]] = None,
+    boltzmann_eligible_dedup_groups: int = 0,
+    boltzmann_skipped_dedup_groups: int = 0,
     boltzmann_eligible_parent_pairs: int = 0,
     boltzmann_skipped_parent_pairs: int = 0,
     boltzmann_skipped_eligible_dimers: int = 0,
+    boltzmann_max_prob_by_parent_pair: Optional[Dict[str, float]] = None,
 ) -> Dict[str, Any]:
     """Construit le dictionnaire JSON structuré de `labcraft analyze`.
     Builds the structured JSON payload for `labcraft analyze`.
@@ -107,6 +110,11 @@ def build_analyze_json_payload(
             "boltzmann_3p_prob": (
                 float(r.boltzmann_3p_prob) if r.boltzmann_3p_prob is not None else None
             ),
+            "parent_pair_max_boltzmann_3p_prob": (
+                float(r.parent_pair_max_boltzmann_3p_prob)
+                if r.parent_pair_max_boltzmann_3p_prob is not None
+                else None
+            ),
             "prob_3p_intra_a": (
                 float(r.prob_3p_intra_a) if r.prob_3p_intra_a is not None else None
             ),
@@ -130,9 +138,12 @@ def build_analyze_json_payload(
         "amplifiable_dimers_intra_by_panel_nm": dict(dimer_decomposition.get("intra_by_panel_nm", {})),
         "amplifiable_dimers_inter_nm": float(dimer_decomposition.get("inter_nm", 0.0)),
         "blocking_dimers_total_nm": blocking_total_nm,
+        "boltzmann_eligible_dedup_groups": int(boltzmann_eligible_dedup_groups),
+        "boltzmann_skipped_dedup_groups": int(boltzmann_skipped_dedup_groups),
         "boltzmann_eligible_parent_pairs": int(boltzmann_eligible_parent_pairs),
         "boltzmann_skipped_parent_pairs": int(boltzmann_skipped_parent_pairs),
         "boltzmann_skipped_eligible_dimers": int(boltzmann_skipped_eligible_dimers),
+        "boltzmann_max_prob_by_parent_pair": dict(boltzmann_max_prob_by_parent_pair or {}),
         "is_multiplex": bool(dimer_decomposition.get("is_multiplex", False)),
         "dominant_family": dimer_decomposition.get("dominant_family"),
         "families": dimer_decomposition.get("families", []),

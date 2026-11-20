@@ -652,7 +652,139 @@ def test_boltzmann_max_dimers_cap_and_json_skipped_export(tmp_path: Path) -> Non
     assert res_cli.exit_code == 0, res_cli.stdout
     data = json.loads((tmp_path / "d3_cap.json").read_text(encoding="utf-8"))
     assert data["conditions"]["boltzmann_max_dimers"] == 2
+    assert data["conditions"]["boltzmann_dedup_3p_window"] == 5
+    assert data["totals"]["boltzmann_eligible_dedup_groups"] == 6
+    assert data["totals"]["boltzmann_skipped_dedup_groups"] == 4
     assert data["totals"]["boltzmann_eligible_parent_pairs"] == 5
     assert data["totals"]["boltzmann_skipped_parent_pairs"] == 3
+    assert isinstance(data["totals"]["boltzmann_max_prob_by_parent_pair"], dict)
+
+
+def test_boltzmann_3p_window_dedup_merges_5p_and_splits_3p_and_reports_parent_max() -> None:
+    """Vérifie la clé `(couple parent, 3'_A, 3'_B)` de longueur `boltzmann_dedup_3p_window` (défaut 5) :
+    - deux variants ne différant qu'en 5' (`#1` et `#2` partageant `CACTA`) fusionnent sur le plus concentré ;
+    - un variant différant dans les 5 dernières bases 3' (`#3` finissant en `CACTG`, `masked=True`) forme
+      une clé distincte, est évalué séparément malgré une concentration légèrement inférieure, et la
+      `P_Boltzmann` maximale du couple parent est bien rapportée sur le représentant `#3`.
+
+    Verifies `(parent_pair, 3'_A, 3'_B)` deduplication over `boltzmann_dedup_3p_window` (default 5):
+    - 5'-only variants (`#1`, `#2` sharing `CACTA`) merge onto the higher-concentration variant;
+    - 3'-distinct variant (`#3` ending in `CACTG`, `masked=True`) gets its own key, is evaluated separately
+      despite slightly lower concentration, and parent-pair max `P_Boltzmann` equals `#3`'s probability.
+    """
+    import numpy as np
+    import pytest
+
+    from labcraft.diagnostics.enzyme import BST_2_0
+    from labcraft.lamp.domains import PhysicalPrimer, PrimerRole
+    from labcraft.pipeline.analysis import evaluate_dimer_complexes
+    from labcraft.solver.types import EquilibriumProblem, EquilibriumResult, SolverMethod
+    from labcraft.thermo.backends.vienna import ViennaRNABackend
+
+    # Même cas biophysique que F3_Nunes_YFV × LB_Nunes_YFV :
+    # #1 et #2 ont le même 3' `CACTA` (diffèrent en 5' pos 0 : T vs C) -> doivent fusionner !
+    # #3 a le 3' `CACTG` (apparie son 3' sur `AGTGA...CAC...` en sous-optimal -> P_Boltzmann ~ 15.17 %)
+    p_f3_1 = PhysicalPrimer.from_simple(
+        "YFV_F3#1", "TCCACACCCTGGAGGCACTA", PrimerRole.F3, nominal_concentration=1e-7, parent_name="YFV_F3"
+    )
+    p_f3_2 = PhysicalPrimer.from_simple(
+        "YFV_F3#2", "CCCACACCCTGGAGGCACTA", PrimerRole.F3, nominal_concentration=1e-7, parent_name="YFV_F3"
+    )
+    p_f3_3 = PhysicalPrimer.from_simple(
+        "YFV_F3#3", "TCCACACCCTGGAGGCACTG", PrimerRole.F3, nominal_concentration=1e-7, parent_name="YFV_F3"
+    )
+    p_lb = PhysicalPrimer.from_simple(
+        "YFV_LB", "ATGCAGGTGCCACTAGAAGTGA", PrimerRole.LB, nominal_concentration=2e-7
+    )
+
+    primers = [p_f3_1, p_f3_2, p_f3_3, p_lb]
+    stoich = np.array(
+        [
+            [1, 0, 0, 0],
+            [0, 1, 0, 0],
+            [0, 0, 1, 0],
+            [0, 0, 0, 1],
+            [1, 0, 0, 1],  # idx 4 : #1 × LB (0.04964 nM, 3'=CACTA, P ~ 0.02 %)
+            [0, 1, 0, 1],  # idx 5 : #2 × LB (0.04960 nM, 3'=CACTA, doublon 5' de #1 !)
+            [0, 0, 1, 1],  # idx 6 : #3 × LB (0.04963 nM, 3'=CACTG, P ~ 15.17 %, masked=True !)
+        ],
+        dtype=int,
+    )
+    prob = EquilibriumProblem(
+        n_strands=4,
+        n_complexes=7,
+        stoichiometry=stoich,
+        delta_g=np.array([0.0, 0.0, 0.0, 0.0, -6.62, -6.62, -6.62], dtype=float),
+        total_concentrations=np.array([1e-7, 1e-7, 1e-7, 2e-7], dtype=float),
+        temperature_kelvin=63.0 + 273.15,
+    )
+    res_eq = EquilibriumResult(
+        concentrations=np.array([0.9e-7, 0.9e-7, 0.9e-7, 1.9e-7, 4.964e-11, 4.960e-11, 4.963e-11]),
+        free_concentrations=np.array([0.9e-7, 0.9e-7, 0.9e-7, 1.9e-7], dtype=float),
+        log_free_concentrations=np.log(np.array([0.9e-7, 0.9e-7, 0.9e-7, 1.9e-7])),
+        residuals=np.zeros(4, dtype=float),
+        max_residual=0.0,
+        n_iterations=1,
+        method=SolverMethod.DUAL_NEWTON,
+        converged=True,
+    )
+    c_names = [
+        "YFV_F3#1_free",
+        "YFV_F3#2_free",
+        "YFV_F3#3_free",
+        "YFV_LB_free",
+        "YFV_F3#1_YFV_LB",
+        "YFV_F3#2_YFV_LB",
+        "YFV_F3#3_YFV_LB",
+    ]
+    stats5: dict[str, object] = {}
+    _, _, details5 = evaluate_dimer_complexes(
+        prob,
+        res_eq,
+        c_names,
+        primers,
+        ViennaRNABackend(),
+        BST_2_0,
+        63.0,
+        {},
+        {"YFV_F3": "YFV", "YFV_LB": "YFV"},
+        dimer_conc_max_nm=0.23,
+        boltzmann_max_dimers=25,
+        boltzmann_dedup_3p_window=5,
+        boltzmann_stats_out=stats5,
+    )
+    assert stats5["eligible_dedup_groups"] == 2
+    assert "boltzmann_3p_prob" in details5[4]      # #1 retenu pour `CACTA`
+    assert "boltzmann_3p_prob" not in details5[5]  # #2 fusionné dans #1 (même 3' `CACTA`)
+    assert "boltzmann_3p_prob" in details5[6]      # #3 retenu séparément pour `CACTG` !
+    assert details5[6]["suboptimal_3p_masked"] is True
+    p_max = details5[6]["boltzmann_3p_prob"]
+    assert p_max > 0.10
+    assert details5[4]["parent_pair_max_boltzmann_3p_prob"] == pytest.approx(p_max)
+    assert details5[6]["parent_pair_max_boltzmann_3p_prob"] == pytest.approx(p_max)
+    max_map = stats5["max_prob_by_parent_pair"]
+    assert isinstance(max_map, dict)
+    assert max_map["YFV_F3 × YFV_LB"] == pytest.approx(p_max, abs=1e-6)
+
+    # Avec fenêtre 3' = 0 nt : tout le couple parent fusionne en un seul groupe (#1 gagne)
+    stats0: dict[str, object] = {}
+    _, _, details0 = evaluate_dimer_complexes(
+        prob,
+        res_eq,
+        c_names,
+        primers,
+        ViennaRNABackend(),
+        BST_2_0,
+        63.0,
+        {},
+        {"YFV_F3": "YFV", "YFV_LB": "YFV"},
+        dimer_conc_max_nm=0.23,
+        boltzmann_max_dimers=25,
+        boltzmann_dedup_3p_window=0,
+        boltzmann_stats_out=stats0,
+    )
+    assert stats0["eligible_dedup_groups"] == 1
+    assert "boltzmann_3p_prob" not in details0[6]
+
 
 
