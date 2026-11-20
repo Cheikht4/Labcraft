@@ -16,6 +16,7 @@ from dataclasses import replace
 import json
 import os
 from pathlib import Path
+import statistics
 import subprocess
 import sys
 import tempfile
@@ -228,6 +229,7 @@ def run_section_a_five_cases() -> Tuple[List[Dict[str, Any]], Dict[str, List[Dic
                 if r.suboptimal_3p_masked
             ]
             masked_by_case[case_id] = masked_items
+            totals20 = r20.json_payload["totals"]
             rows.append(
                 {
                     "case_id": case_id,
@@ -241,9 +243,9 @@ def run_section_a_five_cases() -> Tuple[List[Dict[str, Any]], Dict[str, List[Dic
                     "verdict_35": r35.verdict.status,
                     "dom_20": dom_str,
                     "masked_count_cap25": len(masked_items),
-                    "skipped_cap25": int(
-                        r20.json_payload["totals"]["boltzmann_skipped_eligible_dimers"]
-                    ),
+                    "eligible_ppairs": int(totals20["boltzmann_eligible_parent_pairs"]),
+                    "skipped_ppairs_cap25": int(totals20["boltzmann_skipped_parent_pairs"]),
+                    "skipped_variants_cap25": int(totals20["boltzmann_skipped_eligible_dimers"]),
                 }
             )
     finally:
@@ -251,6 +253,148 @@ def run_section_a_five_cases() -> Tuple[List[Dict[str, Any]], Dict[str, List[Dic
         enz_mod.ENZYME_REGISTRY["bst 2.0"] = orig_bst2
 
     return rows, masked_by_case
+
+
+def run_section_a_masked_reconciliation() -> List[str]:
+    """Compare sur les 5 cas de référence les 12 dimères `suboptimal_3p_masked` sans dédoublonnage/plafond
+    avec la sélection dédoublonnée par couple parent à `K = 25` et sans plafond (`K = 999999`), en détaillant
+    chaque écart (doublons intra-couple parent, égalité MFE entre variants dégénérés, rang > 25).
+
+    Compares across the 5 reference cases the 12 un-deduplicated/uncapped `suboptimal_3p_masked` dimers
+    against parent-pair deduplicated selection at `K = 25` and uncapped (`K = 999999`).
+    """
+    from labcraft.cli.config import build_engine_from_config
+    from labcraft.diagnostics.amplifiable_dimer import (
+        enrich_dimer_boltzmann_3p,
+        evaluate_pair_amplifiable,
+    )
+    from labcraft.lamp.complex_enumeration import enumerate_complexes
+    from labcraft.pipeline.analysis import _get_parent_name, load_targets_from_config
+    from labcraft.solver.dual import solve_dual
+    from labcraft.thermo.vienna import dna_session
+
+    cases = [
+        ("singleplex_denv3", GT_DIR / "primer_dengue_3_panel3.txt", GT_DIR / "DEN3_M93130.fasta", 0.8, 0.4, 0.2),
+        ("singleplex_denv4", GT_DIR / "parida_DENV4.txt", GT_DIR / "Dengue_4_S1028.fasta", 0.8, 0.4, 0.2),
+        ("singleplex_yfv", GT_DIR / "nunes_YFV.txt", GT_DIR / "YFV_17D_17DD.fasta", 0.8, 0.4, 0.2),
+        ("duplex_half", GT_DIR / "duplex_YFV_DENV4_primers.txt", GT_DIR / "duplex_YFV_DENV4_targets.fasta", 0.4, 0.2, 0.1),
+        ("duplex_full", GT_DIR / "duplex_YFV_DENV4_primers.txt", GT_DIR / "duplex_YFV_DENV4_targets.fasta", 0.8, 0.4, 0.2),
+    ]
+    notes: List[str] = []
+    floor_m = 0.1 * 0.23 * 1e-9
+
+    for cid, pf, tf, c_fb, c_lp, c_f3 in cases:
+        cfg = build_config_from_cli(
+            primers_path=str(pf),
+            targets_path=str(tf),
+            temperature=63.0,
+            conc_fip_bip=c_fb,
+            conc_loop=c_lp,
+            conc_f3_b3=c_f3,
+        )
+        td, _ = load_targets_from_config(cfg, explicit_config=False)
+        primers, p2t, backend, bkw, mon_m, enz, tc, profiles = build_engine_from_config(cfg, td)
+        buf_dump = cfg.experiment.buffer.model_dump() if cfg.experiment.buffer else None
+        with dna_session(temp_celsius=tc):
+            if len(td) > 1:
+                prob, _s, complexes, _ = enumerate_complexes(
+                    primers, td, backend, profile=profiles, temp_celsius=tc,
+                    mon_molar=mon_m, buffer=buf_dump, enzyme=enz, primer_to_target=p2t,
+                )
+            else:
+                prob, _s, complexes, _ = enumerate_complexes(
+                    primers, next(iter(td.values())), backend, profile=next(iter(profiles.values())),
+                    temp_celsius=tc, mon_molar=mon_m, buffer=buf_dump, enzyme=enz, primer_to_target=p2t,
+                )
+            res = solve_dual(prob)
+
+            by_ppair: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
+            for idx_c, cname in enumerate(complexes):
+                conc = float(res.concentrations[idx_c])
+                has_t = any(k >= len(primers) and v > 0 for k, v in enumerate(prob.stoichiometry[idx_c]))
+                if has_t:
+                    continue
+                p_counts = {
+                    k: int(prob.stoichiometry[idx_c][k])
+                    for k, v in enumerate(prob.stoichiometry[idx_c])
+                    if v > 0 and k < len(primers)
+                }
+                if sum(p_counts.values()) != 2:
+                    continue
+                ks = list(p_counts.keys())
+                pa = primers[ks[0]]
+                pb = primers[ks[0]] if len(ks) == 1 else primers[ks[1]]
+                is_amp, _dg3, det = evaluate_pair_amplifiable(pa, pb, backend, enz, tc, **bkw)
+                if is_amp or conc < floor_m:
+                    continue
+                enrich_dimer_boltzmann_3p(det, pa, pb, False, tc, enzyme=enz, **bkw)
+                par_a = str(det.get("parent_a") or _get_parent_name(pa.name))
+                par_b = str(det.get("parent_b") or _get_parent_name(pb.name))
+                ppair = (par_a, par_b) if par_a <= par_b else (par_b, par_a)
+                by_ppair.setdefault(ppair, []).append(
+                    {
+                        "idx": idx_c,
+                        "name": cname,
+                        "conc_nm": conc * 1e9,
+                        "dg": float(det["delta_g"]),
+                        "prob_pct": float(det["boltzmann_3p_prob"]) * 100.0,
+                        "masked": bool(det["suboptimal_3p_masked"]),
+                    }
+                )
+
+        for vlist in by_ppair.values():
+            vlist.sort(key=lambda item: (-item["conc_nm"], item["idx"]))
+        ranked_ppairs = sorted(
+            by_ppair.items(), key=lambda kv: (-kv[1][0]["conc_nm"], kv[1][0]["idx"])
+        )
+
+        raw_masked = [v for _, vlist in ranked_ppairs for v in vlist if v["masked"]]
+        dedup_cap25_masked = [
+            vlist[0] for r_i, (_pp, vlist) in enumerate(ranked_ppairs, 1) if r_i <= 25 and vlist[0]["masked"]
+        ]
+        dedup_nocap_masked = [vlist[0] for _pp, vlist in ranked_ppairs if vlist[0]["masked"]]
+        notes.append(
+            f"- `{cid}` : sans dédoublonnage/plafond = `{len(raw_masked)}` dimère(s) ; "
+            f"dédoublonné par couple parent sans plafond = `{len(dedup_nocap_masked)}` ; "
+            f"dédoublonné à `K = 25` = `{len(dedup_cap25_masked)}` "
+            f"(`{len(ranked_ppairs)}` couples parents éligibles)."
+        )
+        for rank_idx, (ppair, vlist) in enumerate(ranked_ppairs, 1):
+            m_in = [v for v in vlist if v["masked"]]
+            if not m_in:
+                continue
+            top_v = vlist[0]
+            if top_v["masked"] and rank_idx <= 25:
+                extra = [v for v in m_in if v["name"] != top_v["name"]]
+                extra_parts = [f"{x['name']} à {x['conc_nm']:.4f} nM" for x in extra]
+                extra_txt = (
+                    f" ; `{len(extra)}` autre(s) variant(s) du même couple écarté(s) par dédoublonnage "
+                    f"({', '.join(extra_parts)})"
+                    if extra
+                    else ""
+                )
+                notes.append(
+                    f"  - Couple `{ppair[0]} × {ppair[1]}` (rang `{rank_idx}/{len(ranked_ppairs)}`) : "
+                    f"retenu via `{top_v['name']}` (`{top_v['conc_nm']:.4f} nM`, "
+                    f"`P_Boltzmann = {top_v['prob_pct']:.2f} %`){extra_txt}."
+                )
+            elif not top_v["masked"]:
+                m0 = m_in[0]
+                notes.append(
+                    f"  - Couple `{ppair[0]} × {ppair[1]}` (rang `{rank_idx}/{len(ranked_ppairs)}`) : "
+                    f"représentant le plus concentré = `{top_v['name']}` (`{top_v['conc_nm']:.8f} nM`, "
+                    f"`ΔG = {top_v['dg']:.4f} kcal/mol`, `P_Boltzmann = {top_v['prob_pct']:.2f} %`, `masked = False`), "
+                    f"devant `{m0['name']}` (`{m0['conc_nm']:.8f} nM`, `ΔG = {m0['dg']:.4f} kcal/mol`, "
+                    f"`P_Boltzmann = {m0['prob_pct']:.2f} %`, `masked = True`, total `{len(m_in)}` variant(s) masked "
+                    f"dans ce couple)."
+                )
+            else:
+                notes.append(
+                    f"  - Couple `{ppair[0]} × {ppair[1]}` (rang `{rank_idx}/{len(ranked_ppairs)} > 25`) : "
+                    f"représentant `{top_v['name']}` (`{top_v['conc_nm']:.4f} nM`, "
+                    f"`P_Boltzmann = {top_v['prob_pct']:.2f} %`, `masked = True`) hors plafond `K = 25`."
+                )
+    return notes
 
 
 def _run_cov_json_for_tree(
@@ -466,8 +610,24 @@ def _clear_thermo_caches() -> None:
         unf_mod._UNFOLDING_CACHE.clear()
 
 
-def run_section_c_boltzmann_perf() -> List[Dict[str, Any]]:
-    """Mesure le temps et le nombre d'appels de `enrich_dimer_boltzmann_3p` sur 81 espèces (3 321 paires)."""
+def _fmt_med_range(values: List[float], decimals: int = 2) -> str:
+    """Formate `médiane (étendue R, [min–max])` sur `N` répétitions.
+    Formats `median (range R, [min–max])` across `N` repeats.
+    """
+    med = statistics.median(values)
+    lo = min(values)
+    hi = max(values)
+    rng = hi - lo
+    return f"{med:.{decimals}f} (étendue {rng:.{decimals}f}, [{lo:.{decimals}f}–{hi:.{decimals}f}])"
+
+
+def run_section_c_boltzmann_perf(n_repeats: int = 3) -> List[Dict[str, Any]]:
+    """Mesure sur `n_repeats = 3` répétitions entrelacées (médiane et étendue) le temps et les appels
+    de `enrich_dimer_boltzmann_3p` sur 81 espèces (`3 321` paires).
+
+    Measures across `n_repeats = 3` interleaved repeats (median and range) the runtime and call count
+    of `enrich_dimer_boltzmann_3p` on 81 species (`3,321` pairs).
+    """
     from labcraft.pipeline import analysis as an_mod
 
     rows: List[Dict[str, Any]] = []
@@ -480,35 +640,23 @@ def run_section_c_boltzmann_perf() -> List[Dict[str, Any]]:
         local_dup = tmp / "dup_local.fasta"
         local_dup.write_text(f">{yfv_id}\n{yfv_win}\n>{d4_id}\n{d4_win}\n", encoding="utf-8")
 
-        scenarios = [
-            (
-                "81 espèces — fenêtres locales (`test_step3_redesign_v2`)",
-                local_dup,
-                DEFAULT_BOLTZMANN_MAX_DIMERS,
-                f"défaut (`--boltzmann-max-dimers {DEFAULT_BOLTZMANN_MAX_DIMERS}`)",
-            ),
-            (
-                "81 espèces — fenêtres locales (`test_step3_redesign_v2`)",
-                local_dup,
-                999999,
-                "sans plafond (`999999`)",
-            ),
+        targets_spec = [
+            ("81 espèces — fenêtres locales (`test_step3_redesign_v2`)", local_dup),
             (
                 "81 espèces — `duplex_full` génomes viraux complets",
                 GT_DIR / "duplex_YFV_DENV4_targets.fasta",
-                DEFAULT_BOLTZMANN_MAX_DIMERS,
-                f"défaut (`--boltzmann-max-dimers {DEFAULT_BOLTZMANN_MAX_DIMERS}`)",
             ),
+        ]
+        modes_spec = [
             (
-                "81 espèces — `duplex_full` génomes viraux complets",
-                GT_DIR / "duplex_YFV_DENV4_targets.fasta",
-                999999,
-                "sans plafond (`999999`)",
+                DEFAULT_BOLTZMANN_MAX_DIMERS,
+                f"défaut parent-dédoublonné (`--boltzmann-max-dimers {DEFAULT_BOLTZMANN_MAX_DIMERS}`)",
             ),
+            (999999, "tous couples parents (`--boltzmann-max-dimers 999999`)"),
         ]
 
         orig_fn = an_mod.enrich_dimer_boltzmann_3p
-        for scen_label, target_fasta, cap_val, mode_label in scenarios:
+        for scen_label, target_fasta in targets_spec:
             cfg = build_config_from_cli(
                 primers_path=str(GT_DIR / "duplex_YFV_DENV4_primers.txt"),
                 targets_path=str(target_fasta),
@@ -518,53 +666,75 @@ def run_section_c_boltzmann_perf() -> List[Dict[str, Any]]:
                 conc_f3_b3=0.2,
             )
 
-            # 1. Référence hors Boltzmann (no-op)
-            _clear_thermo_caches()
-            an_mod.enrich_dimer_boltzmann_3p = lambda details, *a, **kw: details  # type: ignore[assignment]
-            try:
-                t0 = time.perf_counter()
-                run_analysis_pipeline(cfg, explicit_config=False, boltzmann_max_dimers=cap_val)
-                t_without = time.perf_counter() - t0
-            finally:
-                an_mod.enrich_dimer_boltzmann_3p = orig_fn
+            t_without_list: List[float] = []
+            by_cap: Dict[int, Dict[str, Any]] = {
+                cap_v: {"pf": [], "t_with": [], "calls": 0, "elig_pp": 0, "skip_pp": 0}
+                for cap_v, _ in modes_spec
+            }
 
-            # 2. Mesure instrumentée avec Boltzmann
-            calls = 0
-            pf_time = 0.0
+            # Entrelacer les `n_repeats` répétitions (sans Boltzmann -> cap=25 -> cap=999999)
+            # Interleave `n_repeats` replicates (without Boltzmann -> cap=25 -> cap=999999)
+            for _rep in range(n_repeats):
+                _clear_thermo_caches()
+                an_mod.enrich_dimer_boltzmann_3p = lambda details, *a, **kw: details  # type: ignore[assignment]
+                try:
+                    t0 = time.perf_counter()
+                    run_analysis_pipeline(
+                        cfg, explicit_config=False, boltzmann_max_dimers=DEFAULT_BOLTZMANN_MAX_DIMERS
+                    )
+                    t_without_list.append(time.perf_counter() - t0)
+                finally:
+                    an_mod.enrich_dimer_boltzmann_3p = orig_fn
 
-            def _wrapped(details: Dict[str, Any], *a: Any, **kw: Any) -> Dict[str, Any]:
-                nonlocal calls, pf_time
-                calls += 1
-                ts = time.perf_counter()
-                out = orig_fn(details, *a, **kw)
-                pf_time += time.perf_counter() - ts
-                return out
+                for cap_val, _mode_label in modes_spec:
+                    calls = 0
+                    pf_time = 0.0
 
-            _clear_thermo_caches()
-            an_mod.enrich_dimer_boltzmann_3p = _wrapped  # type: ignore[assignment]
-            try:
-                t0 = time.perf_counter()
-                res_with = run_analysis_pipeline(
-                    cfg, explicit_config=False, boltzmann_max_dimers=cap_val
-                )[0]
-                t_with = time.perf_counter() - t0
-            finally:
-                an_mod.enrich_dimer_boltzmann_3p = orig_fn
+                    def _wrapped(details: Dict[str, Any], *a: Any, **kw: Any) -> Dict[str, Any]:
+                        nonlocal calls, pf_time
+                        calls += 1
+                        ts = time.perf_counter()
+                        out = orig_fn(details, *a, **kw)
+                        pf_time += time.perf_counter() - ts
+                        return out
 
-            skipped = int(res_with.json_payload["totals"]["boltzmann_skipped_eligible_dimers"])
-            rows.append(
-                {
-                    "scenario": scen_label,
-                    "mode": mode_label,
-                    "calls": calls,
-                    "skipped": skipped,
-                    "pf_time": pf_time,
-                    "t_without": t_without,
-                    "t_with": t_with,
-                    "share_pct": (pf_time / t_with) * 100.0 if t_with > 0 else 0.0,
-                    "overhead_pct": (pf_time / t_without) * 100.0 if t_without > 0 else 0.0,
-                }
-            )
+                    _clear_thermo_caches()
+                    an_mod.enrich_dimer_boltzmann_3p = _wrapped  # type: ignore[assignment]
+                    try:
+                        t0 = time.perf_counter()
+                        res_with = run_analysis_pipeline(
+                            cfg, explicit_config=False, boltzmann_max_dimers=cap_val
+                        )[0]
+                        t_with = time.perf_counter() - t0
+                    finally:
+                        an_mod.enrich_dimer_boltzmann_3p = orig_fn
+
+                    tots = res_with.json_payload["totals"]
+                    by_cap[cap_val]["pf"].append(pf_time)
+                    by_cap[cap_val]["t_with"].append(t_with)
+                    by_cap[cap_val]["calls"] = calls
+                    by_cap[cap_val]["elig_pp"] = int(tots["boltzmann_eligible_parent_pairs"])
+                    by_cap[cap_val]["skip_pp"] = int(tots["boltzmann_skipped_parent_pairs"])
+
+            med_without = statistics.median(t_without_list)
+            for cap_val, mode_label in modes_spec:
+                rec = by_cap[cap_val]
+                med_pf = statistics.median(rec["pf"])
+                med_with = statistics.median(rec["t_with"])
+                rows.append(
+                    {
+                        "scenario": scen_label,
+                        "mode": mode_label,
+                        "calls": rec["calls"],
+                        "elig_pp": rec["elig_pp"],
+                        "skip_pp": rec["skip_pp"],
+                        "pf_fmt": _fmt_med_range(rec["pf"], 3),
+                        "without_fmt": _fmt_med_range(t_without_list, 2),
+                        "with_fmt": _fmt_med_range(rec["t_with"], 2),
+                        "share_pct": (med_pf / med_with) * 100.0 if med_with > 0 else 0.0,
+                        "overhead_pct": (med_pf / med_without) * 100.0 if med_without > 0 else 0.0,
+                    }
+                )
     return rows
 
 
@@ -576,8 +746,9 @@ def render_markdown() -> str:
 
     dg3p_rows = run_section_dg3p_shifts()
     five_rows, masked_by_case = run_section_a_five_cases()
+    reconcil_notes = run_section_a_masked_reconciliation()
     cohort_meta, cov_rows = run_section_b_coverage()
-    perf_rows = run_section_c_boltzmann_perf()
+    perf_rows = run_section_c_boltzmann_perf(n_repeats=3)
 
     lines: List[str] = [
         "# Bancs d'essai reproductibles de référence (`reference_benchmarks`)",
@@ -634,8 +805,8 @@ def render_markdown() -> str:
             "",
             "## A. Cinq cas de référence de paillasse (`-2.0` vs `-3.5 kcal/mol`, génomes complets)",
             "",
-            "| Cas | Paillasse | Dimères amp. `-2.0` (`nM`) | dont inter `-2.0` (`nM`) | Dimères amp. `-3.5` (`nM`) | dont inter `-3.5` (`nM`) | Famille dominante (`-2.0`) | Verdict (`-2.0` / `-3.5`) | `suboptimal_3p_masked` (`cap=25`) | Éligibles non évalués (`cap=25`) |",
-            "|---|---|---:|---:|---:|---:|---|---|---:|---:|",
+            "| Cas | Paillasse | Dimères amp. `-2.0` (`nM`) | dont inter `-2.0` (`nM`) | Dimères amp. `-3.5` (`nM`) | dont inter `-3.5` (`nM`) | Famille dominante (`-2.0`) | Verdict (`-2.0` / `-3.5`) | `suboptimal_3p_masked` (`cap=25`) | Couples parents éligibles | Couples parents non évalués (`cap=25`) |",
+            "|---|---|---:|---:|---:|---:|---|---|---:|---:|---:|",
         ]
     )
     for r in five_rows:
@@ -643,7 +814,7 @@ def render_markdown() -> str:
             f"| `{r['case_id']}` | {r['bench']} | `{r['tot_20']:.4f}` | `{r['inter_20']:.4f}` | "
             f"`{r['tot_35']:.4f}` | `{r['inter_35']:.4f}` | `{r['dom_20']}` | "
             f"`{r['verdict_20']}` / `{r['verdict_35']}` | `{r['masked_count_cap25']}` | "
-            f"`{r['skipped_cap25']}` |"
+            f"`{r['eligible_ppairs']}` | `{r['skipped_ppairs_cap25']}` |"
         )
 
     lines.extend(
@@ -673,6 +844,15 @@ def render_markdown() -> str:
                     f"  - `{it['name']}` : `conc = {it['conc_nm']:.4f} nM`, "
                     f"`P_Boltzmann = {it['prob'] * 100.0:.2f} %`, `ΔG = {it['dg']:.2f} kcal/mol`"
                 )
+
+    lines.extend(
+        [
+            "",
+            "### Réconciliation avec les `12` dimères `suboptimal_3p_masked` sans dédoublonnage ni plafond",
+            "",
+            *reconcil_notes,
+        ]
+    )
 
     d3_n, d3_sha = cohort_meta["denv3"]
     d4_n, d4_sha = cohort_meta["denv4"]
@@ -725,16 +905,16 @@ def render_markdown() -> str:
         [
             "---",
             "",
-            "## C. Performance `enrich_dimer_boltzmann_3p` sur 81 espèces (`3 321` paires)",
+            "## C. Performance `enrich_dimer_boltzmann_3p` sur 81 espèces (`3 321` paires, `N = 3` répétitions : médiane et étendue)",
             "",
-            "| Scénario | Mode | Appels Boltzmann | Éligibles non évalués | `pf_time` (`s`) | Total hors Boltzmann (`s`) | Total avec Boltzmann (`s`) | Part `pf / avec` | Surcoût `pf / hors` |",
-            "|---|---|---:|---:|---:|---:|---:|---:|---:|",
+            "| Scénario | Mode | Appels Boltzmann | Couples parents éligibles | Couples parents non évalués | `pf_time` (`s`, médiane / étendue) | Total hors Boltzmann (`s`, médiane / étendue) | Total avec Boltzmann (`s`, médiane / étendue) | Part médiane `pf / avec` | Surcoût médian `pf / hors` |",
+            "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|",
         ]
     )
     for p in perf_rows:
         lines.append(
-            f"| {p['scenario']} | {p['mode']} | `{p['calls']}` | `{p['skipped']}` | "
-            f"`{p['pf_time']:.3f}` | `{p['t_without']:.2f}` | `{p['t_with']:.2f}` | "
+            f"| {p['scenario']} | {p['mode']} | `{p['calls']}` | `{p['elig_pp']}` | `{p['skip_pp']}` | "
+            f"`{p['pf_fmt']}` | `{p['without_fmt']}` | `{p['with_fmt']}` | "
             f"`{p['share_pct']:.2f} %` | `{p['overhead_pct']:+.2f} %` |"
         )
     lines.append("")

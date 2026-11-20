@@ -5,8 +5,8 @@ Toute valeur numérique citée dans `CHANGELOG.md` doit provenir exclusivement d
 
 ## Métadonnées et conditions expérimentales
 
-- **Commit de code évalué (`src/`)** : `e3b8d4c` (`e3b8d4cb3e142b491f49cb478a27bceaafdb46de`)
-- **HEAD lors de l'exécution** : `e3b8d4c`
+- **Commit de code évalué (`src/`)** : `81919b2` (`81919b2bdda4d2428002628c622a0370cf3d04f8`)
+- **HEAD lors de l'exécution** : `81919b2`
 - **Température de réaction (`analyze` & `coverage`)** : `63.0 °C`
 - **Tampon LAMP par défaut (`analyze`)** : `50.0 mM Na+`, `10.0 mM K+`, `20.0 mM Tris`, `6.0 mM Mg2+`, `1.4 mM dNTP`
 - **Tampon explicite du comparatif `coverage` (Section B)** : `50.0 mM Na+`, `0.0 mM K+`, `0.0 mM Tris`, `8.0 mM Mg2+`, `1.4 mM dNTP`, `--ddg-max 3.0 kcal/mol`
@@ -26,13 +26,13 @@ Toute valeur numérique citée dans `CHANGELOG.md` doit provenir exclusivement d
 
 ## A. Cinq cas de référence de paillasse (`-2.0` vs `-3.5 kcal/mol`, génomes complets)
 
-| Cas | Paillasse | Dimères amp. `-2.0` (`nM`) | dont inter `-2.0` (`nM`) | Dimères amp. `-3.5` (`nM`) | dont inter `-3.5` (`nM`) | Famille dominante (`-2.0`) | Verdict (`-2.0` / `-3.5`) | `suboptimal_3p_masked` (`cap=25`) | Éligibles non évalués (`cap=25`) |
-|---|---|---:|---:|---:|---:|---|---|---:|---:|
-| `singleplex_denv3` | SUCCÈS paillasse | `0.0000` | `0.0000` | `0.0000` | `0.0000` | `—` | `INFO` / `INFO` | `6` | `0` |
-| `singleplex_denv4` | SUCCÈS paillasse | `0.1536` | `0.0000` | `0.1536` | `0.0000` | `BIP_ParidaD4 × LF_ParidaD4 (0.1536 nM)` | `WARNING` / `WARNING` | `0` | `0` |
-| `singleplex_yfv` | SUCCÈS paillasse | `0.0011` | `0.0000` | `0.0000` | `0.0000` | `B3_Nunes_YFV × LF_Nunes_YFV (0.0011 nM)` | `WARNING` / `WARNING` | `0` | `198` |
-| `duplex_half` | ÉCHEC paillasse (faux +) | `0.3527` | `0.3109` | `0.3363` | `0.2948` | `FIP_Nunes_YFV × F3_ParidaD4 (0.2931 nM)` | `FAILURE` / `FAILURE` | `0` | `80` |
-| `duplex_full` | ÉCHEC paillasse (faux +) | `1.3547` | `1.2010` | `1.2938` | `1.1412` | `FIP_Nunes_YFV × F3_ParidaD4 (1.1351 nM)` | `FAILURE` / `FAILURE` | `0` | `328` |
+| Cas | Paillasse | Dimères amp. `-2.0` (`nM`) | dont inter `-2.0` (`nM`) | Dimères amp. `-3.5` (`nM`) | dont inter `-3.5` (`nM`) | Famille dominante (`-2.0`) | Verdict (`-2.0` / `-3.5`) | `suboptimal_3p_masked` (`cap=25`) | Couples parents éligibles | Couples parents non évalués (`cap=25`) |
+|---|---|---:|---:|---:|---:|---|---|---:|---:|---:|
+| `singleplex_denv3` | SUCCÈS paillasse | `0.0000` | `0.0000` | `0.0000` | `0.0000` | `—` | `INFO` / `INFO` | `2` | `5` | `0` |
+| `singleplex_denv4` | SUCCÈS paillasse | `0.1536` | `0.0000` | `0.1536` | `0.0000` | `BIP_ParidaD4 × LF_ParidaD4 (0.1536 nM)` | `WARNING` / `WARNING` | `0` | `13` | `0` |
+| `singleplex_yfv` | SUCCÈS paillasse | `0.0011` | `0.0000` | `0.0000` | `0.0000` | `B3_Nunes_YFV × LF_Nunes_YFV (0.0011 nM)` | `WARNING` / `WARNING` | `0` | `6` | `0` |
+| `duplex_half` | ÉCHEC paillasse (faux +) | `0.3527` | `0.3109` | `0.3363` | `0.2948` | `FIP_Nunes_YFV × F3_ParidaD4 (0.2931 nM)` | `FAILURE` / `FAILURE` | `0` | `19` | `0` |
+| `duplex_full` | ÉCHEC paillasse (faux +) | `1.3547` | `1.2010` | `1.2938` | `1.1412` | `FIP_Nunes_YFV × F3_ParidaD4 (1.1351 nM)` | `FAILURE` / `FAILURE` | `0` | `40` | `15` |
 
 ### Causes globales (`verdict.global_cause` à `-2.0 kcal/mol`)
 
@@ -44,17 +44,28 @@ Toute valeur numérique citée dans `CHANGELOG.md` doit provenir exclusivement d
 
 ### Détail des dimères `suboptimal_3p_masked = True` (`--boltzmann-max-dimers 25`)
 
-- `singleplex_denv3` : `6` dimère(s) `suboptimal_3p_masked` :
+- `singleplex_denv3` : `2` dimère(s) `suboptimal_3p_masked` :
   - `LB_3#1_homo` : `conc = 0.1012 nM`, `P_Boltzmann = 42.76 %`, `ΔG = -5.24 kcal/mol`
-  - `LB_3#1_LB_3#2` : `conc = 0.0722 nM`, `P_Boltzmann = 43.20 %`, `ΔG = -5.01 kcal/mol`
   - `F3_3#2_BIP_3#1` : `conc = 0.0404 nM`, `P_Boltzmann = 20.53 %`, `ΔG = -5.09 kcal/mol`
-  - `F3_3#2_BIP_3#2` : `conc = 0.0403 nM`, `P_Boltzmann = 17.37 %`, `ΔG = -5.09 kcal/mol`
-  - `F3_3#2_BIP_3#3` : `conc = 0.0398 nM`, `P_Boltzmann = 22.85 %`, `ΔG = -5.09 kcal/mol`
-  - `F3_3#2_BIP_3#4` : `conc = 0.0398 nM`, `P_Boltzmann = 19.59 %`, `ΔG = -5.09 kcal/mol`
 - `singleplex_denv4` : `0` dimère `suboptimal_3p_masked`.
 - `singleplex_yfv` : `0` dimère `suboptimal_3p_masked`.
 - `duplex_half` : `0` dimère `suboptimal_3p_masked`.
 - `duplex_full` : `0` dimère `suboptimal_3p_masked`.
+
+### Réconciliation avec les `12` dimères `suboptimal_3p_masked` sans dédoublonnage ni plafond
+
+- `singleplex_denv3` : sans dédoublonnage/plafond = `6` dimère(s) ; dédoublonné par couple parent sans plafond = `2` ; dédoublonné à `K = 25` = `2` (`5` couples parents éligibles).
+  - Couple `LB_3 × LB_3` (rang `3/5`) : retenu via `LB_3#1_homo` (`0.1012 nM`, `P_Boltzmann = 42.76 %`) ; `1` autre(s) variant(s) du même couple écarté(s) par dédoublonnage (LB_3#1_LB_3#2 à 0.0722 nM).
+  - Couple `BIP_3 × F3_3` (rang `4/5`) : retenu via `F3_3#2_BIP_3#1` (`0.0404 nM`, `P_Boltzmann = 20.53 %`) ; `3` autre(s) variant(s) du même couple écarté(s) par dédoublonnage (F3_3#2_BIP_3#2 à 0.0403 nM, F3_3#2_BIP_3#3 à 0.0398 nM, F3_3#2_BIP_3#4 à 0.0398 nM).
+- `singleplex_denv4` : sans dédoublonnage/plafond = `0` dimère(s) ; dédoublonné par couple parent sans plafond = `0` ; dédoublonné à `K = 25` = `0` (`13` couples parents éligibles).
+- `singleplex_yfv` : sans dédoublonnage/plafond = `1` dimère(s) ; dédoublonné par couple parent sans plafond = `0` ; dédoublonné à `K = 25` = `0` (`6` couples parents éligibles).
+  - Couple `F3_Nunes_YFV × LB_Nunes_YFV` (rang `5/6`) : représentant le plus concentré = `F3_Nunes_YFV#5_LB_Nunes_YFV#2` (`0.04963523 nM`, `ΔG = -6.6209 kcal/mol`, `P_Boltzmann = 0.02 %`, `masked = False`), devant `F3_Nunes_YFV#6_LB_Nunes_YFV#2` (`0.04963376 nM`, `ΔG = -6.6209 kcal/mol`, `P_Boltzmann = 15.17 %`, `masked = True`, total `1` variant(s) masked dans ce couple).
+- `duplex_half` : sans dédoublonnage/plafond = `0` dimère(s) ; dédoublonné par couple parent sans plafond = `0` ; dédoublonné à `K = 25` = `0` (`19` couples parents éligibles).
+- `duplex_full` : sans dédoublonnage/plafond = `5` dimère(s) ; dédoublonné par couple parent sans plafond = `2` ; dédoublonné à `K = 25` = `0` (`40` couples parents éligibles).
+  - Couple `F3_Nunes_YFV × LB_Nunes_YFV` (rang `27/40`) : représentant le plus concentré = `F3_Nunes_YFV#5_LB_Nunes_YFV#2` (`0.04936754 nM`, `ΔG = -6.6209 kcal/mol`, `P_Boltzmann = 0.02 %`, `masked = False`), devant `F3_Nunes_YFV#6_LB_Nunes_YFV#2` (`0.04936436 nM`, `ΔG = -6.6209 kcal/mol`, `P_Boltzmann = 15.17 %`, `masked = True`, total `1` variant(s) masked dans ce couple).
+  - Couple `LB_ParidaD4 × LF_Nunes_YFV` (rang `33/40 > 25`) : représentant `LF_Nunes_YFV_LB_ParidaD4` (`0.0324 nM`, `P_Boltzmann = 10.27 %`, `masked = True`) hors plafond `K = 25`.
+  - Couple `F3_Nunes_YFV × FIP_ParidaD4` (rang `39/40`) : représentant le plus concentré = `F3_Nunes_YFV#16_FIP_ParidaD4` (`0.02615694 nM`, `ΔG = -5.2681 kcal/mol`, `P_Boltzmann = 0.46 %`, `masked = False`), devant `F3_Nunes_YFV#15_FIP_ParidaD4` (`0.02615681 nM`, `ΔG = -5.2681 kcal/mol`, `P_Boltzmann = 10.74 %`, `masked = True`, total `2` variant(s) masked dans ce couple).
+  - Couple `LF_Nunes_YFV × LF_ParidaD4` (rang `40/40 > 25`) : représentant `LF_Nunes_YFV_LF_ParidaD4` (`0.0253 nM`, `P_Boltzmann = 16.17 %`, `masked = True`) hors plafond `K = 25`.
 
 ---
 
@@ -106,11 +117,11 @@ Cohortes synthétiques de non-régression générées par `scripts/generate_cove
 
 ---
 
-## C. Performance `enrich_dimer_boltzmann_3p` sur 81 espèces (`3 321` paires)
+## C. Performance `enrich_dimer_boltzmann_3p` sur 81 espèces (`3 321` paires, `N = 3` répétitions : médiane et étendue)
 
-| Scénario | Mode | Appels Boltzmann | Éligibles non évalués | `pf_time` (`s`) | Total hors Boltzmann (`s`) | Total avec Boltzmann (`s`) | Part `pf / avec` | Surcoût `pf / hors` |
-|---|---|---:|---:|---:|---:|---:|---:|---:|
-| 81 espèces — fenêtres locales (`test_step3_redesign_v2`) | défaut (`--boltzmann-max-dimers 25`) | `56` | `328` | `0.645` | `19.35` | `17.80` | `3.62 %` | `+3.33 %` |
-| 81 espèces — fenêtres locales (`test_step3_redesign_v2`) | sans plafond (`999999`) | `384` | `0` | `5.848` | `16.82` | `22.90` | `25.54 %` | `+34.77 %` |
-| 81 espèces — `duplex_full` génomes viraux complets | défaut (`--boltzmann-max-dimers 25`) | `56` | `328` | `0.655` | `17.13` | `18.58` | `3.53 %` | `+3.83 %` |
-| 81 espèces — `duplex_full` génomes viraux complets | sans plafond (`999999`) | `384` | `0` | `5.634` | `18.07` | `22.26` | `25.31 %` | `+31.17 %` |
+| Scénario | Mode | Appels Boltzmann | Couples parents éligibles | Couples parents non évalués | `pf_time` (`s`, médiane / étendue) | Total hors Boltzmann (`s`, médiane / étendue) | Total avec Boltzmann (`s`, médiane / étendue) | Part médiane `pf / avec` | Surcoût médian `pf / hors` |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| 81 espèces — fenêtres locales (`test_step3_redesign_v2`) | défaut parent-dédoublonné (`--boltzmann-max-dimers 25`) | `56` | `40` | `15` | `0.416 (étendue 0.014, [0.414–0.428])` | `16.64 (étendue 1.47, [15.69–17.16])` | `15.83 (étendue 1.12, [15.14–16.26])` | `2.63 %` | `+2.50 %` |
+| 81 espèces — fenêtres locales (`test_step3_redesign_v2`) | tous couples parents (`--boltzmann-max-dimers 999999`) | `71` | `40` | `0` | `0.469 (étendue 0.135, [0.456–0.591])` | `16.64 (étendue 1.47, [15.69–17.16])` | `16.10 (étendue 2.27, [15.63–17.90])` | `2.91 %` | `+2.82 %` |
+| 81 espèces — `duplex_full` génomes viraux complets | défaut parent-dédoublonné (`--boltzmann-max-dimers 25`) | `56` | `40` | `15` | `0.422 (étendue 0.016, [0.411–0.427])` | `15.33 (étendue 1.82, [14.14–15.96])` | `15.51 (étendue 1.24, [14.91–16.15])` | `2.72 %` | `+2.75 %` |
+| 81 espèces — `duplex_full` génomes viraux complets | tous couples parents (`--boltzmann-max-dimers 999999`) | `71` | `40` | `0` | `0.463 (étendue 0.003, [0.461–0.465])` | `15.33 (étendue 1.82, [14.14–15.96])` | `15.62 (étendue 1.04, [14.85–15.90])` | `2.96 %` | `+3.02 %` |
