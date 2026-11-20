@@ -94,15 +94,18 @@ _ROLE_IMBALANCE_RATIO_HELP = (
     "sans normalisation par le nombre de variants dégénérés)."
 )
 _BOLTZMANN_MAX_DIMERS_HELP = (
-    "Garde-fou optionnel pour les très gros panels : plafond K du nombre de groupes non amplifiables "
-    "dédoublonnés par clé (couple parent, 3'_A, 3'_B) (parmi ceux >= 0.1 × --dimer-conc-max, triés par "
-    "concentration décroissante) évalués par calc_boltzmann_3p_pairing, en plus de 100 % des dimères "
-    "amplifiables (défaut : illimité ; 0 ou non spécifié = pas de plafond)."
+    "Accélérateur optionnel (APPROXIMATION pour les très gros panels, pouvant masquer des variants "
+    "à risque moins concentrés) : plafond K du nombre de dimères/groupes non amplifiables éligibles "
+    "(>= 0.1 × --dimer-conc-max, triés par concentration décroissante) évalués par calc_boltzmann_3p_pairing, "
+    "en plus de 100 % des dimères amplifiables (défaut : illimité ; 0 ou non spécifié = pas de plafond, "
+    "évaluation exhaustive)."
 )
 _BOLTZMANN_DEDUP_3P_WINDOW_HELP = (
-    "Longueur en nt de la fenêtre 3' par variant dans la clé de dédoublonnage Boltzmann "
-    "(couple parent, 3'_A, 3'_B) : fusionne les variants ne différant qu'en 5'/milieu et évalue "
-    "séparément ceux différant dans les N dernières bases 3' (défaut : 5)."
+    "Accélérateur optionnel (APPROXIMATION pour les très gros panels) : si > 0, dédoublonne les dimères "
+    "non amplifiables éligibles par clé (couple parent, 3'_A, 3'_B) sur N nt en ne gardant que le variant "
+    "le plus concentré. Peut masquer des variants à risque car la matrice de l'appariement 3' peut tomber "
+    "sur une dégénérescence interne du partenaire (ex. LB_3#2_homo à 0,00 % contre LB_3#1_homo à 42,76 % "
+    "et LB_3#1_LB_3#2 à 43,20 % malgré le même 3' TAGGA). Défaut : 0 (désactivé = évaluation exhaustive)."
 )
 
 
@@ -132,7 +135,7 @@ def analyze(
     dimer_warn_ratio: float = typer.Option(0.5, "--dimer-warn-ratio", help=_DIMER_WARN_RATIO_HELP),
     role_imbalance_ratio: float = typer.Option(20.0, "--role-imbalance-ratio", help=_ROLE_IMBALANCE_RATIO_HELP),
     boltzmann_max_dimers: Optional[int] = typer.Option(None, "--boltzmann-max-dimers", min=0, help=_BOLTZMANN_MAX_DIMERS_HELP),
-    boltzmann_dedup_3p_window: int = typer.Option(5, "--boltzmann-dedup-3p-window", min=0, help=_BOLTZMANN_DEDUP_3P_WINDOW_HELP),
+    boltzmann_dedup_3p_window: int = typer.Option(0, "--boltzmann-dedup-3p-window", min=0, help=_BOLTZMANN_DEDUP_3P_WINDOW_HELP),
     separate_targets: bool = typer.Option(False, "--separate-targets", "--per-target", help="Solve targets independently instead of joint multi-target equilibrium."),
     force_joint: bool = typer.Option(False, "--force-joint", help="Force joint analysis of multiple panels for the same target.")
 ) -> None:

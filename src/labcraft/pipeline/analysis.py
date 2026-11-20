@@ -112,21 +112,40 @@ def _format_nm(value: float) -> str:
 
 
 DEFAULT_BOLTZMANN_MAX_DIMERS: Optional[int] = None
-DEFAULT_BOLTZMANN_DEDUP_3P_WINDOW: int = 5
+DEFAULT_BOLTZMANN_DEDUP_3P_WINDOW: int = 0
 _BoltzmannDedupKey = Tuple[Tuple[str, str], Tuple[str, str]]
 
 
 def _make_boltzmann_dedup_key(
-    pa_par: str, seq_a: str, pb_par: str, seq_b: str, window_3p: int
+    pa_par: str,
+    pa_name: str,
+    seq_a: str,
+    pb_par: str,
+    pb_name: str,
+    seq_b: str,
+    window_3p: int,
 ) -> _BoltzmannDedupKey:
-    """Construit la clé canonique symétrique `((parent_1, 3'_1), (parent_2, 3'_2))`.
-    Builds the symmetric canonical deduplication key `((parent_1, 3'_1), (parent_2, 3'_2))`.
+    """Construit la clé canonique de regroupement Boltzmann :
+    - `window_3p <= 0` (défaut `0`, désactivé) : clé exacte par variant physique `((name_1, seq_1), (name_2, seq_2))`
+      sans aucune fusion (évaluation exhaustive) ;
+    - `window_3p > 0` : APPROXIMATION `((parent_1, 3'_1), (parent_2, 3'_2))` sur `window_3p` nt (peut masquer un
+      variant à risque lorsque l'extrémité 3' s'apparie sur une base dégénérée interne du brin partenaire,
+      cf. `LB_3#2_homo` à `0,00 %` face à `LB_3#1_homo` à `42,76 %` et `LB_3#1_LB_3#2` à `43,20 %`).
+
+    Builds the canonical Boltzmann grouping key:
+    - `window_3p <= 0` (default `0`, disabled): exact per-variant key `((name_1, seq_1), (name_2, seq_2))` with
+      zero merging (exhaustive evaluation);
+    - `window_3p > 0`: APPROXIMATION `((parent_1, 3'_1), (parent_2, 3'_2))` over `window_3p` nt (may mask risky
+      variants when the 3' end base-pairs against an internal degenerate base on the partner strand, e.g.
+      `LB_3#2_homo` at `0.00%` vs `LB_3#1_homo` at `42.76%` and `LB_3#1_LB_3#2` at `43.20%`).
     """
-    w = max(0, int(window_3p))
-    tail_a = seq_a[-w:] if w > 0 else ""
-    tail_b = seq_b[-w:] if w > 0 else ""
-    end_a = (pa_par, tail_a)
-    end_b = (pb_par, tail_b)
+    w = int(window_3p)
+    if w <= 0:
+        end_a = (pa_name, seq_a)
+        end_b = (pb_name, seq_b)
+    else:
+        end_a = (pa_par, seq_a[-w:])
+        end_b = (pb_par, seq_b[-w:])
     return (end_a, end_b) if end_a <= end_b else (end_b, end_a)
 
 
@@ -229,7 +248,13 @@ def _evaluate_dimer_complexes_impl(
                 pb_par = str(details.get("parent_b") or _get_parent_name(p_b.name))
                 parent_pair = (pa_par, pb_par) if pa_par <= pb_par else (pb_par, pa_par)
                 dedup_key = _make_boltzmann_dedup_key(
-                    pa_par, p_a.sequence, pb_par, p_b.sequence, boltzmann_dedup_3p_window
+                    pa_par,
+                    p_a.name,
+                    p_a.sequence,
+                    pb_par,
+                    p_b.name,
+                    p_b.sequence,
+                    boltzmann_dedup_3p_window,
                 )
                 dimer_records.append((i, c_name, p_a, p_b, is_amp, conc, parent_pair, dedup_key))
                 details["panel_a"] = primer_to_panel_map.get(
@@ -271,19 +296,21 @@ def _evaluate_dimer_complexes_impl(
 
     # `conc` du solveur est en mol/L (M) ; `dimer_conc_max_nm` est en nmol/L (1 nM = 1e-9 M).
     # Enrichissement Boltzmann 3' (informatif uniquement, sans effet sur le verdict) :
-    # 1. 100 % des dimères amplifiables (`is_amp == True`) sont évalués sans plafond ;
-    # 2. Les dimères non amplifiables vérifiant `conc >= 0.1 * dimer_conc_max` (0,023 nM = 2,3e-11 M par
-    #    défaut) sont dédoublonnés par clé canonique `((parent_A, 3'_A), (parent_B, 3'_B))` de longueur
-    #    `boltzmann_dedup_3p_window` (défaut 5 nt) : les variants ne différant qu'en 5' ou au milieu sont
-    #    fusionnés en gardant le plus concentré, tandis que ceux différant en 3' sont évalués séparément ;
+    # 1. Par défaut (`boltzmann_dedup_3p_window = 0`, `boltzmann_max_dimers = None`), l'évaluation est
+    #    EXHAUSTIVE : 100 % des dimères amplifiables + 100 % des dimères non amplifiables vérifiant
+    #    `conc >= 0.1 * dimer_conc_max` (0,023 nM = 2,3e-11 M par défaut), sans dédoublonnage ni plafond ;
+    # 2. Accélérateurs optionnels (APPROXIMATIONS pour très gros panels, pouvant masquer un variant à risque
+    #    tel que `LB_3#2_homo` à 0,00 % face à `LB_3#1_homo` à 42,76 % lorsque la région matrice interne du
+    #    brin partenaire porte une base dégénérée) : `boltzmann_dedup_3p_window > 0` fusionne par clé
+    #    `((parent_A, 3'_A), (parent_B, 3'_B))` et `boltzmann_max_dimers > 0` plafonne à K entrées ;
     # 3. Pour chaque couple parent, la `P_Boltzmann` maximale sur ses représentants évalués est rapportée.
     # Solver `conc` is in mol/L (M); `dimer_conc_max_nm` is in nmol/L (1 nM = 1e-9 M).
     # Boltzmann 3' enrichment (informational only, never alters the verdict):
-    # 1. 100% of amplifiable dimers (`is_amp == True`) are evaluated without cap;
-    # 2. Non-amplifiable dimers with `conc >= 0.1 * dimer_conc_max` are deduplicated by canonical key
-    #    `((parent_A, 3'_A), (parent_B, 3'_B))` over `boltzmann_dedup_3p_window` nt (default 5): variants
-    #    differing only in 5'/middle merge (keeping highest concentration), while 3'-distinct variants
-    #    are evaluated separately;
+    # 1. By default (`boltzmann_dedup_3p_window = 0`, `boltzmann_max_dimers = None`), evaluation is
+    #    EXHAUSTIVE: 100% of amplifiable dimers + 100% of non-amplifiable dimers with `conc >= 0.1 * dimer_conc_max`;
+    # 2. Optional accelerators (APPROXIMATIONS for very large panels that can mask risky variants when the
+    #    partner strand's internal template carries a degenerate base, e.g. `LB_3#2_homo` at 0.00% vs
+    #    `LB_3#1_homo` at 42.76%): `boltzmann_dedup_3p_window > 0` and `boltzmann_max_dimers > 0`;
     # 3. For each parent pair, the maximum `P_Boltzmann` across its evaluated representatives is reported.
     boltzmann_min_conc_molar = 0.1 * dimer_conc_max_nm * 1e-9
     amp_records = [rec for rec in dimer_records if rec[4]]

@@ -618,6 +618,7 @@ def test_boltzmann_max_dimers_cap_and_json_skipped_export(tmp_path: Path) -> Non
         {"P_F3": "P", "P_B3": "P", "P_LF": "P", "P_LB": "P"},
         dimer_conc_max_nm=0.23,
         boltzmann_max_dimers=2,
+        boltzmann_dedup_3p_window=5,
         boltzmann_stats_out=stats,
     )
     assert amp_flags[5] is True
@@ -631,7 +632,7 @@ def test_boltzmann_max_dimers_cap_and_json_skipped_export(tmp_path: Path) -> Non
     assert stats["evaluated_non_amp_dimers"] == 2
     assert stats["skipped_parent_pairs"] == 1
 
-    # Vérification CLI de bout en bout sur DENV3 (5 couples parents éligibles) avec --boltzmann-max-dimers 2
+    # Vérification CLI de bout en bout sur DENV3 avec accélérateurs --boltzmann-dedup-3p-window 5 --boltzmann-max-dimers 2
     gt_dir = Path(__file__).resolve().parent.parent / "fixtures" / "ground_truth"
     out_html = tmp_path / "d3_cap.html"
     runner = CliRunner()
@@ -645,6 +646,7 @@ def test_boltzmann_max_dimers_cap_and_json_skipped_export(tmp_path: Path) -> Non
             "--conc-fip-bip", "0.8",
             "--conc-loop", "0.4",
             "--conc-f3-b3", "0.2",
+            "--boltzmann-dedup-3p-window", "5",
             "--boltzmann-max-dimers", "2",
             "-o", str(out_html),
         ],
@@ -766,7 +768,8 @@ def test_boltzmann_3p_window_dedup_merges_5p_and_splits_3p_and_reports_parent_ma
     assert isinstance(max_map, dict)
     assert max_map["YFV_F3 × YFV_LB"] == pytest.approx(p_max, abs=1e-6)
 
-    # Avec fenêtre 3' = 0 nt : tout le couple parent fusionne en un seul groupe (#1 gagne)
+    # Avec fenêtre 3' = 0 nt (défaut) : dédoublonnage désactivé -> les 3 variants (#1, #2, #3) sont évalués exhaustivement !
+    # With 3' window = 0 nt (default): deduplication disabled -> all 3 variants (#1, #2, #3) are evaluated exhaustively!
     stats0: dict[str, object] = {}
     _, _, details0 = evaluate_dimer_complexes(
         prob,
@@ -779,29 +782,34 @@ def test_boltzmann_3p_window_dedup_merges_5p_and_splits_3p_and_reports_parent_ma
         {},
         {"YFV_F3": "YFV", "YFV_LB": "YFV"},
         dimer_conc_max_nm=0.23,
-        boltzmann_max_dimers=25,
-        boltzmann_dedup_3p_window=0,
         boltzmann_stats_out=stats0,
     )
-    assert stats0["eligible_dedup_groups"] == 1
-    assert "boltzmann_3p_prob" not in details0[6]
+    assert stats0["eligible_dedup_groups"] == 3
+    assert stats0["skipped_eligible_dimers"] == 0
+    assert all("boltzmann_3p_prob" in details0[idx] for idx in (4, 5, 6))
 
 
 def test_boltzmann_max_dimers_unlimited_by_default_and_zero() -> None:
-    """Vérifie que `--boltzmann-max-dimers` est illimité par défaut (`None` ou `0` = pas de plafond)
-    et documenté comme garde-fou optionnel pour les gros panels.
+    """Vérifie que par défaut `--boltzmann-dedup-3p-window == 0` (désactivé) et `--boltzmann-max-dimers`
+    est illimité (`None` ou `0` = pas de plafond), et que l'aide CLI documente les deux accélérateurs
+    comme APPROXIMATIONS citant `LB_3#2_homo`.
 
-    Verifies `--boltzmann-max-dimers` defaults to unlimited (`None` or `0` = no cap) and is documented
-    as an optional safeguard for large panels.
+    Verifies `--boltzmann-dedup-3p-window == 0` (disabled) and `--boltzmann-max-dimers` unlimited (`None`/`0`)
+    by default, and checks CLI help documents both accelerators as APPROXIMATIONS citing `LB_3#2_homo`.
     """
     import numpy as np
 
     from labcraft.diagnostics.enzyme import BST_2_0
     from labcraft.lamp.domains import PhysicalPrimer, PrimerRole
-    from labcraft.pipeline.analysis import DEFAULT_BOLTZMANN_MAX_DIMERS, evaluate_dimer_complexes
+    from labcraft.pipeline.analysis import (
+        DEFAULT_BOLTZMANN_DEDUP_3P_WINDOW,
+        DEFAULT_BOLTZMANN_MAX_DIMERS,
+        evaluate_dimer_complexes,
+    )
     from labcraft.solver.types import EquilibriumProblem, EquilibriumResult, SolverMethod
     from labcraft.thermo.backends.vienna import ViennaRNABackend
 
+    assert DEFAULT_BOLTZMANN_DEDUP_3P_WINDOW == 0
     assert DEFAULT_BOLTZMANN_MAX_DIMERS is None
 
     primers = [
@@ -868,7 +876,8 @@ def test_boltzmann_max_dimers_unlimited_by_default_and_zero() -> None:
     clean_help = " ".join(res_help.stdout.replace("│", " ").split())
     assert "--boltzmann-max-dimers" in clean_help
     assert "--boltzmann-dedup-3p-window" in clean_help
-    assert "Garde-fou" in clean_help
+    assert "APPROXIMATION" in clean_help
+    assert "LB_3#2_homo" in clean_help
     assert "illimité" in clean_help
 
 
