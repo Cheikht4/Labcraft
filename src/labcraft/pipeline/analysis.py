@@ -375,10 +375,12 @@ def _evaluate_dimer_complexes_impl(
         for pp, val in sorted(parent_max_prob.items(), key=lambda kv: (-kv[1], kv[0]))
     }
 
+    boltzmann_mode = "dedup_approx" if int(boltzmann_dedup_3p_window) > 0 else "exhaustive"
     if boltzmann_stats_out is not None:
         selected_names = {rec[1] for rec in selected_non_amp}
         elig_ppairs = {rec[6] for rec in dedup_reps}
         eval_ppairs = {rec[6] for rec in selected_non_amp}
+        boltzmann_stats_out["boltzmann_mode"] = boltzmann_mode
         boltzmann_stats_out["evaluated_amp_dimers"] = len(amp_records)
         boltzmann_stats_out["eligible_non_amp_dimers"] = len(eligible_non_amp)
         boltzmann_stats_out["eligible_dedup_groups"] = len(dedup_reps)
@@ -978,6 +980,9 @@ def run_single_panel_analysis(
         "warnings": all_warning_messages,
     }
 
+    boltzmann_mode_str = (
+        "dedup_approx" if int(boltzmann_dedup_3p_window) > 0 else "exhaustive"
+    )
     conditions_json: Dict[str, Any] = {
         "temperature_C": temp_celsius,
         "enzyme": enzyme.name,
@@ -985,6 +990,7 @@ def run_single_panel_analysis(
         "dimer_conc_max_nm": dimer_conc_max,
         "dimer_warn_ratio": dimer_warn_ratio,
         "role_imbalance_ratio": role_imbalance_ratio,
+        "boltzmann_mode": boltzmann_mode_str,
         "boltzmann_max_dimers": boltzmann_max_dimers,
         "boltzmann_dedup_3p_window": boltzmann_dedup_3p_window,
         "dimer_dg_threshold": enzyme.dimer_dg_threshold,
@@ -1012,6 +1018,7 @@ def run_single_panel_analysis(
         mispriming_risks=mispriming_risks,
         verdict=verdict,
         panel_summaries=panel_summaries,
+        boltzmann_mode=boltzmann_mode_str,
         boltzmann_eligible_dedup_groups=boltzmann_eligible_dedup_groups,
         boltzmann_skipped_dedup_groups=boltzmann_skipped_dedup_groups,
         boltzmann_eligible_parent_pairs=boltzmann_eligible_parent_pairs,

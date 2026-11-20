@@ -37,6 +37,7 @@ def build_analyze_json_payload(
     mispriming_risks: List[Any],
     verdict: PanelVerdict,
     panel_summaries: Optional[Dict[str, Any]] = None,
+    boltzmann_mode: str = "exhaustive",
     boltzmann_eligible_dedup_groups: int = 0,
     boltzmann_skipped_dedup_groups: int = 0,
     boltzmann_eligible_parent_pairs: int = 0,
@@ -132,12 +133,17 @@ def build_analyze_json_payload(
         elif isinstance(mr, dict):
             mispriming_list.append(mr)
 
+    # Mode Boltzmann ("exhaustive" par défaut | "dedup_approx" si dédoublonnage activé)
+    # Boltzmann mode ("exhaustive" by default | "dedup_approx" when deduplication is enabled)
+    norm_boltzmann_mode = "dedup_approx" if boltzmann_mode == "dedup_approx" else "exhaustive"
+
     # Totaux alignés sur le rapport HTML / Totals aligned with HTML report
     totals = {
         "amplifiable_dimers_total_nm": float(dimer_decomposition.get("total_nm", 0.0)),
         "amplifiable_dimers_intra_by_panel_nm": dict(dimer_decomposition.get("intra_by_panel_nm", {})),
         "amplifiable_dimers_inter_nm": float(dimer_decomposition.get("inter_nm", 0.0)),
         "blocking_dimers_total_nm": blocking_total_nm,
+        "boltzmann_mode": norm_boltzmann_mode,
         "boltzmann_eligible_dedup_groups": int(boltzmann_eligible_dedup_groups),
         "boltzmann_skipped_dedup_groups": int(boltzmann_skipped_dedup_groups),
         "boltzmann_eligible_parent_pairs": int(boltzmann_eligible_parent_pairs),
@@ -154,6 +160,7 @@ def build_analyze_json_payload(
         "timestamp": timestamp,
         "inputs": inputs,
         "conditions": conditions,
+        "boltzmann_mode": norm_boltzmann_mode,
         "primer_concentrations_uM": primer_concentrations_uM,
         "free_fractions": free_fractions,
         "fractions": fractions_detail,

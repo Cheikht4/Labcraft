@@ -881,5 +881,66 @@ def test_boltzmann_max_dimers_unlimited_by_default_and_zero() -> None:
     assert "illimité" in clean_help
 
 
+def test_analyze_json_boltzmann_mode_exhaustive_vs_dedup_approx(tmp_path: Path) -> None:
+    """Vérifie le champ JSON `boltzmann_mode = "exhaustive" | "dedup_approx"` :
+    - par défaut (`--boltzmann-dedup-3p-window 0`), `boltzmann_mode == "exhaustive"`, `0` dimère éligible non évalué,
+      et les `6` variants `suboptimal_3p_masked` de `singleplex_denv3` sont rapportés ;
+    - lorsque le dédoublonnage est activé (`--boltzmann-dedup-3p-window 5`), `boltzmann_mode == "dedup_approx"`.
+
+    Verifies JSON `boltzmann_mode = "exhaustive" | "dedup_approx"`:
+    - default (`--boltzmann-dedup-3p-window 0`) yields `"exhaustive"`, `0` skipped eligible dimers, and all `6`
+      `suboptimal_3p_masked` variants on `singleplex_denv3`;
+    - enabling `--boltzmann-dedup-3p-window 5` sets `boltzmann_mode == "dedup_approx"`.
+    """
+    gt_dir = Path(__file__).resolve().parent.parent / "fixtures" / "ground_truth"
+    runner = CliRunner()
+
+    out_exh = tmp_path / "d3_exhaustive.html"
+    res_exh = runner.invoke(
+        app,
+        [
+            "analyze",
+            "-p", str(gt_dir / "primer_dengue_3_panel3.txt"),
+            "-t", str(gt_dir / "DEN3_M93130.fasta"),
+            "--temperature", "63.0",
+            "--conc-fip-bip", "0.8",
+            "--conc-loop", "0.4",
+            "--conc-f3-b3", "0.2",
+            "-o", str(out_exh),
+        ],
+    )
+    assert res_exh.exit_code == 0, res_exh.stdout
+    data_exh = json.loads((tmp_path / "d3_exhaustive.json").read_text(encoding="utf-8"))
+    assert data_exh["boltzmann_mode"] == "exhaustive"
+    assert data_exh["conditions"]["boltzmann_mode"] == "exhaustive"
+    assert data_exh["totals"]["boltzmann_mode"] == "exhaustive"
+    assert data_exh["totals"]["boltzmann_skipped_eligible_dimers"] == 0
+    masked_exh = [d["name"] for d in data_exh["dimers"] if d["suboptimal_3p_masked"]]
+    assert len(masked_exh) == 6
+
+    out_ded = tmp_path / "d3_dedup5.html"
+    res_ded = runner.invoke(
+        app,
+        [
+            "analyze",
+            "-p", str(gt_dir / "primer_dengue_3_panel3.txt"),
+            "-t", str(gt_dir / "DEN3_M93130.fasta"),
+            "--temperature", "63.0",
+            "--conc-fip-bip", "0.8",
+            "--conc-loop", "0.4",
+            "--conc-f3-b3", "0.2",
+            "--boltzmann-dedup-3p-window", "5",
+            "-o", str(out_ded),
+        ],
+    )
+    assert res_ded.exit_code == 0, res_ded.stdout
+    data_ded = json.loads((tmp_path / "d3_dedup5.json").read_text(encoding="utf-8"))
+    assert data_ded["boltzmann_mode"] == "dedup_approx"
+    assert data_ded["conditions"]["boltzmann_mode"] == "dedup_approx"
+    assert data_ded["totals"]["boltzmann_mode"] == "dedup_approx"
+    masked_ded = [d["name"] for d in data_ded["dimers"] if d["suboptimal_3p_masked"]]
+    assert len(masked_ded) == 2
+
+
 
 
