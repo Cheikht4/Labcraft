@@ -94,9 +94,9 @@ _ROLE_IMBALANCE_RATIO_HELP = (
     "sans normalisation par le nombre de variants dégénérés)."
 )
 _BOLTZMANN_MAX_DIMERS_HELP = (
-    "Plafond du nombre de dimères non amplifiables (parmi ceux >= 0.1 × --dimer-conc-max, triés par "
-    "concentration décroissante) évalués par calc_boltzmann_3p_pairing, en plus de 100 % des dimères "
-    "amplifiables (défaut : 25)."
+    "Plafond du nombre de couples d'amorces parentes non amplifiables (parmi ceux >= 0.1 × --dimer-conc-max, "
+    "dédoublonnés en gardant le variant le plus concentré de chaque couple parent puis triés par concentration "
+    "décroissante) évalués par calc_boltzmann_3p_pairing, en plus de 100 % des dimères amplifiables (défaut : 25)."
 )
 
 

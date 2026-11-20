@@ -170,7 +170,9 @@ def _evaluate_dimer_complexes_impl(
     amplifiable_flags: List[bool] = []
     concs: List[float] = []
     dimer_details: List[Dict[str, Any]] = []
-    dimer_records: List[Tuple[int, str, PhysicalPrimer, PhysicalPrimer, bool, float]] = []
+    dimer_records: List[
+        Tuple[int, str, PhysicalPrimer, PhysicalPrimer, bool, float, Tuple[str, str]]
+    ] = []
 
     for i, c_name in enumerate(complexes):
         conc = float(res.concentrations[i])
@@ -195,9 +197,10 @@ def _evaluate_dimer_complexes_impl(
                 is_amp, _dg_3p, details = evaluate_pair_amplifiable(
                     p_a, p_b, backend, enzyme, temp_celsius, **backend_kwargs
                 )
-                dimer_records.append((i, c_name, p_a, p_b, is_amp, conc))
                 pa_par = str(details.get("parent_a") or _get_parent_name(p_a.name))
                 pb_par = str(details.get("parent_b") or _get_parent_name(p_b.name))
+                parent_pair = (pa_par, pb_par) if pa_par <= pb_par else (pb_par, pa_par)
+                dimer_records.append((i, c_name, p_a, p_b, is_amp, conc, parent_pair))
                 details["panel_a"] = primer_to_panel_map.get(
                     pa_par, primer_to_panel_map.get(p_a.name, "")
                 )
@@ -238,39 +241,62 @@ def _evaluate_dimer_complexes_impl(
     # `conc` du solveur est en mol/L (M) ; `dimer_conc_max_nm` est en nmol/L (1 nM = 1e-9 M).
     # Enrichissement Boltzmann 3' (informatif uniquement, sans effet sur le verdict) :
     # 1. 100 % des dimères amplifiables (`is_amp == True`) sont évalués sans plafond ;
-    # 2. Parmi les dimères non amplifiables vérifiant `conc >= 0.1 * dimer_conc_max` (0,023 nM = 2,3e-11 M
-    #    par défaut), seuls les `K = boltzmann_max_dimers` plus concentrés sont évalués.
+    # 2. Les dimères non amplifiables vérifiant `conc >= 0.1 * dimer_conc_max` (0,023 nM = 2,3e-11 M par
+    #    défaut) sont d'abord dédoublonnés par couple d'amorces parentes non ordonné (en conservant le
+    #    variant le plus concentré de chaque couple parent), puis plafonnés aux `K = boltzmann_max_dimers`
+    #    couples parents les plus concentrés.
     # Solver `conc` is in mol/L (M); `dimer_conc_max_nm` is in nmol/L (1 nM = 1e-9 M).
     # Boltzmann 3' enrichment (informational only, never alters the verdict):
     # 1. 100% of amplifiable dimers (`is_amp == True`) are evaluated without cap;
-    # 2. Among non-amplifiable dimers with `conc >= 0.1 * dimer_conc_max` (0.023 nM = 2.3e-11 M by default),
-    #    only the top `K = boltzmann_max_dimers` by concentration are evaluated.
+    # 2. Non-amplifiable dimers with `conc >= 0.1 * dimer_conc_max` (0.023 nM = 2.3e-11 M by default) are
+    #    deduplicated by unordered parent primer pair (keeping the highest-concentration variant per parent
+    #    pair), then capped at the top `K = boltzmann_max_dimers` parent pairs.
     boltzmann_min_conc_molar = 0.1 * dimer_conc_max_nm * 1e-9
     amp_records = [rec for rec in dimer_records if rec[4]]
     eligible_non_amp = [
         rec for rec in dimer_records if (not rec[4]) and rec[5] >= boltzmann_min_conc_molar
     ]
-    eligible_non_amp.sort(key=lambda rec: (-rec[5], rec[0]))
-    cap = max(0, int(boltzmann_max_dimers))
-    selected_non_amp = eligible_non_amp[:cap]
-    skipped_non_amp = eligible_non_amp[cap:]
 
-    for idx_rec, _cname, p_a, p_b, _is_amp, _conc_rec in amp_records:
+    best_by_parent_pair: Dict[
+        Tuple[str, str], Tuple[int, str, PhysicalPrimer, PhysicalPrimer, bool, float, Tuple[str, str]]
+    ] = {}
+    for rec in eligible_non_amp:
+        ppair = rec[6]
+        prev = best_by_parent_pair.get(ppair)
+        if prev is None or (rec[5], -rec[0]) > (prev[5], -prev[0]):
+            best_by_parent_pair[ppair] = rec
+
+    dedup_parent_reps = list(best_by_parent_pair.values())
+    dedup_parent_reps.sort(key=lambda rec: (-rec[5], rec[0]))
+    cap = max(0, int(boltzmann_max_dimers))
+    selected_non_amp = dedup_parent_reps[:cap]
+    skipped_parent_reps = dedup_parent_reps[cap:]
+
+    for idx_rec, _cname, p_a, p_b, _is_amp, _conc_rec, _ppair in amp_records:
         enrich_dimer_boltzmann_3p(
             dimer_details[idx_rec], p_a, p_b, True, temp_celsius, enzyme=enzyme, **backend_kwargs
         )
-    for idx_rec, _cname, p_a, p_b, _is_amp, _conc_rec in selected_non_amp:
+    for idx_rec, _cname, p_a, p_b, _is_amp, _conc_rec, _ppair in selected_non_amp:
         enrich_dimer_boltzmann_3p(
             dimer_details[idx_rec], p_a, p_b, False, temp_celsius, enzyme=enzyme, **backend_kwargs
         )
 
     if boltzmann_stats_out is not None:
+        selected_names = {rec[1] for rec in selected_non_amp}
         boltzmann_stats_out["evaluated_amp_dimers"] = len(amp_records)
         boltzmann_stats_out["eligible_non_amp_dimers"] = len(eligible_non_amp)
+        boltzmann_stats_out["eligible_parent_pairs"] = len(dedup_parent_reps)
         boltzmann_stats_out["evaluated_non_amp_dimers"] = len(selected_non_amp)
-        boltzmann_stats_out["skipped_eligible_dimers"] = len(skipped_non_amp)
-        boltzmann_stats_out["evaluated_names"] = {rec[1] for rec in selected_non_amp}
-        boltzmann_stats_out["skipped_names"] = {rec[1] for rec in skipped_non_amp}
+        boltzmann_stats_out["skipped_parent_pairs"] = len(skipped_parent_reps)
+        boltzmann_stats_out["skipped_eligible_dimers"] = len(eligible_non_amp) - len(
+            selected_non_amp
+        )
+        boltzmann_stats_out["eligible_parent_pair_keys"] = {rec[6] for rec in dedup_parent_reps}
+        boltzmann_stats_out["evaluated_parent_pair_keys"] = {rec[6] for rec in selected_non_amp}
+        boltzmann_stats_out["evaluated_names"] = selected_names
+        boltzmann_stats_out["skipped_names"] = {
+            rec[1] for rec in eligible_non_amp if rec[1] not in selected_names
+        }
 
     return amplifiable_flags, concs, dimer_details
 
@@ -419,6 +445,8 @@ def run_single_panel_analysis(
     max_residual_global = 0.0
     all_unfolding_penalties: Dict[str, Any] = {}
     interaction_matrix: Dict[str, Dict[str, float]] = {}
+    boltzmann_eligible_parent_pairs: int = 0
+    boltzmann_skipped_parent_pairs: int = 0
     boltzmann_skipped_eligible_dimers: int = 0
 
     prob: Optional[EquilibriumProblem] = None
@@ -471,6 +499,12 @@ def run_single_panel_analysis(
                     dimer_conc_max_nm=dimer_conc_max,
                     boltzmann_max_dimers=boltzmann_max_dimers,
                     boltzmann_stats_out=boltz_stats_joint,
+                )
+                boltzmann_eligible_parent_pairs = int(
+                    boltz_stats_joint.get("eligible_parent_pairs", 0)
+                )
+                boltzmann_skipped_parent_pairs = int(
+                    boltz_stats_joint.get("skipped_parent_pairs", 0)
                 )
                 boltzmann_skipped_eligible_dimers = int(
                     boltz_stats_joint.get("skipped_eligible_dimers", 0)
@@ -527,6 +561,8 @@ def run_single_panel_analysis(
                 # Separate mode (or single target)
                 sep_evaluated_names: set[str] = set()
                 sep_skipped_names: set[str] = set()
+                sep_eligible_ppairs: set[Tuple[str, str]] = set()
+                sep_evaluated_ppairs: set[Tuple[str, str]] = set()
                 for t_id, t_seq in targets_dict.items():
                     emit(f"Solving for target {t_id}...")
                     profile = profiles.get(t_id)
@@ -569,6 +605,12 @@ def run_single_panel_analysis(
                     )
                     sep_evaluated_names.update(boltz_stats_sep.get("evaluated_names", set()))
                     sep_skipped_names.update(boltz_stats_sep.get("skipped_names", set()))
+                    sep_eligible_ppairs.update(
+                        boltz_stats_sep.get("eligible_parent_pair_keys", set())
+                    )
+                    sep_evaluated_ppairs.update(
+                        boltz_stats_sep.get("evaluated_parent_pair_keys", set())
+                    )
 
                     risks = evaluate_risks(
                         complexes,
@@ -603,6 +645,8 @@ def run_single_panel_analysis(
                     all_fractions.update(fractions)
                     if t_id not in all_unfolding_penalties:
                         all_unfolding_penalties[t_id] = unfolding_penalties
+                boltzmann_eligible_parent_pairs = len(sep_eligible_ppairs)
+                boltzmann_skipped_parent_pairs = len(sep_eligible_ppairs - sep_evaluated_ppairs)
                 boltzmann_skipped_eligible_dimers = len(sep_skipped_names - sep_evaluated_names)
 
             # Matrice d'interaction globale pour la carte thermique / Global interaction matrix for heatmap
@@ -768,6 +812,8 @@ def run_single_panel_analysis(
         "dimer_conc_max_nm": dimer_conc_max,
         "dimer_warn_floor_nm": dimer_warn_ratio * dimer_conc_max,
         "boltzmann_max_dimers": boltzmann_max_dimers,
+        "boltzmann_eligible_parent_pairs": boltzmann_eligible_parent_pairs,
+        "boltzmann_skipped_parent_pairs": boltzmann_skipped_parent_pairs,
         "boltzmann_skipped_eligible_dimers": boltzmann_skipped_eligible_dimers,
         "concentrations_fip_bip": "Per target (check config)",
         "concentrations_target": "Per target (check config)",
@@ -826,6 +872,8 @@ def run_single_panel_analysis(
         mispriming_risks=mispriming_risks,
         verdict=verdict,
         panel_summaries=panel_summaries,
+        boltzmann_eligible_parent_pairs=boltzmann_eligible_parent_pairs,
+        boltzmann_skipped_parent_pairs=boltzmann_skipped_parent_pairs,
         boltzmann_skipped_eligible_dimers=boltzmann_skipped_eligible_dimers,
     )
 
