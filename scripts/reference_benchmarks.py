@@ -3,11 +3,13 @@ Reproducible LabCraft reference benchmark suite (`validation/reference_benchmark
 
 Produit à partir du code actuel :
 (a) le tableau des 5 cas de paillasse de référence (dimères amplifiables à -2.0 et -3.5 kcal/mol,
-    verdict, cause globale, indicateur `suboptimal_3p_masked` et `boltzmann_skipped_eligible_dimers`) ;
+    verdict, cause globale, dédoublonnage 3' `(couple parent, 5 nt 3'_A, 5 nt 3'_B)`,
+    indicateur `suboptimal_3p_masked` et `parent_pair_max_boltzmann_3p_prob`) ;
 (b) le comparatif exact `labcraft coverage` entre les commits `58ae5d9` et `8cf5bd8` sur les 3 génomes
     GenBank de référence et les 2 cohortes synthétiques déterministes (120 DENV3 + 120 DENV4, graine 20261119) ;
-(c) le benchmark de temps de calcul de `enrich_dimer_boltzmann_3p` sur 81 espèces (3 321 paires)
-    sans plafond vs avec le plafond `--boltzmann-max-dimers 25`.
+(c) le benchmark de temps de calcul (`N = 3` répétitions : médiane et étendue) de `enrich_dimer_boltzmann_3p`
+    sur 81 espèces (3 321 paires) avec le défaut illimité (`--boltzmann-max-dimers None`, fenêtre 3' = 5 nt)
+    et avec le garde-fou `--boltzmann-max-dimers 25`.
 """
 from __future__ import annotations
 
@@ -49,7 +51,9 @@ from labcraft.metrics.verdict import (  # noqa: E402
     DEFAULT_ROLE_IMBALANCE_RATIO,
 )
 from labcraft.pipeline.analysis import (  # noqa: E402
+    DEFAULT_BOLTZMANN_DEDUP_3P_WINDOW,
     DEFAULT_BOLTZMANN_MAX_DIMERS,
+    _make_boltzmann_dedup_key,
     run_analysis_pipeline,
 )
 
@@ -208,6 +212,7 @@ def run_section_a_five_cases() -> Tuple[List[Dict[str, Any]], Dict[str, List[Dic
                     cfg,
                     explicit_config=False,
                     boltzmann_max_dimers=DEFAULT_BOLTZMANN_MAX_DIMERS,
+                    boltzmann_dedup_3p_window=DEFAULT_BOLTZMANN_DEDUP_3P_WINDOW,
                 )[0]
 
             r20 = res_by_thresh[-2.0]
@@ -223,6 +228,7 @@ def run_section_a_five_cases() -> Tuple[List[Dict[str, Any]], Dict[str, List[Dic
                     "name": r.complex_name,
                     "conc_nm": float(r.concentration) * 1e9,
                     "prob": float(r.boltzmann_3p_prob or 0.0),
+                    "parent_max_prob": float(r.parent_pair_max_boltzmann_3p_prob or 0.0),
                     "dg": float(r.delta_g),
                 }
                 for r in r20.risks
@@ -242,10 +248,11 @@ def run_section_a_five_cases() -> Tuple[List[Dict[str, Any]], Dict[str, List[Dic
                     "inter_35": float(r35.dimer_decomposition["inter_nm"]),
                     "verdict_35": r35.verdict.status,
                     "dom_20": dom_str,
-                    "masked_count_cap25": len(masked_items),
+                    "masked_count_default": len(masked_items),
+                    "eligible_dedup_groups": int(totals20["boltzmann_eligible_dedup_groups"]),
+                    "skipped_dedup_groups": int(totals20["boltzmann_skipped_dedup_groups"]),
                     "eligible_ppairs": int(totals20["boltzmann_eligible_parent_pairs"]),
-                    "skipped_ppairs_cap25": int(totals20["boltzmann_skipped_parent_pairs"]),
-                    "skipped_variants_cap25": int(totals20["boltzmann_skipped_eligible_dimers"]),
+                    "skipped_ppairs": int(totals20["boltzmann_skipped_parent_pairs"]),
                 }
             )
     finally:
@@ -256,12 +263,14 @@ def run_section_a_five_cases() -> Tuple[List[Dict[str, Any]], Dict[str, List[Dic
 
 
 def run_section_a_masked_reconciliation() -> List[str]:
-    """Compare sur les 5 cas de référence les 12 dimères `suboptimal_3p_masked` sans dédoublonnage/plafond
-    avec la sélection dédoublonnée par couple parent à `K = 25` et sans plafond (`K = 999999`), en détaillant
-    chaque écart (doublons intra-couple parent, égalité MFE entre variants dégénérés, rang > 25).
+    """Compare sur les 5 cas de référence les 12 dimères `suboptimal_3p_masked` sans dédoublonnage
+    avec la sélection dédoublonnée par clé `(couple parent, 5 nt 3'_A, 5 nt 3'_B)` sans plafond (défaut `None`),
+    en détaillant chaque fusion de variants identiques en 3' (différant uniquement en 5'/milieu) et la séparation
+    des variants différant dans la fenêtre 3'.
 
-    Compares across the 5 reference cases the 12 un-deduplicated/uncapped `suboptimal_3p_masked` dimers
-    against parent-pair deduplicated selection at `K = 25` and uncapped (`K = 999999`).
+    Compares across the 5 reference cases the 12 un-deduplicated `suboptimal_3p_masked` dimers against
+    `(parent_pair, 5-nt 3'_A, 5-nt 3'_B)` deduplicated selection under the unlimited default (`None`),
+    detailing every 5'/internal merge and every 3'-distinct split.
     """
     from labcraft.cli.config import build_engine_from_config
     from labcraft.diagnostics.amplifiable_dimer import (
@@ -282,6 +291,7 @@ def run_section_a_masked_reconciliation() -> List[str]:
     ]
     notes: List[str] = []
     floor_m = 0.1 * 0.23 * 1e-9
+    win_3p = DEFAULT_BOLTZMANN_DEDUP_3P_WINDOW
 
     for cid, pf, tf, c_fb, c_lp, c_f3 in cases:
         cfg = build_config_from_cli(
@@ -308,7 +318,13 @@ def run_section_a_masked_reconciliation() -> List[str]:
                 )
             res = solve_dual(prob)
 
-            by_ppair: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
+            # Regrouper par couple parent et par clé 3' canonique / Group by parent pair and canonical 3' key
+            by_dkey: Dict[Tuple[Tuple[str, str], Tuple[str, str]], List[Dict[str, Any]]] = {}
+            by_ppair_dkeys: Dict[
+                Tuple[str, str], List[Tuple[Tuple[str, str], Tuple[str, str]]]
+            ] = {}
+            amp_max_by_ppair: Dict[Tuple[str, str], float] = {}
+
             for idx_c, cname in enumerate(complexes):
                 conc = float(res.concentrations[idx_c])
                 has_t = any(k >= len(primers) and v > 0 for k, v in enumerate(prob.stoichiometry[idx_c]))
@@ -325,13 +341,23 @@ def run_section_a_masked_reconciliation() -> List[str]:
                 pa = primers[ks[0]]
                 pb = primers[ks[0]] if len(ks) == 1 else primers[ks[1]]
                 is_amp, _dg3, det = evaluate_pair_amplifiable(pa, pb, backend, enz, tc, **bkw)
-                if is_amp or conc < floor_m:
-                    continue
-                enrich_dimer_boltzmann_3p(det, pa, pb, False, tc, enzyme=enz, **bkw)
                 par_a = str(det.get("parent_a") or _get_parent_name(pa.name))
                 par_b = str(det.get("parent_b") or _get_parent_name(pb.name))
                 ppair = (par_a, par_b) if par_a <= par_b else (par_b, par_a)
-                by_ppair.setdefault(ppair, []).append(
+                if is_amp:
+                    enrich_dimer_boltzmann_3p(det, pa, pb, True, tc, enzyme=enz, **bkw)
+                    p_amp = float(det.get("boltzmann_3p_prob") or 0.0) * 100.0
+                    if p_amp > amp_max_by_ppair.get(ppair, -1.0):
+                        amp_max_by_ppair[ppair] = p_amp
+                    continue
+                if conc < floor_m:
+                    continue
+                enrich_dimer_boltzmann_3p(det, pa, pb, False, tc, enzyme=enz, **bkw)
+                dkey = _make_boltzmann_dedup_key(par_a, pa.sequence, par_b, pb.sequence, win_3p)
+                if dkey not in by_dkey:
+                    by_dkey[dkey] = []
+                    by_ppair_dkeys.setdefault(ppair, []).append(dkey)
+                by_dkey[dkey].append(
                     {
                         "idx": idx_c,
                         "name": cname,
@@ -342,57 +368,69 @@ def run_section_a_masked_reconciliation() -> List[str]:
                     }
                 )
 
-        for vlist in by_ppair.values():
+        for vlist in by_dkey.values():
             vlist.sort(key=lambda item: (-item["conc_nm"], item["idx"]))
-        ranked_ppairs = sorted(
-            by_ppair.items(), key=lambda kv: (-kv[1][0]["conc_nm"], kv[1][0]["idx"])
+        ranked_dkeys = sorted(
+            by_dkey.items(), key=lambda kv: (-kv[1][0]["conc_nm"], kv[1][0]["idx"])
+        )
+        dkey_rank = {dk: r_i for r_i, (dk, _vl) in enumerate(ranked_dkeys, 1)}
+
+        raw_masked = [v for _dk, vlist in ranked_dkeys for v in vlist if v["masked"]]
+        dedup_default_masked = [vlist[0] for _dk, vlist in ranked_dkeys if vlist[0]["masked"]]
+        dedup_cap25_masked = [
+            vlist[0]
+            for r_i, (_dk, vlist) in enumerate(ranked_dkeys, 1)
+            if r_i <= 25 and vlist[0]["masked"]
+        ]
+        notes.append(
+            f"- `{cid}` : sans dédoublonnage = `{len(raw_masked)}` dimère(s) ; "
+            f"dédoublonnage `(couple parent, {win_3p} nt 3'_A, {win_3p} nt 3'_B)` par défaut (illimité) = "
+            f"`{len(dedup_default_masked)}` dimère(s) sur `{len(ranked_dkeys)}` groupe(s) 3' éligible(s) "
+            f"(`{len(by_ppair_dkeys)}` couple(s) parent(s) éligible(s), `0` groupe non évalué ; "
+            f"avec garde-fou `K = 25` = `{len(dedup_cap25_masked)}`)."
         )
 
-        raw_masked = [v for _, vlist in ranked_ppairs for v in vlist if v["masked"]]
-        dedup_cap25_masked = [
-            vlist[0] for r_i, (_pp, vlist) in enumerate(ranked_ppairs, 1) if r_i <= 25 and vlist[0]["masked"]
-        ]
-        dedup_nocap_masked = [vlist[0] for _pp, vlist in ranked_ppairs if vlist[0]["masked"]]
-        notes.append(
-            f"- `{cid}` : sans dédoublonnage/plafond = `{len(raw_masked)}` dimère(s) ; "
-            f"dédoublonné par couple parent sans plafond = `{len(dedup_nocap_masked)}` ; "
-            f"dédoublonné à `K = 25` = `{len(dedup_cap25_masked)}` "
-            f"(`{len(ranked_ppairs)}` couples parents éligibles)."
-        )
-        for rank_idx, (ppair, vlist) in enumerate(ranked_ppairs, 1):
-            m_in = [v for v in vlist if v["masked"]]
-            if not m_in:
+        # Détailler chaque couple parent contenant au moins un variant masked
+        # Detail every parent pair containing at least one masked variant
+        for ppair, dk_list in sorted(
+            by_ppair_dkeys.items(),
+            key=lambda kv: min(dkey_rank[dk] for dk in kv[1]),
+        ):
+            all_pp_variants = [v for dk in dk_list for v in by_dkey[dk]]
+            if not any(v["masked"] for v in all_pp_variants):
                 continue
-            top_v = vlist[0]
-            if top_v["masked"] and rank_idx <= 25:
-                extra = [v for v in m_in if v["name"] != top_v["name"]]
-                extra_parts = [f"{x['name']} à {x['conc_nm']:.4f} nM" for x in extra]
-                extra_txt = (
-                    f" ; `{len(extra)}` autre(s) variant(s) du même couple écarté(s) par dédoublonnage "
-                    f"({', '.join(extra_parts)})"
-                    if extra
+            dk_sorted = sorted(dk_list, key=lambda dk: dkey_rank[dk])
+            rep_probs = [by_dkey[dk][0]["prob_pct"] for dk in dk_sorted]
+            if ppair in amp_max_by_ppair:
+                rep_probs.append(amp_max_by_ppair[ppair])
+            pp_max_pct = max(rep_probs)
+            notes.append(
+                f"  - Couple parent `{ppair[0]} × {ppair[1]}` "
+                f"(`{len(dk_sorted)}` groupe(s) 3' distinct(s), "
+                f"`max P_Boltzmann` couple parent = `{pp_max_pct:.2f} %`) :"
+            )
+            for dk in dk_sorted:
+                vlist = by_dkey[dk]
+                rep = vlist[0]
+                rk = dkey_rank[dk]
+                end1 = f"{dk[0][0]}[3':{dk[0][1]}]"
+                end2 = f"{dk[1][0]}[3':{dk[1][1]}]"
+                merged = vlist[1:]
+                merged_parts = [
+                    f"{x['name']} à {x['conc_nm']:.4f} nM (P = {x['prob_pct']:.2f} %)"
+                    for x in merged
+                ]
+                merged_txt = (
+                    f" ; fusionne `{len(merged)}` variant(s) identique(s) sur les `{win_3p}` nt 3' "
+                    f"ne différant qu'en 5'/milieu ({', '.join(merged_parts)})"
+                    if merged
                     else ""
                 )
                 notes.append(
-                    f"  - Couple `{ppair[0]} × {ppair[1]}` (rang `{rank_idx}/{len(ranked_ppairs)}`) : "
-                    f"retenu via `{top_v['name']}` (`{top_v['conc_nm']:.4f} nM`, "
-                    f"`P_Boltzmann = {top_v['prob_pct']:.2f} %`){extra_txt}."
-                )
-            elif not top_v["masked"]:
-                m0 = m_in[0]
-                notes.append(
-                    f"  - Couple `{ppair[0]} × {ppair[1]}` (rang `{rank_idx}/{len(ranked_ppairs)}`) : "
-                    f"représentant le plus concentré = `{top_v['name']}` (`{top_v['conc_nm']:.8f} nM`, "
-                    f"`ΔG = {top_v['dg']:.4f} kcal/mol`, `P_Boltzmann = {top_v['prob_pct']:.2f} %`, `masked = False`), "
-                    f"devant `{m0['name']}` (`{m0['conc_nm']:.8f} nM`, `ΔG = {m0['dg']:.4f} kcal/mol`, "
-                    f"`P_Boltzmann = {m0['prob_pct']:.2f} %`, `masked = True`, total `{len(m_in)}` variant(s) masked "
-                    f"dans ce couple)."
-                )
-            else:
-                notes.append(
-                    f"  - Couple `{ppair[0]} × {ppair[1]}` (rang `{rank_idx}/{len(ranked_ppairs)} > 25`) : "
-                    f"représentant `{top_v['name']}` (`{top_v['conc_nm']:.4f} nM`, "
-                    f"`P_Boltzmann = {top_v['prob_pct']:.2f} %`, `masked = True`) hors plafond `K = 25`."
+                    f"    - Clé `{end1} × {end2}` (rang `{rk}/{len(ranked_dkeys)}`) : "
+                    f"représentant `{rep['name']}` (`{rep['conc_nm']:.8f} nM` / `{rep['conc_nm']:.4f} nM`, "
+                    f"`ΔG = {rep['dg']:.4f} kcal/mol`, `P_Boltzmann = {rep['prob_pct']:.2f} %`, "
+                    f"`masked = {rep['masked']}`){merged_txt}."
                 )
     return notes
 
@@ -647,12 +685,15 @@ def run_section_c_boltzmann_perf(n_repeats: int = 3) -> List[Dict[str, Any]]:
                 GT_DIR / "duplex_YFV_DENV4_targets.fasta",
             ),
         ]
-        modes_spec = [
+        modes_spec: List[Tuple[Optional[int], str]] = [
             (
                 DEFAULT_BOLTZMANN_MAX_DIMERS,
-                f"défaut parent-dédoublonné (`--boltzmann-max-dimers {DEFAULT_BOLTZMANN_MAX_DIMERS}`)",
+                f"défaut illimité, fenêtre 3' = {DEFAULT_BOLTZMANN_DEDUP_3P_WINDOW} nt (`--boltzmann-max-dimers None`)",
             ),
-            (999999, "tous couples parents (`--boltzmann-max-dimers 999999`)"),
+            (
+                25,
+                f"garde-fou K=25, fenêtre 3' = {DEFAULT_BOLTZMANN_DEDUP_3P_WINDOW} nt (`--boltzmann-max-dimers 25`)",
+            ),
         ]
 
         orig_fn = an_mod.enrich_dimer_boltzmann_3p
@@ -667,20 +708,30 @@ def run_section_c_boltzmann_perf(n_repeats: int = 3) -> List[Dict[str, Any]]:
             )
 
             t_without_list: List[float] = []
-            by_cap: Dict[int, Dict[str, Any]] = {
-                cap_v: {"pf": [], "t_with": [], "calls": 0, "elig_pp": 0, "skip_pp": 0}
+            by_cap: Dict[Optional[int], Dict[str, Any]] = {
+                cap_v: {
+                    "pf": [],
+                    "t_with": [],
+                    "calls": 0,
+                    "elig_dedup": 0,
+                    "skip_dedup": 0,
+                    "elig_pp": 0,
+                }
                 for cap_v, _ in modes_spec
             }
 
-            # Entrelacer les `n_repeats` répétitions (sans Boltzmann -> cap=25 -> cap=999999)
-            # Interleave `n_repeats` replicates (without Boltzmann -> cap=25 -> cap=999999)
+            # Entrelacer les `n_repeats` répétitions (sans Boltzmann -> défaut illimité -> garde-fou K=25)
+            # Interleave `n_repeats` replicates (without Boltzmann -> unlimited default -> K=25 safeguard)
             for _rep in range(n_repeats):
                 _clear_thermo_caches()
                 an_mod.enrich_dimer_boltzmann_3p = lambda details, *a, **kw: details  # type: ignore[assignment]
                 try:
                     t0 = time.perf_counter()
                     run_analysis_pipeline(
-                        cfg, explicit_config=False, boltzmann_max_dimers=DEFAULT_BOLTZMANN_MAX_DIMERS
+                        cfg,
+                        explicit_config=False,
+                        boltzmann_max_dimers=DEFAULT_BOLTZMANN_MAX_DIMERS,
+                        boltzmann_dedup_3p_window=DEFAULT_BOLTZMANN_DEDUP_3P_WINDOW,
                     )
                     t_without_list.append(time.perf_counter() - t0)
                 finally:
@@ -703,7 +754,10 @@ def run_section_c_boltzmann_perf(n_repeats: int = 3) -> List[Dict[str, Any]]:
                     try:
                         t0 = time.perf_counter()
                         res_with = run_analysis_pipeline(
-                            cfg, explicit_config=False, boltzmann_max_dimers=cap_val
+                            cfg,
+                            explicit_config=False,
+                            boltzmann_max_dimers=cap_val,
+                            boltzmann_dedup_3p_window=DEFAULT_BOLTZMANN_DEDUP_3P_WINDOW,
                         )[0]
                         t_with = time.perf_counter() - t0
                     finally:
@@ -713,8 +767,9 @@ def run_section_c_boltzmann_perf(n_repeats: int = 3) -> List[Dict[str, Any]]:
                     by_cap[cap_val]["pf"].append(pf_time)
                     by_cap[cap_val]["t_with"].append(t_with)
                     by_cap[cap_val]["calls"] = calls
+                    by_cap[cap_val]["elig_dedup"] = int(tots["boltzmann_eligible_dedup_groups"])
+                    by_cap[cap_val]["skip_dedup"] = int(tots["boltzmann_skipped_dedup_groups"])
                     by_cap[cap_val]["elig_pp"] = int(tots["boltzmann_eligible_parent_pairs"])
-                    by_cap[cap_val]["skip_pp"] = int(tots["boltzmann_skipped_parent_pairs"])
 
             med_without = statistics.median(t_without_list)
             for cap_val, mode_label in modes_spec:
@@ -726,8 +781,9 @@ def run_section_c_boltzmann_perf(n_repeats: int = 3) -> List[Dict[str, Any]]:
                         "scenario": scen_label,
                         "mode": mode_label,
                         "calls": rec["calls"],
+                        "elig_dedup": rec["elig_dedup"],
+                        "skip_dedup": rec["skip_dedup"],
                         "elig_pp": rec["elig_pp"],
-                        "skip_pp": rec["skip_pp"],
                         "pf_fmt": _fmt_med_range(rec["pf"], 3),
                         "without_fmt": _fmt_med_range(t_without_list, 2),
                         "with_fmt": _fmt_med_range(rec["t_with"], 2),
@@ -784,8 +840,9 @@ def render_markdown() -> str:
             f"`--dimer-warn-ratio = {DEFAULT_DIMER_WARN_RATIO:.3f}` "
             f"(plancher `WARNING = {DEFAULT_DIMER_WARN_RATIO * 0.23:.3f} nM`), "
             f"`--role-imbalance-ratio = {DEFAULT_ROLE_IMBALANCE_RATIO:.1f}`, "
-            f"`--boltzmann-max-dimers = {DEFAULT_BOLTZMANN_MAX_DIMERS}` "
-            f"(plancher d'éligibilité `0.1 × 0.230 = 0.023 nM`)"
+            f"`--boltzmann-dedup-3p-window = {DEFAULT_BOLTZMANN_DEDUP_3P_WINDOW}` nt, "
+            f"`--boltzmann-max-dimers = {DEFAULT_BOLTZMANN_MAX_DIMERS}` (illimité par défaut ; "
+            f"plancher d'éligibilité `0.1 × 0.230 = 0.023 nM`)"
         ),
         "",
         "### Décalage de `local_dg` (`37.0 °C, 1000 mM Na+` → `63.0 °C, tampon LAMP par défaut`)",
@@ -805,16 +862,17 @@ def render_markdown() -> str:
             "",
             "## A. Cinq cas de référence de paillasse (`-2.0` vs `-3.5 kcal/mol`, génomes complets)",
             "",
-            "| Cas | Paillasse | Dimères amp. `-2.0` (`nM`) | dont inter `-2.0` (`nM`) | Dimères amp. `-3.5` (`nM`) | dont inter `-3.5` (`nM`) | Famille dominante (`-2.0`) | Verdict (`-2.0` / `-3.5`) | `suboptimal_3p_masked` (`cap=25`) | Couples parents éligibles | Couples parents non évalués (`cap=25`) |",
-            "|---|---|---:|---:|---:|---:|---|---|---:|---:|---:|",
+            "| Cas | Paillasse | Dimères amp. `-2.0` (`nM`) | dont inter `-2.0` (`nM`) | Dimères amp. `-3.5` (`nM`) | dont inter `-3.5` (`nM`) | Famille dominante (`-2.0`) | Verdict (`-2.0` / `-3.5`) | `suboptimal_3p_masked` (défaut) | Groupes 3' éligibles | Groupes 3' non évalués | Couples parents éligibles |",
+            "|---|---|---:|---:|---:|---:|---|---|---:|---:|---:|---:|",
         ]
     )
     for r in five_rows:
         lines.append(
             f"| `{r['case_id']}` | {r['bench']} | `{r['tot_20']:.4f}` | `{r['inter_20']:.4f}` | "
             f"`{r['tot_35']:.4f}` | `{r['inter_35']:.4f}` | `{r['dom_20']}` | "
-            f"`{r['verdict_20']}` / `{r['verdict_35']}` | `{r['masked_count_cap25']}` | "
-            f"`{r['eligible_ppairs']}` | `{r['skipped_ppairs_cap25']}` |"
+            f"`{r['verdict_20']}` / `{r['verdict_35']}` | `{r['masked_count_default']}` | "
+            f"`{r['eligible_dedup_groups']}` | `{r['skipped_dedup_groups']}` | "
+            f"`{r['eligible_ppairs']}` |"
         )
 
     lines.extend(
@@ -830,7 +888,7 @@ def render_markdown() -> str:
     lines.extend(
         [
             "",
-            f"### Détail des dimères `suboptimal_3p_masked = True` (`--boltzmann-max-dimers {DEFAULT_BOLTZMANN_MAX_DIMERS}`)",
+            f"### Détail des dimères `suboptimal_3p_masked = True` (défaut : `--boltzmann-dedup-3p-window {DEFAULT_BOLTZMANN_DEDUP_3P_WINDOW}`, `--boltzmann-max-dimers {DEFAULT_BOLTZMANN_MAX_DIMERS}`)",
             "",
         ]
     )
@@ -842,13 +900,15 @@ def render_markdown() -> str:
             for it in items:
                 lines.append(
                     f"  - `{it['name']}` : `conc = {it['conc_nm']:.4f} nM`, "
-                    f"`P_Boltzmann = {it['prob'] * 100.0:.2f} %`, `ΔG = {it['dg']:.2f} kcal/mol`"
+                    f"`P_Boltzmann = {it['prob'] * 100.0:.2f} %` "
+                    f"(`max P_Boltzmann` couple parent = `{it['parent_max_prob'] * 100.0:.2f} %`), "
+                    f"`ΔG = {it['dg']:.2f} kcal/mol`"
                 )
 
     lines.extend(
         [
             "",
-            "### Réconciliation avec les `12` dimères `suboptimal_3p_masked` sans dédoublonnage ni plafond",
+            "### Réconciliation des `7` dimères retenus (`2 + 0 + 1 + 0 + 4 = 7`) avec les `12` variants bruts sans dédoublonnage",
             "",
             *reconcil_notes,
         ]
@@ -907,14 +967,14 @@ def render_markdown() -> str:
             "",
             "## C. Performance `enrich_dimer_boltzmann_3p` sur 81 espèces (`3 321` paires, `N = 3` répétitions : médiane et étendue)",
             "",
-            "| Scénario | Mode | Appels Boltzmann | Couples parents éligibles | Couples parents non évalués | `pf_time` (`s`, médiane / étendue) | Total hors Boltzmann (`s`, médiane / étendue) | Total avec Boltzmann (`s`, médiane / étendue) | Part médiane `pf / avec` | Surcoût médian `pf / hors` |",
-            "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|",
+            "| Scénario | Mode | Appels Boltzmann | Groupes 3' éligibles | Groupes 3' non évalués | Couples parents éligibles | `pf_time` (`s`, médiane / étendue) | Total hors Boltzmann (`s`, médiane / étendue) | Total avec Boltzmann (`s`, médiane / étendue) | Part médiane `pf / avec` | Surcoût médian `pf / hors` |",
+            "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
         ]
     )
     for p in perf_rows:
         lines.append(
-            f"| {p['scenario']} | {p['mode']} | `{p['calls']}` | `{p['elig_pp']}` | `{p['skip_pp']}` | "
-            f"`{p['pf_fmt']}` | `{p['without_fmt']}` | `{p['with_fmt']}` | "
+            f"| {p['scenario']} | {p['mode']} | `{p['calls']}` | `{p['elig_dedup']}` | `{p['skip_dedup']}` | "
+            f"`{p['elig_pp']}` | `{p['pf_fmt']}` | `{p['without_fmt']}` | `{p['with_fmt']}` | "
             f"`{p['share_pct']:.2f} %` | `{p['overhead_pct']:+.2f} %` |"
         )
     lines.append("")
