@@ -787,4 +787,90 @@ def test_boltzmann_3p_window_dedup_merges_5p_and_splits_3p_and_reports_parent_ma
     assert "boltzmann_3p_prob" not in details0[6]
 
 
+def test_boltzmann_max_dimers_unlimited_by_default_and_zero() -> None:
+    """Vérifie que `--boltzmann-max-dimers` est illimité par défaut (`None` ou `0` = pas de plafond)
+    et documenté comme garde-fou optionnel pour les gros panels.
+
+    Verifies `--boltzmann-max-dimers` defaults to unlimited (`None` or `0` = no cap) and is documented
+    as an optional safeguard for large panels.
+    """
+    import numpy as np
+
+    from labcraft.diagnostics.enzyme import BST_2_0
+    from labcraft.lamp.domains import PhysicalPrimer, PrimerRole
+    from labcraft.pipeline.analysis import DEFAULT_BOLTZMANN_MAX_DIMERS, evaluate_dimer_complexes
+    from labcraft.solver.types import EquilibriumProblem, EquilibriumResult, SolverMethod
+    from labcraft.thermo.backends.vienna import ViennaRNABackend
+
+    assert DEFAULT_BOLTZMANN_MAX_DIMERS is None
+
+    primers = [
+        PhysicalPrimer.from_simple(f"G_P{k}", f"CGCGCGCAAAAAATGCAG{b1}{b2}", PrimerRole.F3, nominal_concentration=2e-7)
+        for k, (b1, b2) in enumerate([("A", "T"), ("G", "C"), ("T", "A"), ("C", "G")])
+    ]
+    # 4 monomères + 4 homodimères distincts en 3' (tous >= 0.023 nM)
+    stoich = np.array(
+        [
+            [1, 0, 0, 0],
+            [0, 1, 0, 0],
+            [0, 0, 1, 0],
+            [0, 0, 0, 1],
+            [2, 0, 0, 0],
+            [0, 2, 0, 0],
+            [0, 0, 2, 0],
+            [0, 0, 0, 2],
+        ],
+        dtype=int,
+    )
+    prob = EquilibriumProblem(
+        n_strands=4,
+        n_complexes=8,
+        stoichiometry=stoich,
+        delta_g=np.array([0.0, 0.0, 0.0, 0.0, -6.0, -6.0, -6.0, -6.0], dtype=float),
+        total_concentrations=np.full(4, 2e-7, dtype=float),
+        temperature_kelvin=63.0 + 273.15,
+    )
+    res_eq = EquilibriumResult(
+        concentrations=np.array([1.9e-7, 1.9e-7, 1.9e-7, 1.9e-7, 8e-11, 7e-11, 6e-11, 5e-11]),
+        free_concentrations=np.full(4, 1.9e-7, dtype=float),
+        log_free_concentrations=np.log(np.full(4, 1.9e-7, dtype=float)),
+        residuals=np.zeros(4, dtype=float),
+        max_residual=0.0,
+        n_iterations=1,
+        method=SolverMethod.DUAL_NEWTON,
+        converged=True,
+    )
+    c_names = [f"G_P{k}_free" for k in range(4)] + [f"G_P{k}_homo" for k in range(4)]
+
+    for unlim_val in (None, 0):
+        st: dict[str, object] = {}
+        _, _, dets = evaluate_dimer_complexes(
+            prob,
+            res_eq,
+            c_names,
+            primers,
+            ViennaRNABackend(),
+            BST_2_0,
+            63.0,
+            {},
+            {p.name: "G" for p in primers},
+            dimer_conc_max_nm=0.23,
+            boltzmann_max_dimers=unlim_val,
+            boltzmann_stats_out=st,
+        )
+        assert st["eligible_dedup_groups"] == 4
+        assert st["skipped_dedup_groups"] == 0
+        assert st["skipped_parent_pairs"] == 0
+        assert all("boltzmann_3p_prob" in dets[idx] for idx in (4, 5, 6, 7))
+
+    runner = CliRunner()
+    res_help = runner.invoke(app, ["analyze", "--help"], env={"COLUMNS": "140"})
+    clean_help = " ".join(res_help.stdout.replace("│", " ").split())
+    assert "--boltzmann-max-dimers" in clean_help
+    assert "--boltzmann-dedup-3p-window" in clean_help
+    assert "Garde-fou" in clean_help
+    assert "illimité" in clean_help
+
+
+
 

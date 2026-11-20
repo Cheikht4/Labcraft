@@ -111,7 +111,7 @@ def _format_nm(value: float) -> str:
     return f"{value:.4f}" if 0.0 < value < 0.01 else f"{value:.2f}"
 
 
-DEFAULT_BOLTZMANN_MAX_DIMERS: int = 25
+DEFAULT_BOLTZMANN_MAX_DIMERS: Optional[int] = None
 DEFAULT_BOLTZMANN_DEDUP_3P_WINDOW: int = 5
 _BoltzmannDedupKey = Tuple[Tuple[str, str], Tuple[str, str]]
 
@@ -142,7 +142,7 @@ def evaluate_dimer_complexes(
     primer_to_panel_map: Dict[str, str],
     *,
     dimer_conc_max_nm: float = 0.23,
-    boltzmann_max_dimers: int = DEFAULT_BOLTZMANN_MAX_DIMERS,
+    boltzmann_max_dimers: Optional[int] = DEFAULT_BOLTZMANN_MAX_DIMERS,
     boltzmann_dedup_3p_window: int = DEFAULT_BOLTZMANN_DEDUP_3P_WINDOW,
     boltzmann_stats_out: Optional[Dict[str, Any]] = None,
 ) -> Tuple[List[bool], List[float], List[Dict[str, Any]]]:
@@ -179,7 +179,7 @@ def _evaluate_dimer_complexes_impl(
     primer_to_panel_map: Dict[str, str],
     *,
     dimer_conc_max_nm: float = 0.23,
-    boltzmann_max_dimers: int = DEFAULT_BOLTZMANN_MAX_DIMERS,
+    boltzmann_max_dimers: Optional[int] = DEFAULT_BOLTZMANN_MAX_DIMERS,
     boltzmann_dedup_3p_window: int = DEFAULT_BOLTZMANN_DEDUP_3P_WINDOW,
     boltzmann_stats_out: Optional[Dict[str, Any]] = None,
 ) -> Tuple[List[bool], List[float], List[Dict[str, Any]]]:
@@ -312,9 +312,13 @@ def _evaluate_dimer_complexes_impl(
 
     dedup_reps = list(best_by_dedup_key.values())
     dedup_reps.sort(key=lambda rec: (-rec[5], rec[0]))
-    cap = max(0, int(boltzmann_max_dimers))
-    selected_non_amp = dedup_reps[:cap]
-    skipped_dedup_reps = dedup_reps[cap:]
+    if boltzmann_max_dimers is None or int(boltzmann_max_dimers) <= 0:
+        selected_non_amp = dedup_reps
+        skipped_dedup_reps = []
+    else:
+        cap = int(boltzmann_max_dimers)
+        selected_non_amp = dedup_reps[:cap]
+        skipped_dedup_reps = dedup_reps[cap:]
 
     parent_max_prob: Dict[Tuple[str, str], float] = {}
     for idx_rec, _cname, p_a, p_b, _is_amp, _conc_rec, ppair, _dkey in amp_records:
@@ -443,7 +447,7 @@ def run_single_panel_analysis(
     dimer_conc_max: float = 0.23,
     dimer_warn_ratio: float = DEFAULT_DIMER_WARN_RATIO,
     role_imbalance_ratio: float = DEFAULT_ROLE_IMBALANCE_RATIO,
-    boltzmann_max_dimers: int = DEFAULT_BOLTZMANN_MAX_DIMERS,
+    boltzmann_max_dimers: Optional[int] = DEFAULT_BOLTZMANN_MAX_DIMERS,
     boltzmann_dedup_3p_window: int = DEFAULT_BOLTZMANN_DEDUP_3P_WINDOW,
     separate_targets: bool = False,
     progress_callback: Optional[Callable[[str], None]] = None,
@@ -1032,7 +1036,7 @@ def run_analysis_pipeline(
     dimer_conc_max: float = 0.23,
     dimer_warn_ratio: float = DEFAULT_DIMER_WARN_RATIO,
     role_imbalance_ratio: float = DEFAULT_ROLE_IMBALANCE_RATIO,
-    boltzmann_max_dimers: int = DEFAULT_BOLTZMANN_MAX_DIMERS,
+    boltzmann_max_dimers: Optional[int] = DEFAULT_BOLTZMANN_MAX_DIMERS,
     boltzmann_dedup_3p_window: int = DEFAULT_BOLTZMANN_DEDUP_3P_WINDOW,
     separate_targets: bool = False,
     force_joint: bool = False,

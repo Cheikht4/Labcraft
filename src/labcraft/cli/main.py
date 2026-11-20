@@ -94,9 +94,10 @@ _ROLE_IMBALANCE_RATIO_HELP = (
     "sans normalisation par le nombre de variants dégénérés)."
 )
 _BOLTZMANN_MAX_DIMERS_HELP = (
-    "Plafond du nombre de groupes non amplifiables dédoublonnés par clé (couple parent, 3'_A, 3'_B) "
-    "(parmi ceux >= 0.1 × --dimer-conc-max, triés par concentration décroissante) évalués par "
-    "calc_boltzmann_3p_pairing, en plus de 100 % des dimères amplifiables (défaut : 25)."
+    "Garde-fou optionnel pour les très gros panels : plafond K du nombre de groupes non amplifiables "
+    "dédoublonnés par clé (couple parent, 3'_A, 3'_B) (parmi ceux >= 0.1 × --dimer-conc-max, triés par "
+    "concentration décroissante) évalués par calc_boltzmann_3p_pairing, en plus de 100 % des dimères "
+    "amplifiables (défaut : illimité ; 0 ou non spécifié = pas de plafond)."
 )
 _BOLTZMANN_DEDUP_3P_WINDOW_HELP = (
     "Longueur en nt de la fenêtre 3' par variant dans la clé de dédoublonnage Boltzmann "
@@ -130,7 +131,7 @@ def analyze(
     dimer_conc_max: float = typer.Option(0.23, "--dimer-conc-max", help=_DIMER_CONC_MAX_HELP),
     dimer_warn_ratio: float = typer.Option(0.5, "--dimer-warn-ratio", help=_DIMER_WARN_RATIO_HELP),
     role_imbalance_ratio: float = typer.Option(20.0, "--role-imbalance-ratio", help=_ROLE_IMBALANCE_RATIO_HELP),
-    boltzmann_max_dimers: int = typer.Option(25, "--boltzmann-max-dimers", min=0, help=_BOLTZMANN_MAX_DIMERS_HELP),
+    boltzmann_max_dimers: Optional[int] = typer.Option(None, "--boltzmann-max-dimers", min=0, help=_BOLTZMANN_MAX_DIMERS_HELP),
     boltzmann_dedup_3p_window: int = typer.Option(5, "--boltzmann-dedup-3p-window", min=0, help=_BOLTZMANN_DEDUP_3P_WINDOW_HELP),
     separate_targets: bool = typer.Option(False, "--separate-targets", "--per-target", help="Solve targets independently instead of joint multi-target equilibrium."),
     force_joint: bool = typer.Option(False, "--force-joint", help="Force joint analysis of multiple panels for the same target.")
@@ -226,7 +227,7 @@ def _run_analyze_with_config(
     dimer_conc_max: float,
     dimer_warn_ratio: float = 0.5,
     role_imbalance_ratio: float = 20.0,
-    boltzmann_max_dimers: int = 25,
+    boltzmann_max_dimers: Optional[int] = None,
     boltzmann_dedup_3p_window: int = 5,
     separate_targets: bool,
     force_joint: bool,
